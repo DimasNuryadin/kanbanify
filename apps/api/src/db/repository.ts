@@ -6,11 +6,15 @@ import {
   DEFAULT_BOARD_COLUMNS,
   DEFAULT_BOARD_LABELS,
   DEFAULT_BOARD_MEMBERS,
+  DEFAULT_BOARD_TEMPLATES,
+  DEFAULT_WORKSPACE,
   type Activity,
   type ActivityActionType,
   type Attachment,
+  type AutomationRule,
   type Board,
   type BoardBackground,
+  type BoardTemplate,
   type Card,
   type CardCover,
   type Checklist,
@@ -20,18 +24,23 @@ import {
   type CopyCardRequest,
   type CopyColumnRequest,
   type CopyColumnResponse,
+  type CreateAutomationRuleRequest,
   type CreateBoardRequest,
   type CreateCardRequest,
   type CreateColumnRequest,
   type CreateCommentRequest,
+  type CreateWorkspaceRequest,
   type Label,
   type Member,
   type MoveCardRequest,
   type MoveColumnRequest,
   type Subtask,
+  type UpdateAutomationRuleRequest,
   type UpdateBoardRequest,
   type UpdateCardRequest,
   type UpdateColumnRequest,
+  type Workspace,
+  type WorkspaceWithBoards,
 } from "@kinetix/contracts";
 import * as schema from "./schema.js";
 import { AppError } from "../errors.js";
@@ -273,17 +282,29 @@ export function buildDefaultBoardMembers(): Member[] {
 }
 
 interface InMemoryStore {
+  workspaces: Map<string, Workspace>;
   boards: Map<string, Omit<Board, "columns" | "cards">>;
   columns: Map<string, Column>;
   cards: Map<string, Card>;
 }
 
 function createPreseededMemoryStore(): InMemoryStore {
+  const workspaces = new Map<string, Workspace>();
   const boards = new Map<string, Omit<Board, "columns" | "cards">>();
   const columns = new Map<string, Column>();
   const cards = new Map<string, Card>();
 
   const createdAt = "2026-11-08T10:00:00.000Z";
+
+  workspaces.set(DEFAULT_WORKSPACE.id, {
+    id: DEFAULT_WORKSPACE.id,
+    name: DEFAULT_WORKSPACE.name,
+    slug: DEFAULT_WORKSPACE.slug,
+    description: DEFAULT_WORKSPACE.description,
+    logo_color: DEFAULT_WORKSPACE.logo_color,
+    created_at: DEFAULT_WORKSPACE.created_at,
+  });
+
   const seedActivities: Activity[] = [
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
@@ -293,6 +314,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       action_type: "CARD_CREATED",
       description: "added Implement OAuth2 PKCE flow to Backlog",
       created_at: "2026-11-08T10:05:00.000Z",
+      is_automated: false,
     },
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
@@ -303,6 +325,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       description:
         "moved Real-Time WebSocket Broadcast & Redis Pub/Sub Bridge to In Progress",
       created_at: "2026-11-08T10:10:00.000Z",
+      is_automated: false,
     },
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
@@ -313,6 +336,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       description:
         'commented on Real-Time WebSocket Broadcast & Redis Pub/Sub Bridge: "WebSocket heartbeat ping/pong interval is tuned to 15s."',
       created_at: "2026-11-08T10:12:00.000Z",
+      is_automated: false,
     },
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
@@ -323,13 +347,102 @@ function createPreseededMemoryStore(): InMemoryStore {
       description:
         "completed Algorithm Verification on Lexicographical O(1) Fractional Indexing Engine",
       created_at: "2026-11-08T10:15:00.000Z",
+      is_automated: false,
     },
   ];
 
+  const primaryButlerRules: AutomationRule[] = [
+    {
+      id: "66666666-6666-4666-8666-666666666661",
+      board_id: SEED_BOARD_ID,
+      name: "Auto-Complete on Done",
+      description:
+        "When card is moved to Done, mark due date as complete, add Ship Ready label, and assign Alex Rivera",
+      is_enabled: true,
+      trigger: {
+        type: "WHEN_CARD_MOVED_TO_COLUMN",
+        column_id: null,
+        column_title_match: "Done",
+        priority: null,
+        label_id: null,
+      },
+      actions: [
+        {
+          type: "MARK_DUE_DATE_COMPLETE",
+          due_complete_value: true,
+          member_id: null,
+          label_id: null,
+          priority: null,
+          target_column_id: null,
+          checklist_title: null,
+          checklist_items: null,
+          comment_text: null,
+        },
+        {
+          type: "ADD_LABEL",
+          label_id: "77777777-7777-4777-8777-777777777771", // Ship Ready (green)
+          member_id: null,
+          priority: null,
+          target_column_id: null,
+          checklist_title: null,
+          checklist_items: null,
+          comment_text: null,
+          due_complete_value: null,
+        },
+        {
+          type: "ASSIGN_MEMBER",
+          member_id: "88888888-8888-4888-8888-888888888881", // Alex Rivera
+          label_id: null,
+          priority: null,
+          target_column_id: null,
+          checklist_title: null,
+          checklist_items: null,
+          comment_text: null,
+          due_complete_value: null,
+        },
+      ],
+      execution_count: 0,
+      last_triggered_at: null,
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+    {
+      id: "66666666-6666-4666-8666-666666666662",
+      board_id: SEED_BOARD_ID,
+      name: "Checklist 100% Auto-Review",
+      description:
+        "When all checklist items are completed, automatically move card to Review column",
+      is_enabled: true,
+      trigger: {
+        type: "WHEN_CHECKLIST_COMPLETED",
+        column_id: null,
+        column_title_match: null,
+        priority: null,
+        label_id: null,
+      },
+      actions: [
+        {
+          type: "MOVE_CARD_TO_COLUMN",
+          target_column_id: "33333333-3333-4333-8333-333333333333", // Review column
+          member_id: null,
+          label_id: null,
+          priority: null,
+          checklist_title: null,
+          checklist_items: null,
+          comment_text: null,
+          due_complete_value: null,
+        },
+      ],
+      execution_count: 0,
+      last_triggered_at: null,
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+  ];
+
+  // Board 1: Primary Platform Launch Board
   boards.set(SEED_BOARD_ID, {
     id: SEED_BOARD_ID,
     workspace_id: DEFAULT_WORKSPACE_ID,
-    title: "Kinetix v2 — Full Trello Parity Launch",
+    title: "Kinetix Platform Launch",
     description:
       "High-craftsmanship real-time workspace uniting Trello visual fluidity with Linear engineering precision.",
     is_starred: true,
@@ -337,6 +450,7 @@ function createPreseededMemoryStore(): InMemoryStore {
     labels: buildDefaultBoardLabels(SEED_BOARD_ID),
     members: buildDefaultBoardMembers(),
     activities: seedActivities,
+    automation_rules: primaryButlerRules,
     created_at: createdAt,
   });
 
@@ -938,7 +1052,241 @@ function createPreseededMemoryStore(): InMemoryStore {
     cards.set(card.id, card);
   }
 
-  return { boards, columns, cards };
+  // Pre-seed Board 2 (Mobile App Redesign & Growth)
+  const BOARD_2_ID = "11111111-1111-4111-8111-111111111112";
+  boards.set(BOARD_2_ID, {
+    id: BOARD_2_ID,
+    workspace_id: DEFAULT_WORKSPACE_ID,
+    title: "Mobile App Redesign & Growth",
+    description: "Cross-platform mobile redesign, performance overhaul, and onboarding flow.",
+    is_starred: false,
+    background: {
+      type: "gradient",
+      value: "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%)",
+    },
+    labels: buildDefaultBoardLabels(BOARD_2_ID),
+    members: buildDefaultBoardMembers(),
+    activities: [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa21",
+        board_id: BOARD_2_ID,
+        card_id: null,
+        actor_name: "Maya Lin",
+        action_type: "CARD_CREATED",
+        description: "created mobile redesign board",
+        created_at: "2026-11-08T10:00:00.000Z",
+        is_automated: false,
+      },
+    ],
+    automation_rules: [],
+    created_at: createdAt,
+  });
+
+  const b2Cols: Column[] = [
+    { id: "33333333-3333-4333-8333-333333333341", board_id: BOARD_2_ID, title: "Ideas & Research", position: "a0", wip_limit: null, color: "#ec4899", is_archived: false },
+    { id: "33333333-3333-4333-8333-333333333342", board_id: BOARD_2_ID, title: "In Design", position: "a1", wip_limit: 4, color: "#8b5cf6", is_archived: false },
+    { id: "33333333-3333-4333-8333-333333333343", board_id: BOARD_2_ID, title: "User Testing", position: "a2", wip_limit: 3, color: "#3b82f6", is_archived: false },
+    { id: "33333333-3333-4333-8333-333333333344", board_id: BOARD_2_ID, title: "Production Ready", position: "a3", wip_limit: null, color: "#10b981", is_archived: false },
+  ];
+  for (const c of b2Cols) columns.set(c.id, c);
+
+  const b2Cards: Card[] = [
+    {
+      id: "44444444-4444-4444-8444-444444444421",
+      board_id: BOARD_2_ID,
+      column_id: "33333333-3333-4333-8333-333333333341",
+      title: "Fluid Gestures & Physics Animation Engine",
+      description: "Natural 60fps spring animations for card dragging and modal sheets.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["mobile", "ui"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-20T00:00:00.000Z",
+      updated_at: createdAt,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: ["77777777-7777-4777-8777-777777777775"],
+      member_ids: ["88888888-8888-4888-8888-888888888882"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444422",
+      board_id: BOARD_2_ID,
+      column_id: "33333333-3333-4333-8333-333333333342",
+      title: "Biometric FaceID / TouchID Authentication",
+      description: "Secure local keychain storage and biometric fallback unlock.",
+      position: "a0",
+      priority: "MEDIUM",
+      story_points: 3,
+      tags: ["mobile", "security"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-22T00:00:00.000Z",
+      updated_at: createdAt,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: ["77777777-7777-4777-8777-777777777771"],
+      member_ids: ["88888888-8888-4888-8888-888888888883"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444423",
+      board_id: BOARD_2_ID,
+      column_id: "33333333-3333-4333-8333-333333333343",
+      title: "Offline-First Sync Engine with SQLite",
+      description: "Local caching of cards with background WebSocket delta synchronization.",
+      position: "a0",
+      priority: "URGENT",
+      story_points: 8,
+      tags: ["mobile", "offline"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-18T00:00:00.000Z",
+      updated_at: createdAt,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: ["77777777-7777-4777-8777-777777777774"],
+      member_ids: ["88888888-8888-4888-8888-888888888881"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
+    },
+  ];
+  for (const c of b2Cards) cards.set(c.id, c);
+
+  // Pre-seed Board 3 (Core Infrastructure & Reliability)
+  const BOARD_3_ID = "11111111-1111-4111-8111-111111111113";
+  boards.set(BOARD_3_ID, {
+    id: BOARD_3_ID,
+    workspace_id: DEFAULT_WORKSPACE_ID,
+    title: "Core Infrastructure & Reliability",
+    description: "PostgreSQL replication, Redis pub/sub cluster, zero-downtime deployment pipelines.",
+    is_starred: true,
+    background: {
+      type: "gradient",
+      value: "linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)",
+    },
+    labels: buildDefaultBoardLabels(BOARD_3_ID),
+    members: buildDefaultBoardMembers(),
+    activities: [
+      {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa31",
+        board_id: BOARD_3_ID,
+        card_id: null,
+        actor_name: "Samir Patel",
+        action_type: "CARD_CREATED",
+        description: "created infrastructure reliability board",
+        created_at: "2026-11-08T10:00:00.000Z",
+        is_automated: false,
+      },
+    ],
+    automation_rules: [],
+    created_at: createdAt,
+  });
+
+  const b3Cols: Column[] = [
+    { id: "33333333-3333-4333-8333-333333333351", board_id: BOARD_3_ID, title: "Backlog", position: "a0", wip_limit: null, color: "#64748b", is_archived: false },
+    { id: "33333333-3333-4333-8333-333333333352", board_id: BOARD_3_ID, title: "Active Sprint", position: "a1", wip_limit: 4, color: "#3b82f6", is_archived: false },
+    { id: "33333333-3333-4333-8333-333333333353", board_id: BOARD_3_ID, title: "Staging Verification", position: "a2", wip_limit: 3, color: "#f59e0b", is_archived: false },
+    { id: "33333333-3333-4333-8333-333333333354", board_id: BOARD_3_ID, title: "Deployed", position: "a3", wip_limit: null, color: "#10b981", is_archived: false },
+  ];
+  for (const c of b3Cols) columns.set(c.id, c);
+
+  const b3Cards: Card[] = [
+    {
+      id: "44444444-4444-4444-8444-444444444431",
+      board_id: BOARD_3_ID,
+      column_id: "33333333-3333-4333-8333-333333333351",
+      title: "Zero-Downtime Blue/Green Deployments",
+      description: "Automated canary testing and rolling updates via Envoy ingress.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 8,
+      tags: ["infra", "devops"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-25T00:00:00.000Z",
+      updated_at: createdAt,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: ["77777777-7777-4777-8777-777777777776"],
+      member_ids: ["88888888-8888-4888-8888-888888888884"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444432",
+      board_id: BOARD_3_ID,
+      column_id: "33333333-3333-4333-8333-333333333352",
+      title: "Multi-Region Redis Sentinel Cluster",
+      description: "High availability pub/sub bridge with sub-second failover detection.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["infra", "redis"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-21T00:00:00.000Z",
+      updated_at: createdAt,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: ["77777777-7777-4777-8777-777777777773"],
+      member_ids: ["88888888-8888-4888-8888-888888888883"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444433",
+      board_id: BOARD_3_ID,
+      column_id: "33333333-3333-4333-8333-333333333353",
+      title: "Automated PostgreSQL WAL Streaming & Point-In-Time Recovery",
+      description: "Continuous archival to object storage with automated restore testing.",
+      position: "a0",
+      priority: "URGENT",
+      story_points: 13,
+      tags: ["infra", "postgres"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-19T00:00:00.000Z",
+      updated_at: createdAt,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: ["77777777-7777-4777-8777-777777777774"],
+      member_ids: ["88888888-8888-4888-8888-888888888881"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
+    },
+  ];
+  for (const c of b3Cards) cards.set(c.id, c);
+
+  return { workspaces, boards, columns, cards };
 }
 
 export class StorageRepository {
@@ -1031,12 +1379,17 @@ export class StorageRepository {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
 
+      ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS slug VARCHAR(150) NOT NULL DEFAULT '';
+      ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+      ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS logo_color VARCHAR(32) NOT NULL DEFAULT '#6366f1';
+
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS is_starred BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS background JSONB NOT NULL DEFAULT '{"type":"gradient","value":"linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"}'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS labels JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS activities JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS automation_rules JSONB NOT NULL DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS columns (
         id UUID PRIMARY KEY,
@@ -1103,16 +1456,21 @@ export class StorageRepository {
     const existingBoards = await this.db.select().from(schema.boards).limit(1);
     if (existingBoards.length > 0) return;
 
-    await this.db
-      .insert(schema.workspaces)
-      .values({
-        id: DEFAULT_WORKSPACE_ID,
-        name: "Kinetix Default Workspace",
-        created_at: "2026-11-08T10:00:00.000Z",
-      })
-      .onConflictDoNothing();
-
     const seedMem = createPreseededMemoryStore();
+    for (const ws of seedMem.workspaces.values()) {
+      await this.db
+        .insert(schema.workspaces)
+        .values({
+          id: ws.id,
+          name: ws.name,
+          slug: ws.slug,
+          description: ws.description,
+          logo_color: ws.logo_color,
+          created_at: ws.created_at,
+        })
+        .onConflictDoNothing();
+    }
+
     for (const b of seedMem.boards.values()) {
       await this.db
         .insert(schema.boards)
@@ -1126,6 +1484,7 @@ export class StorageRepository {
           labels: b.labels,
           members: b.members,
           activities: b.activities,
+          automation_rules: b.automation_rules,
           created_at: b.created_at,
         })
         .onConflictDoNothing();
@@ -1280,8 +1639,12 @@ export class StorageRepository {
       ? row.activities.map((a) => ({
           ...a,
           card_id: a.card_id ?? null,
+          is_automated: Boolean(a.is_automated),
           created_at: normalizeIsoTimestamp(a.created_at),
         }))
+      : [];
+    const automationRules: AutomationRule[] = Array.isArray(row.automation_rules)
+      ? row.automation_rules
       : [];
 
     return {
@@ -1294,6 +1657,7 @@ export class StorageRepository {
       labels,
       members,
       activities,
+      automation_rules: automationRules,
       columns: cols,
       cards: boardCards,
       created_at: normalizeIsoTimestamp(row.created_at),
@@ -1311,6 +1675,7 @@ export class StorageRepository {
       actor_name?: string;
       action_type: ActivityActionType;
       description: string;
+      is_automated?: boolean;
     }
   ): Promise<Activity> {
     const activity: Activity = {
@@ -1320,6 +1685,7 @@ export class StorageRepository {
       actor_name: params.actor_name || "Alex Rivera",
       action_type: params.action_type,
       description: params.description,
+      is_automated: params.is_automated ?? false,
       created_at: new Date().toISOString(),
     };
 
@@ -1356,6 +1722,121 @@ export class StorageRepository {
     }
 
     return activity;
+  }
+
+  // ==========================================================================
+  // WORKSPACE & TEMPLATE OPERATIONS
+  // ==========================================================================
+
+  public async listWorkspaces(): Promise<WorkspaceWithBoards[]> {
+    let wsList: Workspace[] = [];
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        const rows = await this.db
+          .select()
+          .from(schema.workspaces)
+          .orderBy(asc(schema.workspaces.created_at));
+        wsList = rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          slug: r.slug,
+          description: r.description,
+          logo_color: r.logo_color,
+          created_at: normalizeIsoTimestamp(r.created_at),
+        }));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in listWorkspaces, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    if (!this.isUsingPostgres() || wsList.length === 0) {
+      wsList = Array.from(this.memory.workspaces.values());
+    }
+
+    const allBoards = await this.listBoards();
+
+    return wsList.map((ws) => {
+      const wsBoards = allBoards
+        .filter((b) => b.workspace_id === ws.id)
+        .map((b) => ({
+          id: b.id,
+          workspace_id: b.workspace_id,
+          title: b.title,
+          is_starred: b.is_starred,
+          background: b.background,
+          card_count: b.cards.filter((c) => !c.is_archived).length,
+          updated_at: b.cards[0]?.updated_at ?? b.created_at,
+          created_at: b.created_at,
+          description: b.description,
+        }));
+
+      return {
+        ...ws,
+        boards: wsBoards,
+      };
+    });
+  }
+
+  public async getWorkspaceById(
+    workspaceId: string
+  ): Promise<WorkspaceWithBoards | null> {
+    const all = await this.listWorkspaces();
+    return all.find((w) => w.id === workspaceId) ?? null;
+  }
+
+  public async createWorkspace(
+    input: CreateWorkspaceRequest
+  ): Promise<Workspace> {
+    const id = randomUUID();
+    const slug =
+      input.slug ||
+      input.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+
+    const ws: Workspace = {
+      id,
+      name: input.name,
+      slug,
+      description: input.description ?? "",
+      logo_color: input.logo_color ?? "#6366f1",
+      created_at: new Date().toISOString(),
+    };
+
+    this.memory.workspaces.set(id, ws);
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db.insert(schema.workspaces).values({
+          id: ws.id,
+          name: ws.name,
+          slug: ws.slug,
+          description: ws.description,
+          logo_color: ws.logo_color,
+          created_at: ws.created_at,
+        });
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in createWorkspace, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return ws;
+  }
+
+  public async getBoardTemplates(): Promise<BoardTemplate[]> {
+    return DEFAULT_BOARD_TEMPLATES.map((t) => ({
+      ...t,
+      default_columns: [...t.default_columns],
+    }));
   }
 
   // ==========================================================================
@@ -1422,24 +1903,112 @@ export class StorageRepository {
     const createdAt = new Date().toISOString();
     const description = input.description ?? "";
     const isStarred = input.is_starred ?? false;
-    const background: BoardBackground = input.background ?? {
-      ...DEFAULT_BOARD_BACKGROUND,
-    };
+
+    const template = input.template_id
+      ? DEFAULT_BOARD_TEMPLATES.find((t) => t.id === input.template_id)
+      : undefined;
+
+    const background: BoardBackground =
+      input.background ?? (template ? template.background : { ...DEFAULT_BOARD_BACKGROUND });
+
     const labels = buildDefaultBoardLabels(boardId);
     const members = buildDefaultBoardMembers();
     const activities: Activity[] = [];
 
-    const defaultColumns: Column[] = DEFAULT_BOARD_COLUMNS.map((col) => ({
+    const columnTitles = template
+      ? template.default_columns
+      : DEFAULT_BOARD_COLUMNS.map((col) => col.title);
+
+    const defaultColumns: Column[] = columnTitles.map((title, idx) => ({
       id: randomUUID(),
       board_id: boardId,
-      title: col.title,
-      position: col.position,
+      title,
+      position: `a${idx}`,
       wip_limit: null,
       color: null,
       is_archived: false,
-    })).sort((a, b) => compareFractionalIndex(a.position, b.position));
+    }));
 
-    // Keep memory synced as well
+    const sampleCards: Card[] = [];
+    if (template && template.sample_cards_count > 0 && defaultColumns.length > 0) {
+      const col0 = defaultColumns[0]!;
+      for (let i = 0; i < template.sample_cards_count; i++) {
+        const cardId = randomUUID();
+        sampleCards.push({
+          id: cardId,
+          board_id: boardId,
+          column_id: col0.id,
+          title: `${template.name} Task #${i + 1}`,
+          description: `Task pre-configured from ${template.name} template`,
+          position: `a${i}`,
+          priority: i === 0 ? "HIGH" : "MEDIUM",
+          story_points: 3,
+          tags: [template.category.toLowerCase()],
+          subtasks: [],
+          blocked_by_card_ids: [],
+          due_date: null,
+          updated_at: createdAt,
+          cover: { type: "none", value: null, size: "normal" },
+          label_ids: labels[i % labels.length] ? [labels[i % labels.length]!.id] : [],
+          member_ids: members[0] ? [members[0]!.id] : [],
+          checklists: [],
+          comments: [],
+          attachments: [],
+          start_date: null,
+          is_due_complete: false,
+          is_archived: false,
+          is_watching: false,
+        });
+      }
+    }
+
+    const automationRules: AutomationRule[] = [];
+    if (template?.id === "template-engineering-sprint") {
+      automationRules.push({
+        id: randomUUID(),
+        board_id: boardId,
+        name: "Auto-Complete on Done",
+        description:
+          "When card is moved to Done, mark due date as complete and assign member",
+        is_enabled: true,
+        trigger: {
+          type: "WHEN_CARD_MOVED_TO_COLUMN",
+          column_id: null,
+          column_title_match: "Done",
+          priority: null,
+          label_id: null,
+        },
+        actions: [
+          {
+            type: "MARK_DUE_DATE_COMPLETE",
+            due_complete_value: true,
+            member_id: null,
+            label_id: null,
+            priority: null,
+            target_column_id: null,
+            checklist_title: null,
+            checklist_items: null,
+            comment_text: null,
+          },
+          {
+            type: "ASSIGN_MEMBER",
+            member_id: members[0]?.id ?? null,
+            label_id: null,
+            priority: null,
+            target_column_id: null,
+            checklist_title: null,
+            checklist_items: null,
+            comment_text: null,
+            due_complete_value: null,
+          },
+        ],
+        execution_count: 0,
+        last_triggered_at: null,
+        created_at: createdAt,
+      });
+    }
+
+    // Keep memory synced
     this.memory.boards.set(boardId, {
       id: boardId,
       workspace_id: workspaceId,
@@ -1450,10 +2019,14 @@ export class StorageRepository {
       labels,
       members,
       activities,
+      automation_rules: automationRules,
       created_at: createdAt,
     });
     for (const col of defaultColumns) {
       this.memory.columns.set(col.id, col);
+    }
+    for (const card of sampleCards) {
+      this.memory.cards.set(card.id, card);
     }
 
     if (this.isUsingPostgres() && this.db) {
@@ -1468,6 +2041,7 @@ export class StorageRepository {
           labels,
           members,
           activities,
+          automation_rules: automationRules,
           created_at: createdAt,
         });
         await this.db.insert(schema.columns).values(
@@ -1481,6 +2055,35 @@ export class StorageRepository {
             is_archived: col.is_archived,
           }))
         );
+        if (sampleCards.length > 0) {
+          await this.db.insert(schema.cards).values(
+            sampleCards.map((sc) => ({
+              id: sc.id,
+              board_id: sc.board_id,
+              column_id: sc.column_id,
+              title: sc.title,
+              description: sc.description,
+              position: sc.position,
+              priority: sc.priority,
+              story_points: sc.story_points,
+              tags: sc.tags,
+              subtasks: sc.subtasks,
+              blocked_by_card_ids: sc.blocked_by_card_ids,
+              due_date: sc.due_date,
+              updated_at: sc.updated_at,
+              cover: sc.cover,
+              label_ids: sc.label_ids,
+              member_ids: sc.member_ids,
+              checklists: sc.checklists,
+              comments: sc.comments,
+              attachments: sc.attachments,
+              start_date: sc.start_date,
+              is_due_complete: sc.is_due_complete,
+              is_archived: sc.is_archived,
+              is_watching: sc.is_watching,
+            }))
+          );
+        }
       } catch (err) {
         console.warn(
           "[StorageRepository] PostgreSQL insert failed in createBoard, falling back to memory:",
@@ -1500,8 +2103,9 @@ export class StorageRepository {
       labels,
       members,
       activities,
+      automation_rules: automationRules,
       columns: defaultColumns,
-      cards: [],
+      cards: sampleCards,
       created_at: createdAt,
     };
   }
@@ -1598,6 +2202,7 @@ export class StorageRepository {
       labels: updatedLabels,
       members: updatedMembers,
       activities: existing.activities,
+      automation_rules: existing.automation_rules,
       created_at: existing.created_at,
     });
 
@@ -1632,6 +2237,322 @@ export class StorageRepository {
       labels: updatedLabels,
       members: updatedMembers,
     };
+  }
+
+  public async deleteBoard(
+    boardId: string
+  ): Promise<{ id: string; deleted: boolean }> {
+    const existing = await this.getBoardById(boardId);
+    if (!existing) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    this.memory.boards.delete(boardId);
+    for (const [colId, col] of this.memory.columns.entries()) {
+      if (col.board_id === boardId) {
+        this.memory.columns.delete(colId);
+      }
+    }
+    for (const [cardId, card] of this.memory.cards.entries()) {
+      if (card.board_id === boardId) {
+        this.memory.cards.delete(cardId);
+      }
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .delete(schema.boards)
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in deleteBoard, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { id: boardId, deleted: true };
+  }
+
+  // ==========================================================================
+  // BUTLER AUTOMATION RULES OPERATIONS
+  // ==========================================================================
+
+  public async getAutomationRules(boardId: string): Promise<AutomationRule[]> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+    return board.automation_rules ?? [];
+  }
+
+  public async createAutomationRule(
+    boardId: string,
+    input: CreateAutomationRuleRequest
+  ): Promise<AutomationRule> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const rule: AutomationRule = {
+      id: randomUUID(),
+      board_id: boardId,
+      name: input.name,
+      description: input.description ?? "",
+      is_enabled: input.is_enabled ?? true,
+      trigger: input.trigger,
+      actions: input.actions,
+      execution_count: 0,
+      last_triggered_at: null,
+      created_at: new Date().toISOString(),
+    };
+
+    const updatedRules = [...(board.automation_rules ?? []), rule];
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.automation_rules = updatedRules;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ automation_rules: updatedRules })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in createAutomationRule, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return rule;
+  }
+
+  public async updateAutomationRule(
+    ruleId: string,
+    input: UpdateAutomationRuleRequest
+  ): Promise<{ rule: AutomationRule; boardId: string }> {
+    const allBoards = await this.listBoards();
+    let foundBoard: Board | null = null;
+    let foundRule: AutomationRule | null = null;
+
+    for (const b of allBoards) {
+      const r = (b.automation_rules ?? []).find((x) => x.id === ruleId);
+      if (r) {
+        foundBoard = b;
+        foundRule = r;
+        break;
+      }
+    }
+
+    if (!foundBoard || !foundRule) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Automation rule '${ruleId}' not found`,
+        { rule_id: ruleId }
+      );
+    }
+
+    const updatedRule: AutomationRule = {
+      ...foundRule,
+      name: input.name ?? foundRule.name,
+      description: input.description ?? foundRule.description,
+      is_enabled: input.is_enabled ?? foundRule.is_enabled,
+      trigger: input.trigger ?? foundRule.trigger,
+      actions: input.actions ?? foundRule.actions,
+    };
+
+    const nextRules = (foundBoard.automation_rules ?? []).map((r) =>
+      r.id === ruleId ? updatedRule : r
+    );
+
+    const memBoard = this.memory.boards.get(foundBoard.id);
+    if (memBoard) {
+      memBoard.automation_rules = nextRules;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ automation_rules: nextRules })
+          .where(eq(schema.boards.id, foundBoard.id));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in updateAutomationRule, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { rule: updatedRule, boardId: foundBoard.id };
+  }
+
+  public async deleteAutomationRule(
+    ruleId: string
+  ): Promise<{ id: string; boardId: string; deleted: boolean }> {
+    const allBoards = await this.listBoards();
+    let foundBoard: Board | null = null;
+
+    for (const b of allBoards) {
+      const r = (b.automation_rules ?? []).find((x) => x.id === ruleId);
+      if (r) {
+        foundBoard = b;
+        break;
+      }
+    }
+
+    if (!foundBoard) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Automation rule '${ruleId}' not found`,
+        { rule_id: ruleId }
+      );
+    }
+
+    const nextRules = (foundBoard.automation_rules ?? []).filter(
+      (r) => r.id !== ruleId
+    );
+
+    const memBoard = this.memory.boards.get(foundBoard.id);
+    if (memBoard) {
+      memBoard.automation_rules = nextRules;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ automation_rules: nextRules })
+          .where(eq(schema.boards.id, foundBoard.id));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in deleteAutomationRule, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { id: ruleId, boardId: foundBoard.id, deleted: true };
+  }
+
+  public async updateRuleExecution(
+    boardId: string,
+    ruleId: string
+  ): Promise<AutomationRule> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const rule = (board.automation_rules ?? []).find((r) => r.id === ruleId);
+    if (!rule) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Automation rule '${ruleId}' not found on board '${boardId}'`,
+        { board_id: boardId, rule_id: ruleId }
+      );
+    }
+
+    rule.execution_count = (rule.execution_count ?? 0) + 1;
+    rule.last_triggered_at = new Date().toISOString();
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.automation_rules = board.automation_rules;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ automation_rules: board.automation_rules })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in updateRuleExecution, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return rule;
+  }
+
+  public async saveCardDirect(card: Card): Promise<Card> {
+    this.memory.cards.set(card.id, card);
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.cards)
+          .set({
+            column_id: card.column_id,
+            title: card.title,
+            description: card.description,
+            position: card.position,
+            priority: card.priority,
+            story_points: card.story_points,
+            tags: card.tags,
+            subtasks: card.subtasks,
+            blocked_by_card_ids: card.blocked_by_card_ids,
+            due_date: card.due_date,
+            updated_at: card.updated_at,
+            cover: card.cover,
+            label_ids: card.label_ids,
+            member_ids: card.member_ids,
+            checklists: card.checklists,
+            comments: card.comments,
+            attachments: card.attachments,
+            start_date: card.start_date,
+            is_due_complete: card.is_due_complete,
+            is_archived: card.is_archived,
+            is_watching: card.is_watching,
+          })
+          .where(eq(schema.cards.id, card.id));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in saveCardDirect, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return card;
   }
 
   // ==========================================================================

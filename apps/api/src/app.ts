@@ -6,9 +6,14 @@ import { z, ZodError } from "zod";
 import {
   AIDecomposeRequestSchema,
   AIDecomposeResponseSchema,
+  AIParseAutomationRequestSchema,
+  AIParseAutomationResponseSchema,
   AISuggestCardEnrichmentRequestSchema,
   AISuggestCardEnrichmentResponseSchema,
+  AutomationRuleSchema,
   BoardSchema,
+  BoardSummarySchema,
+  BoardTemplateSchema,
   CardMovedEventDataSchema,
   CardSchema,
   ColumnMovedEventDataSchema,
@@ -17,23 +22,29 @@ import {
   CopyCardRequestSchema,
   CopyColumnRequestSchema,
   CopyColumnResponseSchema,
+  CreateAutomationRuleRequestSchema,
   CreateBoardRequestSchema,
   CreateCardRequestSchema,
   CreateColumnRequestSchema,
   CreateCommentRequestSchema,
+  CreateWorkspaceRequestSchema,
   HealthCheckResponseSchema,
   MoveCardRequestSchema,
   MoveColumnRequestSchema,
   StandardErrorSchema,
+  UpdateAutomationRuleRequestSchema,
   UpdateBoardRequestSchema,
   UpdateCardRequestSchema,
   UpdateColumnRequestSchema,
+  WorkspaceSchema,
+  WorkspaceWithBoardsSchema,
   type Checklist,
   type Priority,
   type Subtask,
 } from "@kinetix/contracts";
 import { StorageRepository } from "./db/repository.js";
 import { BoardRealtimeHub } from "./ws/hub.js";
+import { AutomationEngine } from "./services/automation-engine.js";
 import { AppError, buildErrorPayload } from "./errors.js";
 
 const UuidParamSchema = z.string().uuid();
@@ -45,10 +56,15 @@ const OptionalAIDecomposeBodySchema = z
   })
   .optional();
 
+const AIGenerateAutomationBodySchema = z.object({
+  prompt: z.string().min(1).max(1000),
+});
+
 export interface BuildAppOptions {
   logger?: boolean;
   repository?: StorageRepository;
   hub?: BoardRealtimeHub;
+  automationEngine?: AutomationEngine;
 }
 
 export async function buildApp(
@@ -57,6 +73,7 @@ export async function buildApp(
   app: FastifyInstance;
   repository: StorageRepository;
   hub: BoardRealtimeHub;
+  automationEngine: AutomationEngine;
 }> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -64,6 +81,8 @@ export async function buildApp(
 
   const repository = options.repository ?? new StorageRepository();
   const hub = options.hub ?? new BoardRealtimeHub();
+  const automationEngine =
+    options.automationEngine ?? new AutomationEngine(repository, hub);
 
   await repository.init();
   await hub.init();
@@ -195,7 +214,46 @@ export async function buildApp(
   });
 
   // ==========================================================================
-  // 2. BOARDS ENDPOINTS
+  // 2. WORKSPACES & TEMPLATES ENDPOINTS
+  // ==========================================================================
+  app.get("/api/v1/workspaces", async (_req, reply) => {
+    const workspaces = await repository.listWorkspaces();
+    const validated = z.array(WorkspaceWithBoardsSchema).parse(workspaces);
+    return reply.status(200).send(validated);
+  });
+
+  app.post("/api/v1/workspaces", async (req, reply) => {
+    const body = CreateWorkspaceRequestSchema.parse(req.body);
+    const created = await repository.createWorkspace(body);
+    const validated = WorkspaceSchema.parse(created);
+    return reply.status(201).send(validated);
+  });
+
+  app.get<{ Params: { workspaceId: string } }>(
+    "/api/v1/workspaces/:workspaceId",
+    async (req, reply) => {
+      const ws = await repository.getWorkspaceById(req.params.workspaceId);
+      if (!ws) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Workspace '${req.params.workspaceId}' not found`,
+          { workspace_id: req.params.workspaceId }
+        );
+      }
+      const validated = WorkspaceWithBoardsSchema.parse(ws);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.get("/api/v1/board-templates", async (_req, reply) => {
+    const templates = await repository.getBoardTemplates();
+    const validated = z.array(BoardTemplateSchema).parse(templates);
+    return reply.status(200).send(validated);
+  });
+
+  // ==========================================================================
+  // 3. BOARDS ENDPOINTS
   // ==========================================================================
   app.get("/api/v1/boards", async (_req, reply) => {
     const boards = await repository.listBoards();
@@ -244,6 +302,313 @@ export async function buildApp(
       });
 
       return reply.status(200).send(validated);
+    }
+  );
+
+  app.delete<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const result = await repository.deleteBoard(boardId);
+
+      await hub.broadcast({
+        event: "BOARD_DELETED",
+        board_id: boardId,
+        data: { id: boardId, deleted: true },
+        actor_id: getActorId(req.headers),
+      });
+
+      return reply.status(200).send(result);
+    }
+  );
+
+  // ==========================================================================
+  // 4. BUTLER AUTOMATION RULES ENDPOINTS
+  // ==========================================================================
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/automations",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const rules = await repository.getAutomationRules(boardId);
+      const validated = z.array(AutomationRuleSchema).parse(rules);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/automations",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = CreateAutomationRuleRequestSchema.parse(req.body);
+      const rule = await repository.createAutomationRule(boardId, body);
+      const validated = AutomationRuleSchema.parse(rule);
+
+      await hub.broadcast({
+        event: "AUTOMATION_RULE_CREATED",
+        board_id: boardId,
+        data: validated,
+        actor_id: getActorId(req.headers),
+      });
+
+      return reply.status(201).send(validated);
+    }
+  );
+
+  app.patch<{ Params: { ruleId: string } }>(
+    "/api/v1/automations/:ruleId",
+    async (req, reply) => {
+      const ruleId = NonEmptyIdParamSchema.parse(req.params.ruleId);
+      const body = UpdateAutomationRuleRequestSchema.parse(req.body);
+      const { rule, boardId } = await repository.updateAutomationRule(
+        ruleId,
+        body
+      );
+      const validated = AutomationRuleSchema.parse(rule);
+
+      await hub.broadcast({
+        event: "AUTOMATION_RULE_UPDATED",
+        board_id: boardId,
+        data: validated,
+        actor_id: getActorId(req.headers),
+      });
+
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.delete<{ Params: { ruleId: string } }>(
+    "/api/v1/automations/:ruleId",
+    async (req, reply) => {
+      const ruleId = NonEmptyIdParamSchema.parse(req.params.ruleId);
+      const { id, boardId, deleted } = await repository.deleteAutomationRule(
+        ruleId
+      );
+
+      await hub.broadcast({
+        event: "AUTOMATION_RULE_DELETED",
+        board_id: boardId,
+        data: { id, deleted },
+        actor_id: getActorId(req.headers),
+      });
+
+      return reply.status(200).send({ id, deleted });
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/automations/ai-generate",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+
+      const body = AIGenerateAutomationBodySchema.parse(req.body);
+      const aiEngineBaseUrl = (
+        process.env.INTERNAL_AI_ENGINE_URL ?? "http://localhost:8001"
+      ).replace(/\/+$/, "");
+      const internalToken =
+        process.env.INTERNAL_SERVICE_TOKEN ?? "orca_internal_sync_token_2026";
+
+      let generatedRule: {
+        name: string;
+        description: string;
+        trigger: any;
+        actions: any[];
+      };
+
+      try {
+        const aiReqPayload = AIParseAutomationRequestSchema.parse({
+          prompt: body.prompt,
+          board_columns: board.columns.map((c) => ({
+            id: c.id,
+            title: c.title,
+          })),
+          board_members: board.members.map((m) => ({
+            id: m.id,
+            name: m.name,
+          })),
+          board_labels: board.labels.map((l) => ({
+            id: l.id,
+            name: l.name,
+            color: l.color,
+          })),
+        });
+
+        const response = await fetch(
+          `${aiEngineBaseUrl}/internal/v1/parse-automation`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Internal-Token": internalToken,
+            },
+            body: JSON.stringify(aiReqPayload),
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+
+        if (response.ok) {
+          const raw = await response.json();
+          generatedRule = AIParseAutomationResponseSchema.parse(raw);
+        } else {
+          throw new Error(`AI Engine error: status ${response.status}`);
+        }
+      } catch (err) {
+        console.warn(
+          `[AIAutomationBuilder] AI Engine unreachable or error (${
+            err instanceof Error ? err.message : String(err)
+          }); using deterministic fallback builder.`
+        );
+
+        const promptLower = body.prompt.toLowerCase();
+        let triggerType: any = "WHEN_CARD_CREATED";
+        let columnTitleMatch: string | null = null;
+        let triggerColId: string | null = null;
+        let triggerPriority: any = null;
+
+        if (promptLower.includes("done") || promptLower.includes("move")) {
+          triggerType = "WHEN_CARD_MOVED_TO_COLUMN";
+          for (const col of board.columns) {
+            if (promptLower.includes(col.title.toLowerCase())) {
+              columnTitleMatch = col.title;
+              triggerColId = col.id;
+              break;
+            }
+          }
+          if (!columnTitleMatch) {
+            columnTitleMatch = "Done";
+          }
+        } else if (promptLower.includes("checklist")) {
+          triggerType = "WHEN_CHECKLIST_COMPLETED";
+        } else if (promptLower.includes("urgent")) {
+          triggerType = "WHEN_PRIORITY_CHANGED";
+          triggerPriority = "URGENT";
+        } else if (promptLower.includes("high")) {
+          triggerType = "WHEN_PRIORITY_CHANGED";
+          triggerPriority = "HIGH";
+        }
+
+        const actions: any[] = [];
+        if (promptLower.includes("due") || promptLower.includes("complete")) {
+          actions.push({
+            type: "MARK_DUE_DATE_COMPLETE",
+            due_complete_value: true,
+            member_id: null,
+            label_id: null,
+            priority: null,
+            target_column_id: null,
+            checklist_title: null,
+            checklist_items: null,
+            comment_text: null,
+          });
+        }
+        if (promptLower.includes("priority")) {
+          actions.push({
+            type: "SET_PRIORITY",
+            priority: promptLower.includes("urgent") ? "URGENT" : "HIGH",
+            member_id: null,
+            label_id: null,
+            target_column_id: null,
+            checklist_title: null,
+            checklist_items: null,
+            comment_text: null,
+            due_complete_value: null,
+          });
+        }
+        for (const m of board.members) {
+          if (promptLower.includes(m.name.toLowerCase().split(" ")[0]!)) {
+            actions.push({
+              type: "ASSIGN_MEMBER",
+              member_id: m.id,
+              label_id: null,
+              priority: null,
+              target_column_id: null,
+              checklist_title: null,
+              checklist_items: null,
+              comment_text: null,
+              due_complete_value: null,
+            });
+            break;
+          }
+        }
+        for (const l of board.labels) {
+          if (
+            (l.name && promptLower.includes(l.name.toLowerCase())) ||
+            promptLower.includes(l.color)
+          ) {
+            actions.push({
+              type: "ADD_LABEL",
+              label_id: l.id,
+              member_id: null,
+              priority: null,
+              target_column_id: null,
+              checklist_title: null,
+              checklist_items: null,
+              comment_text: null,
+              due_complete_value: null,
+            });
+            break;
+          }
+        }
+
+        if (actions.length === 0) {
+          actions.push({
+            type: "POST_COMMENT",
+            comment_text: `🤖 Butler automated action: ${body.prompt.slice(
+              0,
+              80
+            )}`,
+            member_id: null,
+            label_id: null,
+            priority: null,
+            target_column_id: null,
+            checklist_title: null,
+            checklist_items: null,
+            due_complete_value: null,
+          });
+        }
+
+        generatedRule = {
+          name:
+            body.prompt.length <= 40
+              ? body.prompt
+              : `${body.prompt.slice(0, 37)}...`,
+          description: body.prompt,
+          trigger: {
+            type: triggerType,
+            column_id: triggerColId,
+            column_title_match: columnTitleMatch,
+            priority: triggerPriority,
+            label_id: null,
+          },
+          actions,
+        };
+      }
+
+      // Persist the generated rule to the board
+      const persisted = await repository.createAutomationRule(boardId, {
+        name: generatedRule.name,
+        description: generatedRule.description,
+        is_enabled: true,
+        trigger: generatedRule.trigger,
+        actions: generatedRule.actions,
+      });
+
+      await hub.broadcast({
+        event: "AUTOMATION_RULE_CREATED",
+        board_id: boardId,
+        data: persisted,
+        actor_id: getActorId(req.headers),
+      });
+
+      return reply.status(201).send(persisted);
     }
   );
 
@@ -333,7 +698,7 @@ export async function buildApp(
   );
 
   // ==========================================================================
-  // 4. RICH CARDS & TRELLO MODAL ENDPOINTS
+  // 5. RICH CARDS & TRELLO MODAL ENDPOINTS
   // ==========================================================================
   app.post<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId/cards",
@@ -341,15 +706,22 @@ export async function buildApp(
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const body = CreateCardRequestSchema.parse(req.body);
       const card = await repository.createCard(boardId, body);
-      const validated = CardSchema.parse(card);
+      const initialValidated = CardSchema.parse(card);
 
       await hub.broadcast({
         event: "CARD_CREATED",
         board_id: boardId,
-        data: validated,
+        data: initialValidated,
         actor_id: getActorId(req.headers),
       });
 
+      // Trigger Butler automations for card creation
+      const autoResult = await automationEngine.evaluateAndExecute(boardId, {
+        type: "CARD_CREATED",
+        card,
+      });
+
+      const validated = CardSchema.parse(autoResult.card);
       return reply.status(201).send(validated);
     }
   );
@@ -370,7 +742,7 @@ export async function buildApp(
       }
 
       const updated = await repository.updateCard(cardId, body);
-      const validated = CardSchema.parse(updated);
+      const validatedUpdated = CardSchema.parse(updated);
 
       const archiveChanged =
         body.is_archived !== undefined &&
@@ -378,11 +750,22 @@ export async function buildApp(
 
       await hub.broadcast({
         event: archiveChanged ? "CARD_ARCHIVED" : "CARD_UPDATED",
-        board_id: validated.board_id,
-        data: validated,
+        board_id: validatedUpdated.board_id,
+        data: validatedUpdated,
         actor_id: getActorId(req.headers),
       });
 
+      // Trigger Butler automations for card update
+      const autoResult = await automationEngine.evaluateAndExecute(
+        existing.board_id,
+        {
+          type: "CARD_UPDATED",
+          card: updated,
+          previousCard: existing,
+        }
+      );
+
+      const validated = CardSchema.parse(autoResult.card);
       return reply.status(200).send(validated);
     }
   );
@@ -393,23 +776,35 @@ export async function buildApp(
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const body = MoveCardRequestSchema.parse(req.body);
       const { card, sourceColumnId } = await repository.moveCard(cardId, body);
-      const validated = CardSchema.parse(card);
+      const validatedCard = CardSchema.parse(card);
 
       const moveEventData = CardMovedEventDataSchema.parse({
-        card_id: validated.id,
+        card_id: validatedCard.id,
         source_column_id: sourceColumnId,
-        target_column_id: validated.column_id,
-        new_position: validated.position,
-        updated_at: validated.updated_at,
+        target_column_id: validatedCard.column_id,
+        new_position: validatedCard.position,
+        updated_at: validatedCard.updated_at,
       });
 
       await hub.broadcast({
         event: "CARD_MOVED",
-        board_id: validated.board_id,
+        board_id: validatedCard.board_id,
         data: moveEventData,
         actor_id: getActorId(req.headers),
       });
 
+      // Trigger Butler automations for card move
+      const autoResult = await automationEngine.evaluateAndExecute(
+        card.board_id,
+        {
+          type: "CARD_MOVED",
+          card,
+          sourceColumnId,
+          targetColumnId: card.column_id,
+        }
+      );
+
+      const validated = CardSchema.parse(autoResult.card);
       return reply.status(200).send(validated);
     }
   );
@@ -864,5 +1259,5 @@ export async function buildApp(
     await repository.close();
   });
 
-  return { app, repository, hub };
+  return { app, repository, hub, automationEngine };
 }
