@@ -11,7 +11,11 @@ import {
 import { Card, Priority } from "@kinetix/contracts";
 import { PRIORITY_STYLES } from "./kanban-board";
 import { useWorkspaceStore } from "@/store/workspace-store";
-import { comparePositions, generatePositionBetween } from "@/lib/fractional-index";
+import {
+  comparePositions,
+  generatePositionBetween,
+} from "@/lib/fractional-index";
+import { getDueDateStatus, LABEL_COLOR_MAP } from "@/lib/trello-theme";
 
 type SortField =
   | "position"
@@ -106,7 +110,12 @@ export function TableView({
   const handleInlineColumnChange = (card: Card, targetColumnId: string) => {
     if (card.column_id === targetColumnId) return;
     const targetColCards = board.cards
-      .filter((c) => c.column_id === targetColumnId && c.id !== card.id)
+      .filter(
+        (c) =>
+          c.column_id === targetColumnId &&
+          c.id !== card.id &&
+          !c.is_archived
+      )
       .sort((a, b) => comparePositions(a.position, b.position));
     const prevPos =
       targetColCards.length > 0
@@ -117,7 +126,7 @@ export function TableView({
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-xs dark:border-zinc-800/80 dark:bg-zinc-900/90">
+    <div className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white/95 shadow-xs backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-900/90">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left text-xs">
           <thead>
@@ -128,20 +137,22 @@ export function TableView({
                   onClick={() => toggleSort("title")}
                   className="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100"
                 >
-                  Issue
+                  Card
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
+              <th className="px-3 py-3">Labels</th>
               <th className="px-3 py-3">
                 <button
                   type="button"
                   onClick={() => toggleSort("column")}
                   className="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100"
                 >
-                  Status
+                  List
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
+              <th className="px-3 py-3">Members</th>
               <th className="px-3 py-3">
                 <button
                   type="button"
@@ -152,28 +163,8 @@ export function TableView({
                   <ArrowUpDown className="h-3 w-3" />
                 </button>
               </th>
-              <th className="px-3 py-3">
-                <button
-                  type="button"
-                  onClick={() => toggleSort("story_points")}
-                  className="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100"
-                >
-                  Points
-                  <ArrowUpDown className="h-3 w-3" />
-                </button>
-              </th>
-              <th className="px-3 py-3">Subtasks</th>
+              <th className="px-3 py-3">Checklists</th>
               <th className="px-3 py-3">Blocker Radar</th>
-              <th className="px-3 py-3">
-                <button
-                  type="button"
-                  onClick={() => toggleSort("position")}
-                  className="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100"
-                >
-                  Key
-                  <ArrowUpDown className="h-3 w-3" />
-                </button>
-              </th>
               <th className="px-4 py-3 text-right">
                 <button
                   type="button"
@@ -195,6 +186,16 @@ export function TableView({
               ).length;
               const totalSubtasks = card.subtasks.length;
               const hasAiTag = card.tags.includes("ai-decomposed");
+              const cardLabels = board.labels.filter((l) =>
+                card.label_ids.includes(l.id)
+              );
+              const cardMembers = board.members.filter((m) =>
+                card.member_ids.includes(m.id)
+              );
+              const dueStatus = getDueDateStatus(
+                card.due_date,
+                card.is_due_complete
+              );
 
               return (
                 <tr
@@ -202,7 +203,7 @@ export function TableView({
                   onClick={() => setSelectedCardId(card.id)}
                   className="group cursor-pointer transition-colors duration-150 hover:bg-zinc-50/90 dark:hover:bg-zinc-800/40"
                 >
-                  {/* Issue Title & Tags */}
+                  {/* Card Title */}
                   <td className="max-w-md px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-zinc-900 group-hover:text-indigo-600 dark:text-zinc-100 dark:group-hover:text-indigo-400">
@@ -215,39 +216,69 @@ export function TableView({
                         </span>
                       )}
                     </div>
-                    {card.tags.length > 0 && (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {card.tags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </td>
 
-                  {/* Status Column Selector */}
+                  {/* Color Labels */}
+                  <td className="px-3 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {cardLabels.map((lbl) => {
+                        const style = LABEL_COLOR_MAP[lbl.color];
+                        return (
+                          <span
+                            key={lbl.id}
+                            className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${style.pillBg} ${style.pillText}`}
+                          >
+                            {lbl.name || style.name}
+                          </span>
+                        );
+                      })}
+                      {cardLabels.length === 0 && (
+                        <span className="text-zinc-400">—</span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* List Column Selector */}
                   <td
                     className="px-3 py-3"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <select
-                      aria-label={`Change column for ${card.title}`}
+                      aria-label={`Change list for ${card.title}`}
                       value={card.column_id}
                       onChange={(e) =>
                         handleInlineColumnChange(card, e.target.value)
                       }
                       className="rounded-md border border-zinc-200/80 bg-zinc-50 px-2 py-1 text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none dark:border-zinc-700/80 dark:bg-zinc-800 dark:text-zinc-200"
                     >
-                      {board.columns.map((col) => (
-                        <option key={col.id} value={col.id}>
-                          {col.title}
-                        </option>
-                      ))}
+                      {board.columns
+                        .filter((col) => !col.is_archived)
+                        .map((col) => (
+                          <option key={col.id} value={col.id}>
+                            {col.title}
+                          </option>
+                        ))}
                     </select>
+                  </td>
+
+                  {/* Assigned Members */}
+                  <td className="px-3 py-3">
+                    {cardMembers.length > 0 ? (
+                      <div className="flex -space-x-1.5">
+                        {cardMembers.map((m) => (
+                          <span
+                            key={m.id}
+                            title={m.name}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white dark:border-zinc-900"
+                            style={{ backgroundColor: m.color }}
+                          >
+                            {m.initials}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-zinc-400">—</span>
+                    )}
                   </td>
 
                   {/* Priority */}
@@ -262,35 +293,20 @@ export function TableView({
                     </span>
                   </td>
 
-                  {/* Story Points */}
-                  <td className="px-3 py-3">
-                    {card.story_points !== null ? (
-                      <span className="rounded border border-zinc-200/80 bg-zinc-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-zinc-700 dark:border-zinc-700/80 dark:bg-zinc-800 dark:text-zinc-200">
-                        {card.story_points} pts
-                      </span>
-                    ) : (
-                      <span className="text-zinc-400">—</span>
-                    )}
-                  </td>
-
-                  {/* Subtasks */}
+                  {/* Checklists */}
                   <td className="px-3 py-3">
                     {totalSubtasks > 0 ? (
                       <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-zinc-600 dark:text-zinc-300">
-                          <CheckSquare className="h-3 w-3 text-indigo-500" />
+                        <span
+                          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold ${
+                            completedSubtasks === totalSubtasks
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                              : "text-zinc-600 dark:text-zinc-300"
+                          }`}
+                        >
+                          <CheckSquare className="h-3 w-3" />
                           {completedSubtasks}/{totalSubtasks}
                         </span>
-                        <div className="h-1.5 w-14 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                          <div
-                            className="h-full rounded-full bg-indigo-500"
-                            style={{
-                              width: `${Math.round(
-                                (completedSubtasks / totalSubtasks) * 100
-                              )}%`,
-                            }}
-                          />
-                        </div>
                       </div>
                     ) : (
                       <span className="text-zinc-400">—</span>
@@ -311,17 +327,20 @@ export function TableView({
                     )}
                   </td>
 
-                  {/* Fractional Index Position Key */}
-                  <td className="px-3 py-3">
-                    <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-                      {card.position}
-                    </code>
-                  </td>
-
                   {/* Due Date */}
                   <td className="px-4 py-3 text-right">
                     {card.due_date ? (
-                      <span className="inline-flex items-center gap-1 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-mono text-[11px] font-medium ${
+                          dueStatus === "complete"
+                            ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                            : dueStatus === "overdue"
+                              ? "border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300"
+                              : dueStatus === "due-soon"
+                                ? "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-300"
+                                : "border-zinc-200/80 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+                        }`}
+                      >
                         <Calendar className="h-3 w-3" />
                         {new Date(card.due_date).toLocaleDateString("en-US", {
                           month: "short",
@@ -342,7 +361,7 @@ export function TableView({
                   colSpan={8}
                   className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400"
                 >
-                  No issues match your current filters.
+                  No cards match your current filters.
                 </td>
               </tr>
             )}

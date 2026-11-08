@@ -5,12 +5,22 @@ import {
   CardSchema,
   Column,
   ColumnSchema,
+  Comment,
+  CommentSchema,
+  CopyCardRequest,
+  CopyColumnRequest,
+  CopyColumnResponse,
+  CopyColumnResponseSchema,
   CreateBoardRequest,
   CreateCardRequest,
   CreateColumnRequest,
+  CreateCommentRequest,
   MoveCardRequest,
+  MoveColumnRequest,
   StandardErrorSchema,
+  UpdateBoardRequest,
   UpdateCardRequest,
+  UpdateColumnRequest,
 } from "@kinetix/contracts";
 import { mockApi } from "./mock-data";
 
@@ -80,7 +90,6 @@ export const apiClient = {
       return mockApi.getBoard(boardId);
     }
     try {
-      // First check if a specific board exists or list boards
       const boards = await fetchJson("/api/v1/boards", { method: "GET" }, (raw) => {
         if (Array.isArray(raw)) return raw;
         return [];
@@ -131,6 +140,31 @@ export const apiClient = {
     }
   },
 
+  async updateBoard(
+    boardId: string,
+    payload: UpdateBoardRequest,
+    opts: ApiClientOptions
+  ): Promise<Board> {
+    if (opts.useMock) {
+      return mockApi.updateBoard(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => BoardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.updateBoard(boardId, payload);
+    }
+  },
+
   async createColumn(
     boardId: string,
     payload: CreateColumnRequest,
@@ -153,6 +187,81 @@ export const apiClient = {
         err instanceof Error ? err.message : "Backend API unreachable"
       );
       return mockApi.createColumn(boardId, payload);
+    }
+  },
+
+  async updateColumn(
+    columnId: string,
+    payload: UpdateColumnRequest,
+    opts: ApiClientOptions
+  ): Promise<Column> {
+    if (opts.useMock) {
+      return mockApi.updateColumn(columnId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/columns/${columnId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => ColumnSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.updateColumn(columnId, payload);
+    }
+  },
+
+  async moveColumn(
+    columnId: string,
+    payload: MoveColumnRequest,
+    opts: ApiClientOptions
+  ): Promise<Column> {
+    if (opts.useMock) {
+      return mockApi.moveColumn(columnId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/columns/${columnId}/move`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => ColumnSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.moveColumn(columnId, payload);
+    }
+  },
+
+  async copyColumn(
+    columnId: string,
+    payload: CopyColumnRequest | undefined,
+    opts: ApiClientOptions
+  ): Promise<CopyColumnResponse> {
+    if (opts.useMock) {
+      return mockApi.copyColumn(columnId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/columns/${columnId}/copy`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload ?? {}),
+        },
+        (raw) => CopyColumnResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.copyColumn(columnId, payload);
     }
   },
 
@@ -228,6 +337,103 @@ export const apiClient = {
         err instanceof Error ? err.message : "Backend API unreachable"
       );
       return mockApi.moveCard(cardId, payload);
+    }
+  },
+
+  async copyCard(
+    cardId: string,
+    payload: CopyCardRequest | undefined,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.copyCard(cardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/copy`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload ?? {}),
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.copyCard(cardId, payload);
+    }
+  },
+
+  async deleteCard(
+    cardId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; deleted: boolean }> {
+    if (opts.useMock) {
+      return mockApi.deleteCard(cardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}`,
+        {
+          method: "DELETE",
+        },
+        () => ({ id: cardId, deleted: true })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.deleteCard(cardId);
+    }
+  },
+
+  async addComment(
+    cardId: string,
+    payload: CreateCommentRequest,
+    opts: ApiClientOptions
+  ): Promise<Comment> {
+    if (opts.useMock) {
+      return mockApi.addComment(cardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/comments`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => CommentSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.addComment(cardId, payload);
+    }
+  },
+
+  async deleteComment(
+    cardId: string,
+    commentId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; deleted: boolean }> {
+    if (opts.useMock) {
+      return mockApi.deleteComment(cardId, commentId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/comments/${commentId}`,
+        {
+          method: "DELETE",
+        },
+        () => ({ id: commentId, deleted: true })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.deleteComment(cardId, commentId);
     }
   },
 
