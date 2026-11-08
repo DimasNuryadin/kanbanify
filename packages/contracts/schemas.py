@@ -45,6 +45,7 @@ class ActivityActionTypeEnum(str, Enum):
     COMMENT_ADDED = "COMMENT_ADDED"
     CHECKLIST_COMPLETED = "CHECKLIST_COMPLETED"
     MEMBER_ASSIGNED = "MEMBER_ASSIGNED"
+    AUTOMATION_TRIGGERED = "AUTOMATION_TRIGGERED"
 
 
 class AttachmentTypeEnum(str, Enum):
@@ -70,6 +71,31 @@ class BoardBackgroundTypeEnum(str, Enum):
     IMAGE = "image"
 
 
+class BoardTemplateCategoryEnum(str, Enum):
+    ENGINEERING = "ENGINEERING"
+    MARKETING = "MARKETING"
+    PRODUCT = "PRODUCT"
+    PERSONAL = "PERSONAL"
+
+
+class AutomationTriggerTypeEnum(str, Enum):
+    WHEN_CARD_MOVED_TO_COLUMN = "WHEN_CARD_MOVED_TO_COLUMN"
+    WHEN_CARD_CREATED = "WHEN_CARD_CREATED"
+    WHEN_CHECKLIST_COMPLETED = "WHEN_CHECKLIST_COMPLETED"
+    WHEN_PRIORITY_CHANGED = "WHEN_PRIORITY_CHANGED"
+    WHEN_LABEL_ADDED = "WHEN_LABEL_ADDED"
+
+
+class AutomationActionTypeEnum(str, Enum):
+    MARK_DUE_DATE_COMPLETE = "MARK_DUE_DATE_COMPLETE"
+    ASSIGN_MEMBER = "ASSIGN_MEMBER"
+    ADD_LABEL = "ADD_LABEL"
+    SET_PRIORITY = "SET_PRIORITY"
+    MOVE_CARD_TO_COLUMN = "MOVE_CARD_TO_COLUMN"
+    ADD_CHECKLIST = "ADD_CHECKLIST"
+    POST_COMMENT = "POST_COMMENT"
+
+
 class WSEventTypeEnum(str, Enum):
     CARD_MOVED = "CARD_MOVED"
     CARD_UPDATED = "CARD_UPDATED"
@@ -80,6 +106,11 @@ class WSEventTypeEnum(str, Enum):
     COLUMN_UPDATED = "COLUMN_UPDATED"
     COMMENT_ADDED = "COMMENT_ADDED"
     BOARD_UPDATED = "BOARD_UPDATED"
+    AUTOMATION_TRIGGERED = "AUTOMATION_TRIGGERED"
+    AUTOMATION_RULE_CREATED = "AUTOMATION_RULE_CREATED"
+    AUTOMATION_RULE_UPDATED = "AUTOMATION_RULE_UPDATED"
+    AUTOMATION_RULE_DELETED = "AUTOMATION_RULE_DELETED"
+    BOARD_DELETED = "BOARD_DELETED"
 
 
 class ErrorCodeEnum(str, Enum):
@@ -166,6 +197,7 @@ class ActivitySchema(BaseModel):
     action_type: ActivityActionTypeEnum
     description: str = Field(..., min_length=1)
     created_at: datetime
+    is_automated: bool = False
 
 
 class AttachmentSchema(BaseModel):
@@ -191,6 +223,46 @@ class BoardBackgroundSchema(BaseModel):
 
     type: BoardBackgroundTypeEnum = BoardBackgroundTypeEnum.GRADIENT
     value: str = "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"
+
+
+# Phase 3 Trello Butler Automation Models
+class AutomationTriggerSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: AutomationTriggerTypeEnum
+    column_id: str | None = None
+    column_title_match: str | None = None
+    priority: PriorityEnum | None = None
+    label_id: str | None = None
+
+
+class AutomationActionSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: AutomationActionTypeEnum
+    member_id: str | None = None
+    label_id: str | None = None
+    priority: PriorityEnum | None = None
+    target_column_id: str | None = None
+    checklist_title: str | None = None
+    checklist_items: list[str] | None = None
+    comment_text: str | None = None
+    due_complete_value: bool | None = True
+
+
+class AutomationRuleSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=150)
+    description: str = ""
+    is_enabled: bool = True
+    trigger: AutomationTriggerSchema
+    actions: list[AutomationActionSchema] = Field(..., min_length=1)
+    execution_count: int = Field(default=0, ge=0)
+    last_triggered_at: datetime | None = None
+    created_at: datetime
 
 
 class CardSchema(BaseModel):
@@ -251,6 +323,50 @@ class BoardSchema(BaseModel):
     labels: list[LabelSchema] = Field(default_factory=list)
     members: list[MemberSchema] = Field(default_factory=list)
     activities: list[ActivitySchema] = Field(default_factory=list)
+    # Phase 3 Trello Butler Automation
+    automation_rules: list[AutomationRuleSchema] = Field(default_factory=list)
+
+
+# Phase 3 Workspace & Board Summary Schemas
+class BoardSummarySchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID | str
+    workspace_id: UUID | str
+    title: str = Field(..., min_length=1, max_length=150)
+    description: str = ""
+    is_starred: bool = False
+    background: BoardBackgroundSchema = Field(default_factory=BoardBackgroundSchema)
+    card_count: int = Field(default=0, ge=0)
+    updated_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class WorkspaceSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=120)
+    slug: str = Field(..., min_length=1, max_length=120)
+    description: str = ""
+    logo_color: str = "#6366f1"
+    created_at: datetime
+
+
+class WorkspaceWithBoardsSchema(WorkspaceSchema):
+    boards: list[BoardSummarySchema] = Field(default_factory=list)
+
+
+class BoardTemplateSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = ""
+    category: BoardTemplateCategoryEnum
+    background: BoardBackgroundSchema
+    default_columns: list[str] = Field(default_factory=list)
+    sample_cards_count: int = Field(default=0, ge=0)
 
 
 # ============================================================================
@@ -266,14 +382,24 @@ class HealthCheckResponseSchema(BaseModel):
     version: str = "1.0.0"
 
 
+class CreateWorkspaceRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=120)
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str = ""
+    logo_color: str = "#6366f1"
+
+
 class CreateBoardRequestSchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    workspace_id: UUID | None = None
+    workspace_id: UUID | str | None = None
     title: str = Field(..., min_length=1, max_length=150)
     description: str = ""
     is_starred: bool = False
     background: BoardBackgroundSchema | None = None
+    template_id: str | None = None
 
 
 class UpdateBoardRequestSchema(BaseModel):
@@ -404,9 +530,41 @@ class CreateCommentRequestSchema(BaseModel):
     content: str = Field(..., min_length=1)
 
 
+class CreateAutomationRuleRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=150)
+    description: str = ""
+    is_enabled: bool = True
+    trigger: AutomationTriggerSchema
+    actions: list[AutomationActionSchema] = Field(..., min_length=1)
+
+
+class UpdateAutomationRuleRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    description: str | None = None
+    is_enabled: bool | None = None
+    trigger: AutomationTriggerSchema | None = None
+    actions: list[AutomationActionSchema] | None = None
+
+
 # ============================================================================
 # 4. WEBSOCKET MESSAGE SCHEMAS
 # ============================================================================
+
+
+class AutomationTriggeredEventDataSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    rule_id: str = Field(..., min_length=1)
+    rule_name: str = Field(..., min_length=1)
+    card_id: UUID | str | None = None
+    trigger_type: AutomationTriggerTypeEnum
+    action_types: list[AutomationActionTypeEnum]
+    execution_count: int = Field(default=0, ge=0)
+    triggered_at: datetime
 
 
 class WSMessageSchema(BaseModel):
@@ -483,11 +641,71 @@ class AISuggestCardEnrichmentResponseSchema(BaseModel):
     potential_risks: list[str] = Field(default_factory=list)
 
 
+# Phase 3 Natural Language Butler Automation Builder Schemas
+class AIParseAutomationColumnContextSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+
+
+class AIParseAutomationMemberContextSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+
+
+class AIParseAutomationLabelContextSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    color: str = Field(..., min_length=1)
+
+
+class AIParseAutomationRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    prompt: str = Field(..., min_length=1, max_length=1000)
+    board_columns: list[AIParseAutomationColumnContextSchema] = Field(default_factory=list)
+    board_members: list[AIParseAutomationMemberContextSchema] = Field(default_factory=list)
+    board_labels: list[AIParseAutomationLabelContextSchema] = Field(default_factory=list)
+
+
+class AIParseAutomationResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=150)
+    description: str = ""
+    trigger: AutomationTriggerSchema
+    actions: list[AutomationActionSchema] = Field(..., min_length=1)
+
+
 # Aliases for direct import without Schema suffix
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
+
+AutomationTrigger = AutomationTriggerSchema
+AutomationAction = AutomationActionSchema
+AutomationRule = AutomationRuleSchema
+CreateAutomationRuleRequest = CreateAutomationRuleRequestSchema
+UpdateAutomationRuleRequest = UpdateAutomationRuleRequestSchema
+
+AIParseAutomationColumnContext = AIParseAutomationColumnContextSchema
+AIParseAutomationMemberContext = AIParseAutomationMemberContextSchema
+AIParseAutomationLabelContext = AIParseAutomationLabelContextSchema
+AIParseAutomationRequest = AIParseAutomationRequestSchema
+AIParseAutomationResponse = AIParseAutomationResponseSchema
+
+Workspace = WorkspaceSchema
+WorkspaceWithBoards = WorkspaceWithBoardsSchema
+CreateWorkspaceRequest = CreateWorkspaceRequestSchema
+BoardSummary = BoardSummarySchema
+BoardTemplate = BoardTemplateSchema
+AutomationTriggeredEventData = AutomationTriggeredEventDataSchema
 
 
 # ============================================================================
