@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -11,18 +15,26 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
     "plugins": [
       {
         "name": "next"
       }
     ],
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@kinetix/contracts": ["../../packages/contracts/index.ts"],
-      "@kinetix/contracts/*": ["../../packages/contracts/*"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@kinetix/contracts": [
+        "../../packages/contracts/index.ts"
+      ],
+      "@kinetix/contracts/*": [
+        "../../packages/contracts/*"
+      ],
+      "zod": [
+        "./node_modules/zod"
+      ]
     }
   },
   "include": [
@@ -30,7 +42,10 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "../../packages/contracts/**/*.ts"
+    "../../packages/contracts/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }
