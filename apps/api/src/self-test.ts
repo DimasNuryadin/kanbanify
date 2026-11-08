@@ -1,20 +1,24 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import {
+  AutomationRuleSchema,
   BoardSchema,
+  BoardTemplateSchema,
   CardSchema,
   ColumnSchema,
   CommentSchema,
   CopyColumnResponseSchema,
   HealthCheckResponseSchema,
   StandardErrorSchema,
+  WorkspaceSchema,
+  WorkspaceWithBoardsSchema,
   WSMessageSchema,
   type WSMessage,
 } from "@kinetix/contracts";
 import { buildApp } from "./app.js";
 
 async function runSelfTest(): Promise<void> {
-  console.info("=== Kinetix API Phase 2 (Full Trello Parity) Self-Test Suite ===");
+  console.info("=== Kinetix API Phase 3 (Multi-Board Workspace & Runtime Butler) Self-Test Suite ===");
   const { app, hub } = await buildApp({ logger: false });
 
   try {
@@ -434,7 +438,337 @@ async function runSelfTest(): Promise<void> {
       "[PASS] 9b. DELETE /api/v1/cards/:cardId/comments/:commentId -> 200 OK"
     );
 
-    // 10. Verify WebSocket Broadcast Events
+    // ========================================================================
+    // PHASE 3 GATE 2 VERIFICATIONS
+    // ========================================================================
+
+    // 10. Workspaces & Multi-Board Sidebar (GET /api/v1/workspaces & POST /api/v1/workspaces)
+    const workspacesRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/workspaces",
+    });
+    assert.equal(workspacesRes.statusCode, 200);
+    const workspaces = z.array(WorkspaceWithBoardsSchema).parse(workspacesRes.json());
+    assert.ok(workspaces.length >= 1, "Default workspace must be present");
+    const defaultWs = workspaces.find((w) => w.slug === "kinetix-engineering") ?? workspaces[0]!;
+    assert.ok(defaultWs.boards.length >= 3, "Default workspace must have 3 rich pre-seeded boards for multi-board sidebar");
+    assert.ok(defaultWs.boards.some((b) => b.title === "Kinetix Platform Launch"));
+    assert.ok(defaultWs.boards.some((b) => b.title === "Mobile App Redesign & Growth"));
+    assert.ok(defaultWs.boards.some((b) => b.title === "Core Infrastructure & Reliability"));
+    console.info(
+      `[PASS] 10. GET /api/v1/workspaces -> ${workspaces.length} workspace(s), pre-seeded with ${defaultWs.boards.length} rich boards`
+    );
+
+    // 10b. Create Workspace (POST /api/v1/workspaces)
+    const createWsRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/workspaces",
+      payload: {
+        name: "Product Design",
+        slug: "product-design",
+        description: "Design systems, prototypes, and UX research",
+        logo_color: "#ec4899",
+      },
+    });
+    assert.equal(createWsRes.statusCode, 201);
+    const createdWs = WorkspaceSchema.parse(createWsRes.json());
+    assert.equal(createdWs.name, "Product Design");
+    assert.equal(createdWs.slug, "product-design");
+    console.info("[PASS] 10b. POST /api/v1/workspaces -> 201 Created");
+
+    // 11. Curated Board Templates (GET /api/v1/board-templates)
+    const templatesRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/board-templates",
+    });
+    assert.equal(templatesRes.statusCode, 200);
+    const templates = z.array(BoardTemplateSchema).parse(templatesRes.json());
+    assert.equal(templates.length, 4, "Must return 4 curated board templates");
+    const templateCategories = templates.map((t) => t.category);
+    assert.ok(templateCategories.includes("ENGINEERING"));
+    assert.ok(templateCategories.includes("MARKETING"));
+    assert.ok(templateCategories.includes("PRODUCT"));
+    assert.ok(templateCategories.includes("PERSONAL"));
+    console.info("[PASS] 11. GET /api/v1/board-templates -> 4 rich curated templates verified");
+
+    // 12. Create Board from Template (POST /api/v1/boards with template_id)
+    const templateBoardRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/boards",
+      payload: {
+        workspace_id: defaultWs.id,
+        title: "Sprint 42 — High Velocity Build",
+        template_id: "template-engineering-sprint",
+      },
+    });
+    assert.equal(templateBoardRes.statusCode, 201);
+    const templateBoard = BoardSchema.parse(templateBoardRes.json());
+    assert.equal(templateBoard.columns.length, 4);
+    assert.deepEqual(
+      templateBoard.columns.map((c) => c.title),
+      ["Backlog", "In Progress", "Review", "Done"]
+    );
+    assert.ok(templateBoard.cards.length >= 1, "Template should populate sample cards");
+    assert.ok(templateBoard.automation_rules.length >= 1, "Engineering template should pre-configure Butler rules");
+    console.info("[PASS] 12. POST /api/v1/boards (from template) -> 201 Created with columns, sample cards, and automations");
+
+    // 13. Butler Automation Rules CRUD (GET /api/v1/boards/:boardId/automations & POST /api/v1/boards/:boardId/automations)
+    // Primary pre-seeded board verification
+    const primaryBoardId = "11111111-1111-4111-8111-111111111111";
+    const primaryRulesRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${primaryBoardId}/automations`,
+    });
+    assert.equal(primaryRulesRes.statusCode, 200);
+    const primaryRules = z.array(AutomationRuleSchema).parse(primaryRulesRes.json());
+    assert.ok(primaryRules.length >= 2, "Primary board must have 2 pre-seeded default Butler rules");
+    const autoCompleteRule = primaryRules.find(
+      (r) =>
+        r.trigger.type === "WHEN_CARD_MOVED_TO_COLUMN" &&
+        r.trigger.column_title_match === "Done"
+    );
+    assert.ok(autoCompleteRule, "Pre-seeded 'Auto-Complete on Done' rule must exist");
+    const autoReviewRule = primaryRules.find(
+      (r) => r.trigger.type === "WHEN_CHECKLIST_COMPLETED"
+    );
+    assert.ok(autoReviewRule, "Pre-seeded 'Checklist 100% Auto-Review' rule must exist");
+    console.info("[PASS] 13. GET /api/v1/boards/:boardId/automations -> Pre-seeded Butler rules verified");
+
+    // 13b. Create custom Butler Automation rule on board
+    const createRuleRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/automations`,
+      payload: {
+        name: "Auto-Complete on Done Test",
+        description: "When card is moved to Done, mark due date as complete and assign Alex Rivera",
+        is_enabled: true,
+        trigger: {
+          type: "WHEN_CARD_MOVED_TO_COLUMN",
+          column_title_match: "Done",
+        },
+        actions: [
+          {
+            type: "MARK_DUE_DATE_COMPLETE",
+            due_complete_value: true,
+          },
+          {
+            type: "ADD_LABEL",
+            label_id: "77777777-7777-4777-8777-777777777771",
+          },
+          {
+            type: "ASSIGN_MEMBER",
+            member_id: "88888888-8888-4888-8888-888888888881",
+          },
+        ],
+      },
+    });
+    assert.equal(createRuleRes.statusCode, 201);
+    const createdRule = AutomationRuleSchema.parse(createRuleRes.json());
+    assert.equal(createdRule.execution_count, 0);
+    assert.equal(createdRule.last_triggered_at, null);
+    console.info("[PASS] 13b. POST /api/v1/boards/:boardId/automations -> 201 Created rule");
+
+    // 13c. Update / toggle rule (PATCH /api/v1/automations/:ruleId)
+    const patchRuleRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/automations/${createdRule.id}`,
+      payload: {
+        is_enabled: true,
+      },
+    });
+    assert.equal(patchRuleRes.statusCode, 200);
+    const patchedRule = AutomationRuleSchema.parse(patchRuleRes.json());
+    assert.equal(patchedRule.is_enabled, true);
+    console.info("[PASS] 13c. PATCH /api/v1/automations/:ruleId -> 200 OK");
+
+    // 14. RUNTIME BUTLER AUTOMATION ENGINE EXECUTION (WHEN_CARD_MOVED_TO_COLUMN)
+    const bCol = createdBoard.columns.find((c) => c.title === "Backlog")!;
+    const doneCol = createdBoard.columns.find((c) => c.title === "Done")!;
+
+    const freshCardRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/cards`,
+      payload: {
+        column_id: bCol.id,
+        title: "Test Butler Auto-Complete Card",
+        description: "Card to verify runtime Butler automation engine",
+        position: "a9",
+        priority: "MEDIUM",
+        is_due_complete: false,
+        member_ids: [],
+        label_ids: [],
+      },
+    });
+    assert.equal(freshCardRes.statusCode, 201);
+    const freshCard = CardSchema.parse(freshCardRes.json());
+    assert.equal(freshCard.is_due_complete, false);
+    assert.equal(freshCard.member_ids.length, 0);
+
+    // Move card to "Done" column -> Butler Automation MUST fire!
+    const autoMoveCardRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/cards/${freshCard.id}/move`,
+      payload: {
+        target_column_id: doneCol.id,
+        new_position: "a0",
+      },
+    });
+    assert.equal(autoMoveCardRes.statusCode, 200);
+    const autoMovedCard = CardSchema.parse(autoMoveCardRes.json());
+    assert.equal(autoMovedCard.column_id, doneCol.id);
+    assert.equal(
+      autoMovedCard.is_due_complete,
+      true,
+      "Butler must set is_due_complete = true on moving to Done"
+    );
+    assert.ok(
+      autoMovedCard.member_ids.includes("88888888-8888-4888-8888-888888888881"),
+      "Butler must automatically assign member Alex Rivera"
+    );
+    assert.ok(
+      autoMovedCard.label_ids.includes("77777777-7777-4777-8777-777777777771"),
+      "Butler must automatically attach Ship Ready label"
+    );
+
+    // Verify Rule Audit: execution_count incremented and last_triggered_at updated
+    const rulesAfterTrigger = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${createdBoard.id}/automations`,
+    });
+    const rulesList = z.array(AutomationRuleSchema).parse(rulesAfterTrigger.json());
+    const triggeredRule = rulesList.find((r) => r.id === createdRule.id)!;
+    assert.equal(triggeredRule.execution_count, 1, "Rule execution_count must increment to 1");
+    assert.ok(triggeredRule.last_triggered_at !== null, "Rule last_triggered_at must be updated");
+
+    // Verify Activity Audit Log: AUTOMATION_TRIGGERED logged
+    const boardStateRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${createdBoard.id}`,
+    });
+    const boardState = BoardSchema.parse(boardStateRes.json());
+    const autoActivity = boardState.activities.find(
+      (a) => a.action_type === "AUTOMATION_TRIGGERED"
+    );
+    assert.ok(autoActivity, "AUTOMATION_TRIGGERED activity log must be recorded");
+    assert.ok(
+      autoActivity.description.includes("🤖 Butler executed rule: [Auto-Complete on Done Test]"),
+      `Activity description should match: ${autoActivity.description}`
+    );
+    console.info(
+      "[PASS] 14. Runtime Butler Engine (WHEN_CARD_MOVED_TO_COLUMN) -> is_due_complete=true, member assigned, execution_count=1, activity logged!"
+    );
+
+    // 14b. RUNTIME BUTLER AUTOMATION ENGINE (WHEN_CHECKLIST_COMPLETED -> MOVE_CARD_TO_COLUMN)
+    const primaryInProgressCol = primaryBoardId ? "33333333-3333-4333-8333-333333333332" : "";
+    const reviewCol = "33333333-3333-4333-8333-333333333333";
+
+    const checklistCardRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${primaryBoardId}/cards`,
+      payload: {
+        column_id: primaryInProgressCol,
+        title: "Checklist Auto-Review Test Card",
+        description: "Verify WHEN_CHECKLIST_COMPLETED trigger moves card to Review",
+        position: "a9V",
+        priority: "MEDIUM",
+        checklists: [
+          {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+            title: "PR Checklist",
+            position: "a0",
+            items: [
+              {
+                id: "iiiiiiii-iiii-4iii-8iii-iiiiiiii0001",
+                title: "Unit tests pass",
+                is_completed: true,
+                position: "a0",
+                due_date: null,
+                assignee_id: null,
+              },
+              {
+                id: "iiiiiiii-iiii-4iii-8iii-iiiiiiii0002",
+                title: "Code review signed off",
+                is_completed: false,
+                position: "a1",
+                due_date: null,
+                assignee_id: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    assert.equal(checklistCardRes.statusCode, 201);
+    const createdChecklistCard = CardSchema.parse(checklistCardRes.json());
+    assert.equal(createdChecklistCard.column_id, primaryInProgressCol);
+
+    // Update the second checklist item to is_completed = true
+    const completeChecklistRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/cards/${createdChecklistCard.id}`,
+      payload: {
+        checklists: [
+          {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+            title: "PR Checklist",
+            position: "a0",
+            items: [
+              {
+                id: "iiiiiiii-iiii-4iii-8iii-iiiiiiii0001",
+                title: "Unit tests pass",
+                is_completed: true,
+                position: "a0",
+                due_date: null,
+                assignee_id: null,
+              },
+              {
+                id: "iiiiiiii-iiii-4iii-8iii-iiiiiiii0002",
+                title: "Code review signed off",
+                is_completed: true,
+                position: "a1",
+                due_date: null,
+                assignee_id: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    assert.equal(completeChecklistRes.statusCode, 200);
+    const updatedChecklistCard = CardSchema.parse(completeChecklistRes.json());
+    assert.equal(
+      updatedChecklistCard.column_id,
+      reviewCol,
+      "WHEN_CHECKLIST_COMPLETED rule must automatically move card to Review column"
+    );
+    console.info(
+      "[PASS] 14b. Runtime Butler Engine (WHEN_CHECKLIST_COMPLETED) -> automatically moved card to Review column!"
+    );
+
+    // 15. Natural Language AI Automation Generation (POST /api/v1/boards/:boardId/automations/ai-generate)
+    const aiGenRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/automations/ai-generate`,
+      payload: {
+        prompt: "Whenever someone moves a card into Review, set priority to HIGH and assign Samir Patel",
+      },
+    });
+    assert.ok(aiGenRes.statusCode === 200 || aiGenRes.statusCode === 201);
+    const generatedRule = AutomationRuleSchema.parse(aiGenRes.json());
+    assert.ok(generatedRule.id, "Generated rule must be persisted and have an ID");
+    assert.equal(generatedRule.is_enabled, true);
+    console.info("[PASS] 15. POST /api/v1/boards/:boardId/automations/ai-generate -> rule parsed & persisted");
+
+    // 16. Delete Board (DELETE /api/v1/boards/:boardId)
+    const delBoardRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/boards/${templateBoard.id}`,
+    });
+    assert.equal(delBoardRes.statusCode, 200);
+    assert.deepEqual(delBoardRes.json(), { id: templateBoard.id, deleted: true });
+    console.info("[PASS] 16. DELETE /api/v1/boards/:boardId -> 200 OK");
+
+    // 17. Verify WebSocket Broadcast Events (including Phase 3 events)
     const wsEvents = receivedWsMessages.map((m) => m.event);
     assert.ok(wsEvents.includes("BOARD_UPDATED"));
     assert.ok(wsEvents.includes("COLUMN_CREATED"));
@@ -445,12 +779,15 @@ async function runSelfTest(): Promise<void> {
     assert.ok(wsEvents.includes("CARD_ARCHIVED"));
     assert.ok(wsEvents.includes("CARD_MOVED"));
     assert.ok(wsEvents.includes("COMMENT_ADDED"));
+    assert.ok(wsEvents.includes("AUTOMATION_TRIGGERED"));
+    assert.ok(wsEvents.includes("AUTOMATION_RULE_CREATED"));
+    assert.ok(wsEvents.includes("AUTOMATION_RULE_UPDATED"));
     console.info(
-      "[PASS] 10. WebSocket Broadcast Verification ->",
+      "[PASS] 17. WebSocket Broadcast Verification (Phase 2 & Phase 3) ->",
       Array.from(new Set(wsEvents))
     );
 
-    // 11. Verify StandardErrorSchema on 404 and 400
+    // 18. Verify StandardErrorSchema on 404 and 400
     const notFoundRes = await app.inject({
       method: "GET",
       url: "/api/v1/boards/99999999-9999-4999-8999-999999999999",
@@ -471,7 +808,7 @@ async function runSelfTest(): Promise<void> {
       "[PASS] 11. StandardErrorSchema envelope verified for 400 & 404"
     );
 
-    console.info("=== ALL KINETIX API PHASE 2 SELF-TESTS PASSED ===");
+    console.info("=== ALL KINETIX API PHASE 3 GATE 2 SELF-TESTS PASSED ===");
   } finally {
     await app.close();
   }

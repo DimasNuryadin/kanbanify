@@ -12,6 +12,7 @@ import {
 import type {
   Activity,
   Attachment,
+  AutomationRule,
   BoardBackground,
   CardCover,
   Checklist,
@@ -31,6 +32,9 @@ export const priorityEnum = pgEnum("priority", [
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: varchar("name", { length: 150 }).notNull(),
+  slug: varchar("slug", { length: 150 }).notNull().default(""),
+  description: text("description").default("").notNull(),
+  logo_color: varchar("logo_color", { length: 32 }).default("#6366f1").notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -52,6 +56,7 @@ export const boards = pgTable("boards", {
   labels: jsonb("labels").$type<Label[]>().default([]).notNull(),
   members: jsonb("members").$type<Member[]>().default([]).notNull(),
   activities: jsonb("activities").$type<Activity[]>().default([]).notNull(),
+  automation_rules: jsonb("automation_rules").$type<AutomationRule[]>().default([]).notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
