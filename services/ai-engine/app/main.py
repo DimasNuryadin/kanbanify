@@ -16,6 +16,8 @@ from app.config import get_settings
 from app.contracts import (
     AIDecomposeRequestSchema,
     AIDecomposeResponseSchema,
+    AIParseAutomationRequestSchema,
+    AIParseAutomationResponseSchema,
     AISuggestCardEnrichmentRequestSchema,
     AISuggestCardEnrichmentResponseSchema,
     ErrorBodySchema,
@@ -24,6 +26,7 @@ from app.contracts import (
     StandardErrorSchema,
 )
 from app.decomposer import decompose_task, enrich_card
+from app.rule_parser import parse_automation
 
 
 def create_app() -> FastAPI:
@@ -150,6 +153,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AISuggestCardEnrichmentResponseSchema:
         return await enrich_card(payload)
+
+    @application.post(
+        "/internal/v1/parse-automation",
+        response_model=AIParseAutomationResponseSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="Natural Language Butler Rule Parser & Compiler (Bilingual ID/EN)",
+    )
+    async def post_parse_automation(
+        payload: AIParseAutomationRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AIParseAutomationResponseSchema:
+        return await parse_automation(payload)
 
     return application
 

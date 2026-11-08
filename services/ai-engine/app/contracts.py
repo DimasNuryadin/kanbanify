@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
@@ -148,6 +149,104 @@ class _BaseAISuggestCardEnrichmentResponseSchema(BaseModel):
     potential_risks: list[str] = Field(default_factory=list)
 
 
+# Phase 3 Trello Butler Automation Fallback Schemas
+class AutomationTriggerTypeEnum(str, Enum):
+    WHEN_CARD_MOVED_TO_COLUMN = "WHEN_CARD_MOVED_TO_COLUMN"
+    WHEN_CARD_CREATED = "WHEN_CARD_CREATED"
+    WHEN_CHECKLIST_COMPLETED = "WHEN_CHECKLIST_COMPLETED"
+    WHEN_PRIORITY_CHANGED = "WHEN_PRIORITY_CHANGED"
+    WHEN_LABEL_ADDED = "WHEN_LABEL_ADDED"
+
+
+class AutomationActionTypeEnum(str, Enum):
+    MARK_DUE_DATE_COMPLETE = "MARK_DUE_DATE_COMPLETE"
+    ASSIGN_MEMBER = "ASSIGN_MEMBER"
+    ADD_LABEL = "ADD_LABEL"
+    SET_PRIORITY = "SET_PRIORITY"
+    MOVE_CARD_TO_COLUMN = "MOVE_CARD_TO_COLUMN"
+    ADD_CHECKLIST = "ADD_CHECKLIST"
+    POST_COMMENT = "POST_COMMENT"
+
+
+class AutomationTriggerSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: AutomationTriggerTypeEnum
+    column_id: str | None = None
+    column_title_match: str | None = None
+    priority: PriorityEnum | None = None
+    label_id: str | None = None
+
+
+class AutomationActionSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: AutomationActionTypeEnum
+    member_id: str | None = None
+    label_id: str | None = None
+    priority: PriorityEnum | None = None
+    target_column_id: str | None = None
+    checklist_title: str | None = None
+    checklist_items: list[str] | None = None
+    comment_text: str | None = None
+    due_complete_value: bool | None = True
+
+
+class AutomationRuleSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=150)
+    description: str = ""
+    is_enabled: bool = True
+    trigger: AutomationTriggerSchema
+    actions: list[AutomationActionSchema] = Field(..., min_length=1)
+    execution_count: int = Field(default=0, ge=0)
+    last_triggered_at: datetime | None = None
+    created_at: datetime
+
+
+class AIParseAutomationColumnContextSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+
+
+class AIParseAutomationMemberContextSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+
+
+class AIParseAutomationLabelContextSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1)
+    color: str = Field(..., min_length=1)
+
+
+class AIParseAutomationRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    prompt: str = Field(..., min_length=1, max_length=1000)
+    board_columns: list[AIParseAutomationColumnContextSchema] = Field(default_factory=list)
+    board_members: list[AIParseAutomationMemberContextSchema] = Field(default_factory=list)
+    board_labels: list[AIParseAutomationLabelContextSchema] = Field(default_factory=list)
+
+
+class AIParseAutomationResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=150)
+    description: str = ""
+    trigger: AutomationTriggerSchema
+    actions: list[AutomationActionSchema] = Field(..., min_length=1)
+
+
 class ErrorBodySchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -192,14 +291,20 @@ if _SHARED_SCHEMAS_PATH.is_file():
         SuggestedLabelSchema = _module.SuggestedLabelSchema  # type: ignore[misc]
         AIDecomposeRequestSchema = _module.AIDecomposeRequestSchema  # type: ignore[misc]
         AIDecomposeResponseSchema = _module.AIDecomposeResponseSchema  # type: ignore[misc]
-        _BaseAISuggestCardEnrichmentRequestSchema = (
-            _module.AISuggestCardEnrichmentRequestSchema  # type: ignore[misc]
-        )
-        _BaseAISuggestCardEnrichmentResponseSchema = (
-            _module.AISuggestCardEnrichmentResponseSchema  # type: ignore[misc]
-        )
+        _BaseAISuggestCardEnrichmentRequestSchema = _module.AISuggestCardEnrichmentRequestSchema  # type: ignore[misc]
+        _BaseAISuggestCardEnrichmentResponseSchema = _module.AISuggestCardEnrichmentResponseSchema  # type: ignore[misc]
         ErrorBodySchema = _module.ErrorBodySchema  # type: ignore[misc]
         StandardErrorSchema = _module.StandardErrorSchema  # type: ignore[misc]
+        AutomationTriggerTypeEnum = _module.AutomationTriggerTypeEnum  # type: ignore[misc]
+        AutomationActionTypeEnum = _module.AutomationActionTypeEnum  # type: ignore[misc]
+        AutomationTriggerSchema = _module.AutomationTriggerSchema  # type: ignore[misc]
+        AutomationActionSchema = _module.AutomationActionSchema  # type: ignore[misc]
+        AutomationRuleSchema = _module.AutomationRuleSchema  # type: ignore[misc]
+        AIParseAutomationColumnContextSchema = _module.AIParseAutomationColumnContextSchema  # type: ignore[misc]
+        AIParseAutomationMemberContextSchema = _module.AIParseAutomationMemberContextSchema  # type: ignore[misc]
+        AIParseAutomationLabelContextSchema = _module.AIParseAutomationLabelContextSchema  # type: ignore[misc]
+        AIParseAutomationRequestSchema = _module.AIParseAutomationRequestSchema  # type: ignore[misc]
+        AIParseAutomationResponseSchema = _module.AIParseAutomationResponseSchema  # type: ignore[misc]
 
 
 _DEFAULT_COLOR_NAMES: dict[str, str] = {
@@ -361,20 +466,50 @@ class AISuggestCardEnrichmentResponseSchema(_BaseAISuggestCardEnrichmentResponse
 # Also provide aliases without the `Schema` suffix as referenced in prompt & contracts
 AISuggestCardEnrichmentRequestSchema.model_rebuild()
 AISuggestCardEnrichmentResponseSchema.model_rebuild()
+AIParseAutomationRequestSchema.model_rebuild()
+AIParseAutomationResponseSchema.model_rebuild()
+
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
+
+AutomationTrigger = AutomationTriggerSchema
+AutomationAction = AutomationActionSchema
+AutomationRule = AutomationRuleSchema
+AIParseAutomationColumnContext = AIParseAutomationColumnContextSchema
+AIParseAutomationMemberContext = AIParseAutomationMemberContextSchema
+AIParseAutomationLabelContext = AIParseAutomationLabelContextSchema
+AIParseAutomationRequest = AIParseAutomationRequestSchema
+AIParseAutomationResponse = AIParseAutomationResponseSchema
 
 __all__ = [
     "AIDecomposeRequest",
     "AIDecomposeRequestSchema",
     "AIDecomposeResponse",
     "AIDecomposeResponseSchema",
+    "AIParseAutomationColumnContext",
+    "AIParseAutomationColumnContextSchema",
+    "AIParseAutomationLabelContext",
+    "AIParseAutomationLabelContextSchema",
+    "AIParseAutomationMemberContext",
+    "AIParseAutomationMemberContextSchema",
+    "AIParseAutomationRequest",
+    "AIParseAutomationRequestSchema",
+    "AIParseAutomationResponse",
+    "AIParseAutomationResponseSchema",
     "AISuggestCardEnrichmentRequest",
     "AISuggestCardEnrichmentRequestSchema",
     "AISuggestCardEnrichmentResponse",
     "AISuggestCardEnrichmentResponseSchema",
+    "AutomationAction",
+    "AutomationActionSchema",
+    "AutomationActionTypeEnum",
+    "AutomationRule",
+    "AutomationRuleSchema",
+    "AutomationTrigger",
+    "AutomationTriggerSchema",
+    "AutomationTriggerTypeEnum",
     "ChecklistItemSchema",
     "ChecklistSchema",
     "ErrorBodySchema",
