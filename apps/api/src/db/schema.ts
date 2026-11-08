@@ -9,7 +9,17 @@ import {
   jsonb,
   pgEnum,
 } from "drizzle-orm/pg-core";
-import type { Subtask } from "@kinetix/contracts";
+import type {
+  Activity,
+  Attachment,
+  BoardBackground,
+  CardCover,
+  Checklist,
+  Comment,
+  Label,
+  Member,
+  Subtask,
+} from "@kinetix/contracts";
 
 export const priorityEnum = pgEnum("priority", [
   "LOW",
@@ -30,6 +40,18 @@ export const boards = pgTable("boards", {
   id: uuid("id").defaultRandom().primaryKey(),
   workspace_id: uuid("workspace_id").notNull(),
   title: varchar("title", { length: 150 }).notNull(),
+  description: text("description").default("").notNull(),
+  is_starred: boolean("is_starred").default(false).notNull(),
+  background: jsonb("background")
+    .$type<BoardBackground>()
+    .default({
+      type: "gradient",
+      value: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)",
+    })
+    .notNull(),
+  labels: jsonb("labels").$type<Label[]>().default([]).notNull(),
+  members: jsonb("members").$type<Member[]>().default([]).notNull(),
+  activities: jsonb("activities").$type<Activity[]>().default([]).notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -43,6 +65,8 @@ export const columns = pgTable("columns", {
   title: varchar("title", { length: 100 }).notNull(),
   position: varchar("position", { length: 64 }).notNull(),
   wip_limit: integer("wip_limit"),
+  color: varchar("color", { length: 64 }),
+  is_archived: boolean("is_archived").default(false).notNull(),
 });
 
 export const cards = pgTable("cards", {
@@ -68,6 +92,20 @@ export const cards = pgTable("cards", {
   updated_at: timestamp("updated_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
+  // Phase 2 Trello Parity Fields
+  cover: jsonb("cover")
+    .$type<CardCover>()
+    .default({ type: "none", value: null, size: "normal" })
+    .notNull(),
+  label_ids: jsonb("label_ids").$type<string[]>().default([]).notNull(),
+  member_ids: jsonb("member_ids").$type<string[]>().default([]).notNull(),
+  checklists: jsonb("checklists").$type<Checklist[]>().default([]).notNull(),
+  comments: jsonb("comments").$type<Comment[]>().default([]).notNull(),
+  attachments: jsonb("attachments").$type<Attachment[]>().default([]).notNull(),
+  start_date: timestamp("start_date", { withTimezone: true, mode: "string" }),
+  is_due_complete: boolean("is_due_complete").default(false).notNull(),
+  is_archived: boolean("is_archived").default(false).notNull(),
+  is_watching: boolean("is_watching").default(false).notNull(),
 });
 
 export const subtasks = pgTable("subtasks", {
