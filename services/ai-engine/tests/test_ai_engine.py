@@ -20,7 +20,10 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.contracts import (
     AIDecomposeResponseSchema,
+    AIParseAutomationResponseSchema,
     AISuggestCardEnrichmentResponseSchema,
+    AutomationActionTypeEnum,
+    AutomationTriggerTypeEnum,
     HealthCheckResponseSchema,
     LabelColorEnum,
     PriorityEnum,
@@ -522,3 +525,456 @@ def test_enrich_card_live_llm_mode_and_fallback(monkeypatch: pytest.MonkeyPatch)
         assert "## Objective" in fallback_parsed.structured_description
         assert len(fallback_parsed.suggested_checklists) >= 2
         assert fallback_parsed.estimated_story_points in FIBONACCI_POINTS
+
+
+# ============================================================================
+# 3. BUTLER NATURAL LANGUAGE AUTOMATION PARSER TESTS (`POST /internal/v1/parse-automation`)
+# ============================================================================
+
+
+def test_parse_automation_missing_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/parse-automation without X-Internal-Token returns 401 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/parse-automation",
+        json={
+            "prompt": "Saat kartu pindah ke Done, otomatis centang due date dan assign member",
+            "board_columns": [{"id": "col-done", "title": "Done"}],
+            "board_members": [{"id": "mem-1", "name": "Budi Santoso"}],
+            "board_labels": [{"id": "lbl-1", "name": "Ship Ready", "color": "green"}],
+        },
+    )
+    assert res.status_code == 401
+    body = res.json()
+    validated_err = StandardErrorSchema.model_validate(body)
+    assert validated_err.error.code.value == "UNAUTHORIZED"
+    assert "X-Internal-Token" in validated_err.error.message
+
+
+def test_parse_automation_invalid_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/parse-automation with invalid token returns 401 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": "invalid_sync_token"},
+        json={
+            "prompt": "When card moved to Done, mark due date complete",
+            "board_columns": [{"id": "col-done", "title": "Done"}],
+        },
+    )
+    assert res.status_code == 401
+    body = res.json()
+    validated_err = StandardErrorSchema.model_validate(body)
+    assert validated_err.error.code.value == "UNAUTHORIZED"
+
+
+def test_parse_automation_empty_prompt_returns_400_validation_error() -> None:
+    """Verify POST /internal/v1/parse-automation with invalid/empty prompt returns 400 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json={
+            "prompt": "",
+        },
+    )
+    assert res.status_code == 400
+    body = res.json()
+    validated_err = StandardErrorSchema.model_validate(body)
+    assert validated_err.error.code.value == "VALIDATION_ERROR"
+
+
+def test_parse_automation_indonesian_prompt_when_card_moved_to_done() -> None:
+    """
+    MANDATORY GATE 2 TEST:
+    Verify POST /internal/v1/parse-automation with an Indonesian prompt:
+    'Saat kartu pindah ke Done, otomatis centang due date dan assign member'
+    returns a valid WHEN_CARD_MOVED_TO_COLUMN trigger and MARK_DUE_DATE_COMPLETE + ASSIGN_MEMBER
+    actions mapped to the passed board_columns and board_members.
+    """
+    payload = {
+        "prompt": "Saat kartu pindah ke Done, otomatis centang due date dan assign member",
+        "board_columns": [
+            {"id": "col-todo", "title": "To Do"},
+            {"id": "col-inprogress", "title": "In Progress"},
+            {"id": "col-done", "title": "Done"},
+        ],
+        "board_members": [
+            {"id": "mem-budi", "name": "Budi Santoso"},
+            {"id": "mem-siti", "name": "Siti Rahma"},
+        ],
+        "board_labels": [
+            {"id": "lbl-ship", "name": "Ship Ready", "color": "green"},
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    # Validate 1:1 against canonical shared contract schema
+    canonical_validated = (
+        _canonical_contracts.AIParseAutomationResponseSchema.model_validate(data)
+    )
+    assert canonical_validated.name
+    assert canonical_validated.description
+
+    # Validate internal model
+    response = AIParseAutomationResponseSchema.model_validate(data)
+    assert response.name
+    assert response.description
+
+    # Verify Trigger mapping
+    assert response.trigger.type == AutomationTriggerTypeEnum.WHEN_CARD_MOVED_TO_COLUMN
+    assert response.trigger.column_id == "col-done"
+    assert response.trigger.column_title_match == "Done"
+
+    # Verify Action mapping
+    assert len(response.actions) == 2
+    action_types = [a.type for a in response.actions]
+    assert AutomationActionTypeEnum.MARK_DUE_DATE_COMPLETE in action_types
+    assert AutomationActionTypeEnum.ASSIGN_MEMBER in action_types
+
+    due_action = next(
+        a
+        for a in response.actions
+        if a.type == AutomationActionTypeEnum.MARK_DUE_DATE_COMPLETE
+    )
+    assert due_action.due_complete_value is True
+
+    assign_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.ASSIGN_MEMBER
+    )
+    # Generic assign fallback maps to the first member in board_members
+    assert assign_action.member_id == "mem-budi"
+
+
+def test_parse_automation_english_prompt_card_moved_with_label() -> None:
+    """Verify English prompt matching api-contract.md example."""
+    payload = {
+        "prompt": "When any card moves to Done, mark due date complete and add green label Ship Ready",
+        "board_columns": [
+            {"id": "33333333-3333-4333-8333-333333333331", "title": "Backlog"},
+            {"id": "33333333-3333-4333-8333-333333333334", "title": "Done"},
+        ],
+        "board_members": [
+            {"id": "88888888-8888-4888-8888-888888888881", "name": "Alex Rivera"}
+        ],
+        "board_labels": [
+            {
+                "id": "77777777-7777-4777-8777-777777777771",
+                "name": "Ship Ready",
+                "color": "green",
+            }
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    _canonical_contracts.AIParseAutomationResponseSchema.model_validate(data)
+    response = AIParseAutomationResponseSchema.model_validate(data)
+
+    assert response.trigger.type == AutomationTriggerTypeEnum.WHEN_CARD_MOVED_TO_COLUMN
+    assert response.trigger.column_id == "33333333-3333-4333-8333-333333333334"
+    assert response.trigger.column_title_match == "Done"
+
+    action_types = [a.type for a in response.actions]
+    assert AutomationActionTypeEnum.MARK_DUE_DATE_COMPLETE in action_types
+    assert AutomationActionTypeEnum.ADD_LABEL in action_types
+
+    label_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.ADD_LABEL
+    )
+    assert label_action.label_id == "77777777-7777-4777-8777-777777777771"
+
+
+def test_parse_automation_specific_member_and_priority() -> None:
+    """Verify matching specific member name and setting priority."""
+    payload = {
+        "prompt": "Ketika kartu pindah ke In Progress, assign ke Alex Rivera dan set prioritas urgent",
+        "board_columns": [
+            {"id": "c-prog", "title": "In Progress"},
+            {"id": "c-done", "title": "Done"},
+        ],
+        "board_members": [
+            {"id": "m-budi", "name": "Budi Santoso"},
+            {"id": "m-alex", "name": "Alex Rivera"},
+        ],
+        "board_labels": [],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    response = AIParseAutomationResponseSchema.model_validate(res.json())
+
+    assert response.trigger.column_id == "c-prog"
+    assert response.trigger.column_title_match == "In Progress"
+
+    assign_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.ASSIGN_MEMBER
+    )
+    assert assign_action.member_id == "m-alex"
+
+    prio_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.SET_PRIORITY
+    )
+    assert prio_action.priority == PriorityEnum.URGENT
+
+
+def test_parse_automation_checklist_completed_and_move_card() -> None:
+    """Verify checklist completed trigger and move card to column action."""
+    payload = {
+        "prompt": "Saat checklist selesai, pindahkan kartu ke Review dan beri label Verified",
+        "board_columns": [
+            {"id": "c-rev", "title": "Review"},
+            {"id": "c-done", "title": "Done"},
+        ],
+        "board_members": [],
+        "board_labels": [
+            {"id": "l-ver", "name": "Verified", "color": "lime"},
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    response = AIParseAutomationResponseSchema.model_validate(res.json())
+
+    assert (
+        response.trigger.type == AutomationTriggerTypeEnum.WHEN_CHECKLIST_COMPLETED
+    )
+    move_action = next(
+        a
+        for a in response.actions
+        if a.type == AutomationActionTypeEnum.MOVE_CARD_TO_COLUMN
+    )
+    assert move_action.target_column_id == "c-rev"
+
+    label_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.ADD_LABEL
+    )
+    assert label_action.label_id == "l-ver"
+
+
+def test_parse_automation_card_created_with_add_checklist() -> None:
+    """Verify card created trigger with add checklist action."""
+    payload = {
+        "prompt": "When a card is created in Backlog, add checklist Verification Steps",
+        "board_columns": [
+            {"id": "c-backlog", "title": "Backlog"},
+        ],
+        "board_members": [],
+        "board_labels": [],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    response = AIParseAutomationResponseSchema.model_validate(res.json())
+
+    assert response.trigger.type == AutomationTriggerTypeEnum.WHEN_CARD_CREATED
+    assert response.trigger.column_id == "c-backlog"
+
+    cl_action = next(
+        a
+        for a in response.actions
+        if a.type == AutomationActionTypeEnum.ADD_CHECKLIST
+    )
+    assert cl_action.checklist_title
+    assert "Verification" in cl_action.checklist_title
+
+
+def test_parse_automation_priority_changed_trigger() -> None:
+    """Verify priority changed trigger with comment and label action."""
+    payload = {
+        "prompt": "Saat prioritas kartu berubah menjadi urgent, beri label Blocker dan tulis komentar Mohon segera ditindaklanjuti",
+        "board_columns": [],
+        "board_members": [],
+        "board_labels": [
+            {"id": "l-blocker", "name": "Blocker", "color": "red"},
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    response = AIParseAutomationResponseSchema.model_validate(res.json())
+
+    assert response.trigger.type == AutomationTriggerTypeEnum.WHEN_PRIORITY_CHANGED
+    assert response.trigger.priority == PriorityEnum.URGENT
+
+    label_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.ADD_LABEL
+    )
+    assert label_action.label_id == "l-blocker"
+
+    comment_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.POST_COMMENT
+    )
+    assert "ditindaklanjuti" in (comment_action.comment_text or "")
+
+
+def test_parse_automation_label_added_trigger() -> None:
+    """Verify label added trigger with priority update."""
+    payload = {
+        "prompt": "when label Bug is added, set priority to urgent",
+        "board_columns": [],
+        "board_members": [],
+        "board_labels": [
+            {"id": "l-bug", "name": "Bug", "color": "red"},
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    response = AIParseAutomationResponseSchema.model_validate(res.json())
+
+    assert response.trigger.type == AutomationTriggerTypeEnum.WHEN_LABEL_ADDED
+    assert response.trigger.label_id == "l-bug"
+
+    prio_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.SET_PRIORITY
+    )
+    assert prio_action.priority == PriorityEnum.URGENT
+
+
+def test_parse_automation_color_synonym_mapping() -> None:
+    """Verify Indonesian color synonym (hijau -> green) maps to label."""
+    payload = {
+        "prompt": "Saat kartu masuk ke Done, tempel label hijau",
+        "board_columns": [{"id": "c-done", "title": "Done"}],
+        "board_members": [],
+        "board_labels": [
+            {"id": "l-red", "name": "Bug", "color": "red"},
+            {"id": "l-green", "name": "Ready", "color": "green"},
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/parse-automation",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    response = AIParseAutomationResponseSchema.model_validate(res.json())
+
+    assert response.trigger.column_id == "c-done"
+    label_action = next(
+        a for a in response.actions if a.type == AutomationActionTypeEnum.ADD_LABEL
+    )
+    assert label_action.label_id == "l-green"
+
+
+def test_parse_automation_live_llm_orchestration_and_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify live LLM response handling and graceful fallback on LLM failure."""
+    monkeypatch.setenv("LLM_API_KEY", "sk-proj-test-live-key-12345")
+
+    mock_rule_json = {
+        "name": "Auto-Complete & Tag Done Cards",
+        "description": "When card moves to Done, mark due date complete and attach Ship Ready label",
+        "trigger": {
+            "type": "WHEN_CARD_MOVED_TO_COLUMN",
+            "column_id": "col-done",
+            "column_title_match": "Done",
+            "priority": None,
+            "label_id": None,
+        },
+        "actions": [
+            {
+                "type": "MARK_DUE_DATE_COMPLETE",
+                "due_complete_value": True,
+            },
+            {
+                "type": "ADD_LABEL",
+                "label_id": "lbl-ship",
+                "due_complete_value": None,
+            },
+        ],
+    }
+
+    mock_response = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(mock_rule_json),
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    with patch.object(
+        httpx.AsyncClient,
+        "post",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        res = client.post(
+            "/internal/v1/parse-automation",
+            headers={"X-Internal-Token": DEFAULT_TOKEN},
+            json={
+                "prompt": "When card moved to Done, mark complete and tag Ship Ready",
+                "board_columns": [{"id": "col-done", "title": "Done"}],
+                "board_labels": [{"id": "lbl-ship", "name": "Ship Ready", "color": "green"}],
+            },
+        )
+        assert res.status_code == 200
+        parsed = AIParseAutomationResponseSchema.model_validate(res.json())
+        assert parsed.name == "Auto-Complete & Tag Done Cards"
+        assert parsed.trigger.column_id == "col-done"
+        assert len(parsed.actions) == 2
+
+    # Simulate upstream timeout and verify fallback to deterministic compiler
+    with patch.object(
+        httpx.AsyncClient,
+        "post",
+        new=AsyncMock(side_effect=httpx.ReadTimeout("LLM timeout")),
+    ):
+        fallback_res = client.post(
+            "/internal/v1/parse-automation",
+            headers={"X-Internal-Token": DEFAULT_TOKEN},
+            json={
+                "prompt": "Saat kartu pindah ke Done, otomatis centang due date dan assign member",
+                "board_columns": [{"id": "col-done", "title": "Done"}],
+                "board_members": [{"id": "mem-1", "name": "Budi Santoso"}],
+            },
+        )
+        assert fallback_res.status_code == 200
+        fallback_parsed = AIParseAutomationResponseSchema.model_validate(
+            fallback_res.json()
+        )
+        assert (
+            fallback_parsed.trigger.type
+            == AutomationTriggerTypeEnum.WHEN_CARD_MOVED_TO_COLUMN
+        )
+        assert fallback_parsed.trigger.column_id == "col-done"
+        assert len(fallback_parsed.actions) == 2
+
