@@ -55,10 +55,22 @@ export async function buildApp(
   await repository.init();
   await hub.init();
 
+  const configuredOrigins = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : null;
+
   await app.register(cors, {
-    origin: true,
+    origin: configuredOrigins && configuredOrigins.length > 0 ? configuredOrigins : true,
+    credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Internal-Token", "X-Actor-Id"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Internal-Token",
+      "X-Actor-Id",
+    ],
   });
 
   await app.register(websocket);

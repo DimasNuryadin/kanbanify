@@ -1,0 +1,18 @@
+{
+  "name": "kinetix-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kinetix — High-Performance Real-Time Kanban & AI Workspace Monorepo",
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:api": "npm --prefix apps/api run dev",
+    "dev:engine": "uv --directory services/ai-engine run python main.py",
+    "build:web": "npm --prefix apps/web run build",
+    "build:api": "npm --prefix apps/api run build",
+    "test:api": "npm --prefix apps/api run test",
+    "test:engine": "uv --directory services/ai-engine run pytest",
+    "test:e2e": "node scripts/e2e_test.mjs",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down"
+  }
+}

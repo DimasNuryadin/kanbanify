@@ -20,7 +20,7 @@ export const API_BASE_URL =
 export const DEFAULT_USE_MOCK =
   process.env.NEXT_PUBLIC_USE_MOCK !== undefined
     ? process.env.NEXT_PUBLIC_USE_MOCK === "true"
-    : true;
+    : false;
 
 async function fetchJson<T>(
   path: string,
@@ -28,7 +28,7 @@ async function fetchJson<T>(
   parse: (raw: unknown) => T
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3500);
+  const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
@@ -86,8 +86,11 @@ export const apiClient = {
         return [];
       });
 
-      const targetId =
-        boards.length > 0 && typeof boards[0]?.id === "string"
+      const targetId = boards.some(
+        (b) => typeof b?.id === "string" && b.id === boardId
+      )
+        ? boardId
+        : boards.length > 0 && typeof boards[0]?.id === "string"
           ? boards[0].id
           : boardId;
 
