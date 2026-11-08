@@ -510,6 +510,7 @@ function KanbanCardContent({
                   {new Date(card.due_date).toLocaleDateString("en-US", {
                     month: "short",
                     day: "numeric",
+                    timeZone: "UTC",
                   })}
                 </span>
               </button>
@@ -1270,6 +1271,7 @@ export function KanbanBoard({
 
   return (
     <DndContext
+      id="kinetix-kanban-dnd"
       sensors={sensors}
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}

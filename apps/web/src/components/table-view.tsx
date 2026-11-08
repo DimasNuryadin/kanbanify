@@ -345,6 +345,7 @@ export function TableView({
                         {new Date(card.due_date).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
+                          timeZone: "UTC",
                         })}
                       </span>
                     ) : (
