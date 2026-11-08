@@ -1,6 +1,6 @@
 """
 Kinetix Internal AI Engine Service (`services/ai-engine` — FastAPI Port `8001`).
-Stateless AI task decomposition & risk analysis microservice.
+Stateless AI task decomposition, Trello Power-Up smart card enrichment & risk analysis microservice.
 """
 
 from __future__ import annotations
@@ -16,19 +16,21 @@ from app.config import get_settings
 from app.contracts import (
     AIDecomposeRequestSchema,
     AIDecomposeResponseSchema,
+    AISuggestCardEnrichmentRequestSchema,
+    AISuggestCardEnrichmentResponseSchema,
     ErrorBodySchema,
     ErrorCodeEnum,
     HealthCheckResponseSchema,
     StandardErrorSchema,
 )
-from app.decomposer import decompose_task
+from app.decomposer import decompose_task, enrich_card
 
 
 def create_app() -> FastAPI:
     """Create and configure the Kinetix AI Engine FastAPI application."""
     application = FastAPI(
         title="Kinetix Internal AI Engine",
-        description="Stateless AI Task Decomposer & Technical Risk Analyzer (Port 8001)",
+        description="Stateless AI Task Decomposer, Smart Card Enrichment & Technical Risk Analyzer (Port 8001)",
         version="1.0.0",
     )
 
@@ -122,7 +124,10 @@ def create_app() -> FastAPI:
     @application.post(
         "/internal/v1/decompose-task",
         response_model=AIDecomposeResponseSchema,
-        responses={401: {"model": StandardErrorSchema}},
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
         summary="Smart Task Decomposer & Technical Risk Analyzer",
     )
     async def post_decompose_task(
@@ -130,6 +135,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AIDecomposeResponseSchema:
         return await decompose_task(payload)
+
+    @application.post(
+        "/internal/v1/enrich-card",
+        response_model=AISuggestCardEnrichmentResponseSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="Trello Power-Up Smart Card Enrichment (Description, Checklists, Labels, Priority & Story Points)",
+    )
+    async def post_enrich_card(
+        payload: AISuggestCardEnrichmentRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AISuggestCardEnrichmentResponseSchema:
+        return await enrich_card(payload)
 
     return application
 
