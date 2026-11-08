@@ -1,0 +1,517 @@
+openapi: 3.1.0
+info:
+  title: Kinetix Core API & Internal AI Engine Contract
+  version: 1.0.0
+  description: >
+    Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kinetix
+    High-Performance Real-Time Kanban & AI Workspace.
+servers:
+  - url: http://localhost:8000
+    description: Fastify Core API Server (apps/api)
+  - url: http://localhost:8001
+    description: FastAPI AI Engine Service (services/ai-engine)
+
+paths:
+  /health:
+    get:
+      summary: Mandatory health check for Core API (8000) and AI Engine (8001)
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthCheckResponse"
+
+  /api/v1/boards:
+    get:
+      summary: List all boards
+      operationId: listBoards
+      responses:
+        "200":
+          description: Array of boards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Board"
+    post:
+      summary: Create board (auto-creates 4 default columns Backlog "a0", In Progress "a1", Review "a2", Done "a3")
+      operationId: createBoard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBoardRequest"
+      responses:
+        "201":
+          description: Created board with default columns
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Board"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}:
+    get:
+      summary: Get full board state (columns + cards sorted lexicographically by position)
+      operationId: getBoardById
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Full board state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Board"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/columns:
+    post:
+      summary: Create column in board
+      operationId: createColumn
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateColumnRequest"
+      responses:
+        "201":
+          description: Created column
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Column"
+
+  /api/v1/boards/{boardId}/cards:
+    post:
+      summary: Create card in board
+      operationId: createCard
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCardRequest"
+      responses:
+        "201":
+          description: Created card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+
+  /api/v1/cards/{cardId}:
+    patch:
+      summary: Update card details, blocked_by_card_ids, or subtasks
+      operationId: updateCard
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCardRequest"
+      responses:
+        "200":
+          description: Updated card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+
+  /api/v1/cards/{cardId}/move:
+    patch:
+      summary: Move card (target_column_id, new_position) in O(1) and broadcast CARD_MOVED
+      operationId: moveCard
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveCardRequest"
+      responses:
+        "200":
+          description: Updated moved card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+
+  /api/v1/cards/{cardId}/ai-decompose:
+    post:
+      summary: Decompose card via services/ai-engine, persist subtasks/points/priority, broadcast CARD_UPDATED
+      operationId: aiDecomposeCard
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated card with AI-generated subtasks, story_points, and priority
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+
+  /internal/v1/decompose-task:
+    post:
+      summary: Internal AI Engine task decomposition endpoint (Port 8001)
+      operationId: internalDecomposeTask
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIDecomposeRequest"
+      responses:
+        "200":
+          description: Structured AI decomposition result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIDecomposeResponse"
+
+components:
+  schemas:
+    PriorityEnum:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, URGENT]
+
+    Subtask:
+      type: object
+      required: [id, title, is_completed, position]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        is_completed:
+          type: boolean
+        position:
+          type: string
+
+    Card:
+      type: object
+      required:
+        - id
+        - board_id
+        - column_id
+        - title
+        - description
+        - position
+        - priority
+        - story_points
+        - tags
+        - subtasks
+        - blocked_by_card_ids
+        - due_date
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        board_id:
+          type: string
+          format: uuid
+        column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        position:
+          type: string
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        story_points:
+          type: [integer, "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        subtasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Subtask"
+        blocked_by_card_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        due_date:
+          type: [string, "null"]
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Column:
+      type: object
+      required: [id, board_id, title, position, wip_limit]
+      properties:
+        id:
+          type: string
+          format: uuid
+        board_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        position:
+          type: string
+        wip_limit:
+          type: [integer, "null"]
+
+    Board:
+      type: object
+      required: [id, workspace_id, title, columns, cards, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/Column"
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Card"
+        created_at:
+          type: string
+          format: date-time
+
+    HealthCheckResponse:
+      type: object
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        version:
+          type: string
+
+    CreateBoardRequest:
+      type: object
+      required: [title]
+      properties:
+        workspace_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+
+    CreateColumnRequest:
+      type: object
+      required: [title, position]
+      properties:
+        title:
+          type: string
+        position:
+          type: string
+        wip_limit:
+          type: [integer, "null"]
+
+    CreateCardRequest:
+      type: object
+      required: [column_id, title, position]
+      properties:
+        column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        position:
+          type: string
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        story_points:
+          type: [integer, "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        subtasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Subtask"
+        blocked_by_card_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        due_date:
+          type: [string, "null"]
+          format: date-time
+
+    UpdateCardRequest:
+      type: object
+      properties:
+        column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        position:
+          type: string
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        story_points:
+          type: [integer, "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        subtasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Subtask"
+        blocked_by_card_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        due_date:
+          type: [string, "null"]
+          format: date-time
+
+    MoveCardRequest:
+      type: object
+      required: [target_column_id, new_position]
+      properties:
+        target_column_id:
+          type: string
+          format: uuid
+        new_position:
+          type: string
+
+    AIDecomposeRequest:
+      type: object
+      required: [card_title, card_description, board_context]
+      properties:
+        card_title:
+          type: string
+        card_description:
+          type: string
+        board_context:
+          type: array
+          items:
+            type: string
+
+    AIDecomposeResponse:
+      type: object
+      required:
+        - suggested_subtasks
+        - estimated_story_points
+        - suggested_priority
+        - potential_risks
+      properties:
+        suggested_subtasks:
+          type: array
+          items:
+            type: object
+            required: [title, position]
+            properties:
+              title:
+                type: string
+              position:
+                type: string
+        estimated_story_points:
+          type: integer
+        suggested_priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        potential_risks:
+          type: array
+          items:
+            type: string
+
+    StandardError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              enum:
+                - RESOURCE_NOT_FOUND
+                - VALIDATION_ERROR
+                - UNAUTHORIZED
+                - INTERNAL_ERROR
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
