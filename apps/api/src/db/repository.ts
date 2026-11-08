@@ -101,29 +101,140 @@ function createPreseededMemoryStore(): InMemoryStore {
     columns.set(col.id, col);
   }
 
-  const seedCard: Card = {
-    id: "44444444-4444-4444-8444-444444444444",
-    board_id: SEED_BOARD_ID,
-    column_id: "33333333-3333-4333-8333-333333333331",
-    title: "Implement OAuth2 PKCE flow",
-    description: "Support GitHub and Google providers",
-    position: "a0",
-    priority: "HIGH",
-    story_points: 5,
-    tags: ["auth", "security"],
-    subtasks: [
-      {
-        id: "55555555-5555-4555-8555-555555555555",
-        title: "Configure callback routes",
-        is_completed: false,
-        position: "a0",
-      },
-    ],
-    blocked_by_card_ids: [],
-    due_date: "2026-11-15T00:00:00.000Z",
-    updated_at: "2026-11-08T10:05:00.000Z",
-  };
-  cards.set(seedCard.id, seedCard);
+  const seedCards: Card[] = [
+    {
+      id: "44444444-4444-4444-8444-444444444444",
+      board_id: SEED_BOARD_ID,
+      column_id: "33333333-3333-4333-8333-333333333331",
+      title: "Implement OAuth2 PKCE flow",
+      description: "Support GitHub and Google providers",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["auth", "security"],
+      subtasks: [
+        {
+          id: "55555555-5555-4555-8555-555555555555",
+          title: "Configure callback routes",
+          is_completed: false,
+          position: "a0",
+        },
+      ],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-15T00:00:00.000Z",
+      updated_at: "2026-11-08T10:05:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444403",
+      board_id: SEED_BOARD_ID,
+      column_id: "33333333-3333-4333-8333-333333333332",
+      title: "Real-Time WebSocket Broadcast & Redis Pub/Sub Bridge",
+      description:
+        "Synchronize CARD_MOVED, CARD_UPDATED, and CARD_CREATED events across active board peers in <25ms.",
+      position: "a0",
+      priority: "URGENT",
+      story_points: 8,
+      tags: ["realtime", "websocket", "redis"],
+      subtasks: [
+        {
+          id: "55555555-5555-4555-8555-555555555506",
+          title: "Subscribe client to /ws/boards/:boardId with auto-reconnect",
+          is_completed: true,
+          position: "a0",
+        },
+        {
+          id: "55555555-5555-4555-8555-555555555508",
+          title: "Handle multi-tab state convergence under bursty moves",
+          is_completed: false,
+          position: "a1",
+        },
+      ],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-12T00:00:00.000Z",
+      updated_at: "2026-11-08T10:10:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444404",
+      board_id: SEED_BOARD_ID,
+      column_id: "33333333-3333-4333-8333-333333333332",
+      title: "AI Task Decomposer Service & Subtask Synthesis",
+      description:
+        "Connect POST /api/v1/cards/:cardId/ai-decompose to internal FastAPI AI Engine (:8001).",
+      position: "a1",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["ai-engine", "llm", "ux"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-14T00:00:00.000Z",
+      updated_at: "2026-11-08T10:15:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444406",
+      board_id: SEED_BOARD_ID,
+      column_id: "33333333-3333-4333-8333-333333333333",
+      title: "Command Palette (Cmd+K) & Keyboard-First Navigation",
+      description:
+        "Instant Raycast-inspired modal for creating cards, switching Kanban/Table views, and toggling themes.",
+      position: "a0",
+      priority: "MEDIUM",
+      story_points: 3,
+      tags: ["design-system", "keyboard"],
+      subtasks: [
+        {
+          id: "55555555-5555-4555-8555-555555555514",
+          title: "Bind global Cmd+K / Ctrl+K shortcut listener",
+          is_completed: true,
+          position: "a0",
+        },
+      ],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-13T00:00:00.000Z",
+      updated_at: "2026-11-08T10:18:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444408",
+      board_id: SEED_BOARD_ID,
+      column_id: "33333333-3333-4333-8333-333333333331",
+      title: "Automated Dependency Blocker Radar & Critical Path Graph",
+      description:
+        "Highlight cards blocked by upstream unresolved issues (blocked_by_card_ids).",
+      position: "a1",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["analytics", "blocker-radar"],
+      subtasks: [],
+      blocked_by_card_ids: ["44444444-4444-4444-8444-444444444403"],
+      due_date: "2026-11-20T00:00:00.000Z",
+      updated_at: "2026-11-08T10:20:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444401",
+      board_id: SEED_BOARD_ID,
+      column_id: "33333333-3333-4333-8333-333333333334",
+      title: "Lexicographical O(1) Fractional Indexing Engine",
+      description:
+        "Implement base-62 midpoint string computation (a0 + a1 -> a0V) for O(1) single-row card moves.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["core", "algorithms", "perf"],
+      subtasks: [
+        {
+          id: "55555555-5555-4555-8555-555555555501",
+          title: "Verify adjacent key midpoint (a0 and a1 -> a0V)",
+          is_completed: true,
+          position: "a0",
+        },
+      ],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-10T00:00:00.000Z",
+      updated_at: "2026-11-08T09:10:00.000Z",
+    },
+  ];
+  for (const card of seedCards) {
+    cards.set(card.id, card);
+  }
 
   return { boards, columns, cards };
 }
