@@ -8,6 +8,8 @@ node_modules/
 out/
 build/
 dist/
+AGENTS.md
+**/AGENTS.md
 
 # TypeScript
 *.tsbuildinfo
