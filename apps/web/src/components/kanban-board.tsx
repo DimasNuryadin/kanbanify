@@ -60,6 +60,7 @@ import {
   getDueDateStatus,
   LABEL_COLOR_MAP,
   LIST_COLOR_ACCENTS,
+  resolveCoverColor,
 } from "@/lib/trello-theme";
 
 export const PRIORITY_STYLES: Record<
@@ -182,7 +183,7 @@ function KanbanCardContent({
         onClick={() => onSelect(card.id)}
         style={
           card.cover.type === "color"
-            ? { backgroundColor: card.cover.value ?? "#3b82f6" }
+            ? { backgroundColor: resolveCoverColor(card.cover.value) }
             : {
                 backgroundImage: `linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.65)), url(${card.cover.value})`,
                 backgroundSize: "cover",
@@ -288,7 +289,7 @@ function KanbanCardContent({
           }
           style={
             card.cover.type === "color"
-              ? { backgroundColor: card.cover.value ?? "#3b82f6" }
+              ? { backgroundColor: resolveCoverColor(card.cover.value) }
               : {
                   backgroundImage: `url(${card.cover.value})`,
                   backgroundSize: "cover",

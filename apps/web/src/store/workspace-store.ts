@@ -98,6 +98,7 @@ interface WorkspaceState {
   upsertCard: (card: Card) => void;
   removeCard: (cardId: string) => void;
   upsertColumn: (column: Column) => void;
+  removeColumn: (columnId: string) => void;
   appendCardComment: (comment: Comment) => void;
 }
 
@@ -349,17 +350,53 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       };
     }),
 
-  appendCardComment: (comment) =>
+  removeColumn: (columnId) =>
     set((state) => ({
       board: sortBoard({
         ...state.board,
-        cards: state.board.cards.map((c) => {
-          if (c.id !== comment.card_id) return c;
-          const alreadyExists = c.comments.some((cm) => cm.id === comment.id);
-          return alreadyExists
-            ? c
-            : { ...c, comments: [...c.comments, comment] };
-        }),
+        columns: state.board.columns.filter((col) => col.id !== columnId),
       }),
     })),
+
+  appendCardComment: (comment) =>
+    set((state) => {
+      const targetCard = state.board.cards.find(
+        (c) => c.id === comment.card_id
+      );
+      const activityId = `act-${comment.id}`;
+      const hasActivity = state.board.activities.some(
+        (a) =>
+          a.id === activityId ||
+          (a.action_type === "COMMENT_ADDED" &&
+            a.card_id === comment.card_id &&
+            a.created_at === comment.created_at)
+      );
+      const nextActivities = hasActivity
+        ? state.board.activities
+        : [
+            {
+              id: activityId,
+              board_id: state.board.id,
+              card_id: comment.card_id,
+              actor_name: comment.author_name,
+              action_type: "COMMENT_ADDED" as const,
+              description: `commented on ${targetCard?.title ?? "card"}: "${comment.content.slice(0, 80)}"`,
+              created_at: comment.created_at,
+            },
+            ...state.board.activities,
+          ];
+      return {
+        board: sortBoard({
+          ...state.board,
+          activities: nextActivities,
+          cards: state.board.cards.map((c) => {
+            if (c.id !== comment.card_id) return c;
+            const alreadyExists = c.comments.some((cm) => cm.id === comment.id);
+            return alreadyExists
+              ? c
+              : { ...c, comments: [...c.comments, comment] };
+          }),
+        }),
+      };
+    }),
 }));

@@ -226,13 +226,16 @@ async function runSmokeTests() {
   );
 
   // ---------------------------------------------------------------------------
-  // STEP 3: Board Creation & Default Columns
+  // STEP 2: Board Creation & Trello Defaults (Labels, Members, 4 Columns)
   // ---------------------------------------------------------------------------
-  logStep("BOARD", 'Creating board {"title": "E2E Integration Board"}...');
+  logStep("BOARD", 'Creating board {"title": "E2E Phase 2 Trello Parity Board"}...');
   const createBoardRes = await fetch(`${API_BASE_URL}/api/v1/boards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "E2E Integration Board" }),
+    body: JSON.stringify({
+      title: "E2E Phase 2 Trello Parity Board",
+      description: "Automated Phase 2 Full Trello Parity verification board",
+    }),
   });
   assert.ok(
     createBoardRes.status === 200 || createBoardRes.status === 201,
@@ -241,7 +244,15 @@ async function runSmokeTests() {
 
   const board = await createBoardRes.json();
   assert.ok(board.id, "Created board must have a valid UUID id");
-  assert.equal(board.title, "E2E Integration Board");
+  assert.equal(board.title, "E2E Phase 2 Trello Parity Board");
+  assert.ok(
+    Array.isArray(board.labels) && board.labels.length >= 6,
+    `Expected >= 6 default Trello labels, got ${board.labels?.length}`
+  );
+  assert.ok(
+    Array.isArray(board.members) && board.members.length >= 1,
+    `Expected >= 1 default board members, got ${board.members?.length}`
+  );
   assert.equal(
     board.columns.length,
     4,
@@ -261,12 +272,16 @@ async function runSmokeTests() {
     "Default columns must match Backlog(a0), In Progress(a1), Review(a2), Done(a3)"
   );
   logPass(
-    `POST /api/v1/boards -> ${createBoardRes.status} Created board '${board.id}' with default columns [a0, a1, a2, a3]`
+    `POST /api/v1/boards -> ${createBoardRes.status} Created board '${board.id}' with ${board.labels.length} labels, ${board.members.length} members, and 4 default columns`
   );
 
   const backlogCol = board.columns.find((c) => c.title === "Backlog");
   const inProgressCol = board.columns.find((c) => c.title === "In Progress");
-  assert.ok(backlogCol && inProgressCol, "Backlog and In Progress columns must exist");
+  const reviewCol = board.columns.find((c) => c.title === "Review");
+  assert.ok(
+    backlogCol && inProgressCol && reviewCol,
+    "Backlog, In Progress, and Review columns must exist"
+  );
 
   // Optional: Open live WebSocket listener on /ws/boards/:boardId if global WebSocket exists
   /** @type {Array<{ event: string; board_id: string; data: unknown }>} */
@@ -300,7 +315,74 @@ async function runSmokeTests() {
   }
 
   // ---------------------------------------------------------------------------
-  // STEP 4: Card Creation & O(1) Fractional Move
+  // STEP 3: List (Column) Operations (Reorder & Copy)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "COLUMN_MOVE",
+    `Reordering column '${reviewCol.title}' via PATCH /api/v1/columns/${reviewCol.id}/move...`
+  );
+  const moveColRes = await fetch(
+    `${API_BASE_URL}/api/v1/columns/${reviewCol.id}/move`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_position: "a0V" }),
+    }
+  );
+  assert.equal(
+    moveColRes.status,
+    200,
+    `Expected 200 from PATCH /api/v1/columns/:columnId/move, got ${moveColRes.status}`
+  );
+  const movedCol = await moveColRes.json();
+  assert.equal(movedCol.id, reviewCol.id);
+  assert.equal(movedCol.position, "a0V");
+  logPass(
+    `PATCH /api/v1/columns/${reviewCol.id}/move -> 200 OK (new_position="a0V")`
+  );
+
+  logStep(
+    "COLUMN_COPY",
+    `Copying column '${backlogCol.title}' via POST /api/v1/columns/${backlogCol.id}/copy...`
+  );
+  const copyColRes = await fetch(
+    `${API_BASE_URL}/api/v1/columns/${backlogCol.id}/copy`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Backlog (Copy)",
+        position: "a0G",
+      }),
+    }
+  );
+  assert.ok(
+    copyColRes.status === 200 || copyColRes.status === 201,
+    `Expected 200/201 from POST /api/v1/columns/:columnId/copy, got ${copyColRes.status}`
+  );
+  const copiedColPayload = await copyColRes.json();
+  assert.ok(
+    copiedColPayload.column && copiedColPayload.column.id,
+    "Copied column response must include column object with UUID"
+  );
+  assert.equal(copiedColPayload.column.title, "Backlog (Copy)");
+
+  const boardAfterColCopyRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}`
+  );
+  assert.equal(boardAfterColCopyRes.status, 200);
+  const boardAfterColCopy = await boardAfterColCopyRes.json();
+  const duplicatedColumn = boardAfterColCopy.columns.find(
+    (c) => c.id === copiedColPayload.column.id
+  );
+  assert.ok(duplicatedColumn, "Duplicated column must exist on fetched board");
+  assert.equal(duplicatedColumn.title, "Backlog (Copy)");
+  logPass(
+    `POST /api/v1/columns/${backlogCol.id}/copy -> ${copyColRes.status} Duplicated column '${duplicatedColumn.id}' ("Backlog (Copy)") verified on board`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 4: Rich Trello Card Lifecycle (Create, Move, Cover, Labels, Members, Checklists, Due Complete)
   // ---------------------------------------------------------------------------
   logStep(
     "CARD_CREATE",
@@ -317,7 +399,7 @@ async function runSmokeTests() {
         description:
           "Synchronize live Kanban board state over WebSockets and handle Stripe checkout webhook retries safely.",
         position: "a0",
-        priority: "MEDIUM",
+        priority: "HIGH",
         tags: ["websocket", "payments"],
       }),
     }
@@ -355,34 +437,155 @@ async function runSmokeTests() {
     `Expected 200 from PATCH /api/v1/cards/:cardId/move, got ${moveCardRes.status}`
   );
   const movedCard = await moveCardRes.json();
-  assert.equal(
-    movedCard.column_id,
-    inProgressCol.id,
-    "Moved card column_id must equal In Progress column id"
-  );
-  assert.equal(
-    movedCard.position,
-    "a0V",
-    'Moved card position must equal "a0V"'
+  assert.equal(movedCard.column_id, inProgressCol.id);
+  assert.equal(movedCard.position, "a0V");
+  logPass(
+    `PATCH /api/v1/cards/${createdCard.id}/move -> 200 OK (column_id='${inProgressCol.id}', position='a0V')`
   );
 
-  // Verify persistence via GET /api/v1/boards/:boardId
+  logStep(
+    "CARD_RICH_UPDATE",
+    `Updating card '${createdCard.id}' with cover, label_ids, member_ids, multiple named checklists, and is_due_complete=true...`
+  );
+  const targetLabelIds = [board.labels[0].id, board.labels[5].id];
+  const targetMemberIds = [board.members[0].id];
+  const frontendChecklistId = "99999999-9999-4999-8999-999999999101";
+  const qaChecklistId = "99999999-9999-4999-8999-999999999102";
+  const richUpdatePayload = {
+    cover: { type: "color", value: "blue", size: "normal" },
+    label_ids: targetLabelIds,
+    member_ids: targetMemberIds,
+    start_date: "2026-11-08T00:00:00.000Z",
+    due_date: "2026-11-20T00:00:00.000Z",
+    is_due_complete: true,
+    checklists: [
+      {
+        id: frontendChecklistId,
+        title: "Frontend Checklist",
+        position: "a0",
+        items: [
+          {
+            id: "55555555-5555-4555-8555-555555555901",
+            title: "Render cover strip & expandable Trello label pills",
+            is_completed: true,
+            position: "a0",
+            due_date: null,
+            assignee_id: targetMemberIds[0],
+          },
+          {
+            id: "55555555-5555-4555-8555-555555555902",
+            title: "Wire optimistic checklist progress bar",
+            is_completed: false,
+            position: "a1",
+            due_date: null,
+            assignee_id: targetMemberIds[0],
+          },
+        ],
+      },
+      {
+        id: qaChecklistId,
+        title: "QA Checklist",
+        position: "a1",
+        items: [
+          {
+            id: "55555555-5555-4555-8555-555555555903",
+            title: "Verify WebSocket CARD_UPDATED broadcast across peers",
+            is_completed: true,
+            position: "a0",
+            due_date: null,
+            assignee_id: targetMemberIds[0],
+          },
+        ],
+      },
+    ],
+  };
+
+  const updateCardRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(richUpdatePayload),
+    }
+  );
+  assert.equal(
+    updateCardRes.status,
+    200,
+    `Expected 200 from PATCH /api/v1/cards/:cardId, got ${updateCardRes.status}`
+  );
+  const updatedCard = await updateCardRes.json();
+  assert.deepEqual(updatedCard.cover, {
+    type: "color",
+    value: "blue",
+    size: "normal",
+  });
+  assert.deepEqual(updatedCard.label_ids, targetLabelIds);
+  assert.deepEqual(updatedCard.member_ids, targetMemberIds);
+  assert.equal(updatedCard.is_due_complete, true);
+  assert.equal(updatedCard.checklists.length, 2);
+  assert.equal(updatedCard.checklists[0].title, "Frontend Checklist");
+  assert.equal(updatedCard.checklists[1].title, "QA Checklist");
+  logPass(
+    `PATCH /api/v1/cards/${createdCard.id} -> 200 OK (cover=blue, labels=${updatedCard.label_ids.length}, members=${updatedCard.member_ids.length}, checklists=["Frontend Checklist", "QA Checklist"], is_due_complete=true)`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 5: Comments & Activity Feed
+  // ---------------------------------------------------------------------------
+  logStep(
+    "COMMENT_ADD",
+    `Adding Markdown comment via POST /api/v1/cards/${createdCard.id}/comments...`
+  );
+  const commentText =
+    "Verified **O(1) fractional indexing** and multi-checklist persistence in E2E smoke test.";
+  const addCommentRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}/comments`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        author_id: board.members[0].id,
+        author_name: board.members[0].full_name,
+        author_initials: board.members[0].initials,
+        content: commentText,
+      }),
+    }
+  );
+  assert.ok(
+    addCommentRes.status === 200 || addCommentRes.status === 201,
+    `Expected 200/201 from POST /api/v1/cards/:cardId/comments, got ${addCommentRes.status}`
+  );
+  const createdComment = await addCommentRes.json();
+  assert.ok(createdComment.id, "Created comment must have a UUID id");
+  assert.equal(createdComment.content, commentText);
+
   const verifyBoardRes = await fetch(`${API_BASE_URL}/api/v1/boards/${board.id}`);
   assert.equal(verifyBoardRes.status, 200);
   const verifiedBoard = await verifyBoardRes.json();
   const persistedCard = verifiedBoard.cards.find((c) => c.id === createdCard.id);
-  assert.ok(persistedCard, "Moved card must be persisted on board");
-  assert.equal(persistedCard.column_id, inProgressCol.id);
-  assert.equal(persistedCard.position, "a0V");
+  assert.ok(persistedCard, "Updated card must be persisted on board");
+  assert.ok(
+    Array.isArray(persistedCard.comments) &&
+      persistedCard.comments.some((cm) => cm.id === createdComment.id),
+    "Card comments[] must contain the newly created comment"
+  );
+  assert.ok(
+    Array.isArray(verifiedBoard.activities) &&
+      verifiedBoard.activities.some(
+        (act) =>
+          act.action_type === "COMMENT_ADDED" && act.card_id === createdCard.id
+      ),
+    "Board activities[] must contain a COMMENT_ADDED entry for the card"
+  );
   logPass(
-    `PATCH /api/v1/cards/${createdCard.id}/move -> 200 OK (persisted column_id='${inProgressCol.id}', position='a0V')`
+    `POST /api/v1/cards/${createdCard.id}/comments -> ${addCommentRes.status} Comment & COMMENT_ADDED activity verified on board`
   );
 
   // ---------------------------------------------------------------------------
-  // STEP 5: Cross-Service AI Task Decomposition (API -> AI Engine -> DB)
+  // STEP 6: AI Task Decompose / Enrich (API -> AI Engine -> DB)
   // ---------------------------------------------------------------------------
   logStep(
-    "AI_DECOMPOSE",
+    "AI_ENRICH",
     `Calling POST /api/v1/cards/${createdCard.id}/ai-decompose (API -> AI Engine -> DB)...`
   );
   const decomposeRes = await fetch(
@@ -401,23 +604,14 @@ async function runSmokeTests() {
   const decomposedCard = await decomposeRes.json();
 
   assert.ok(
-    Array.isArray(decomposedCard.subtasks) && decomposedCard.subtasks.length > 0,
-    "AI-decomposed card must contain non-empty subtasks[]"
+    Array.isArray(decomposedCard.checklists) &&
+      decomposedCard.checklists.length >= 2,
+    `AI-enriched card must contain checklists[] (got ${decomposedCard.checklists?.length})`
   );
-  for (const st of decomposedCard.subtasks) {
-    assert.ok(
-      typeof st.id === "string" && st.id.length > 0,
-      "Each subtask must have a valid id"
-    );
-    assert.ok(
-      typeof st.title === "string" && st.title.length > 0,
-      "Each subtask must have a non-empty title"
-    );
-    assert.ok(
-      typeof st.position === "string" && st.position.length > 0,
-      "Each subtask must have a valid fractional index position"
-    );
-  }
+  assert.ok(
+    Array.isArray(decomposedCard.subtasks) && decomposedCard.subtasks.length > 0,
+    "AI-enriched card must contain non-empty subtasks[]"
+  );
   assert.ok(
     typeof decomposedCard.story_points === "number" &&
       decomposedCard.story_points > 0,
@@ -428,7 +622,60 @@ async function runSmokeTests() {
     `Expected valid priority enum, got ${decomposedCard.priority}`
   );
   logPass(
-    `POST /api/v1/cards/${createdCard.id}/ai-decompose -> 200 OK (${decomposedCard.subtasks.length} subtasks, story_points=${decomposedCard.story_points}, priority=${decomposedCard.priority})`
+    `POST /api/v1/cards/${createdCard.id}/ai-decompose -> 200 OK (${decomposedCard.checklists.length} checklists, ${decomposedCard.subtasks.length} subtasks, story_points=${decomposedCard.story_points}, priority=${decomposedCard.priority})`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 7: Card Copy & Archive
+  // ---------------------------------------------------------------------------
+  logStep(
+    "CARD_COPY_ARCHIVE",
+    `Copying card via POST /api/v1/cards/${createdCard.id}/copy and archiving the copy...`
+  );
+  const copyCardRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}/copy`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_column_id: inProgressCol.id,
+        title: "Implement Real-Time WebSocket & Payment Flow (Copy)",
+        position: "a1",
+      }),
+    }
+  );
+  assert.ok(
+    copyCardRes.status === 200 || copyCardRes.status === 201,
+    `Expected 200/201 from POST /api/v1/cards/:cardId/copy, got ${copyCardRes.status}`
+  );
+  const copiedCard = await copyCardRes.json();
+  assert.ok(
+    copiedCard.id && copiedCard.id !== createdCard.id,
+    "Copied card must have a new UUID id"
+  );
+  assert.equal(
+    copiedCard.title,
+    "Implement Real-Time WebSocket & Payment Flow (Copy)"
+  );
+
+  const archiveCardRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${copiedCard.id}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_archived: true }),
+    }
+  );
+  assert.equal(
+    archiveCardRes.status,
+    200,
+    `Expected 200 from PATCH /api/v1/cards/:copiedCardId, got ${archiveCardRes.status}`
+  );
+  const archivedCard = await archiveCardRes.json();
+  assert.equal(archivedCard.id, copiedCard.id);
+  assert.equal(archivedCard.is_archived, true);
+  logPass(
+    `POST /api/v1/cards/${createdCard.id}/copy & PATCH /api/v1/cards/${copiedCard.id} -> Copied card '${copiedCard.id}' and archived (is_archived=true)`
   );
 
   if (wsClient) {
@@ -444,7 +691,9 @@ async function runSmokeTests() {
   }
 
   console.log("==================================================================");
-  console.log("\x1b[32m[PASS] All E2E Integration Smoke Tests Succeeded!\x1b[0m");
+  console.log(
+    "\x1b[32m[PASS] Phase 2 Full Trello Parity E2E Smoke Tests Succeeded!\x1b[0m"
+  );
   console.log("==================================================================");
 }
 

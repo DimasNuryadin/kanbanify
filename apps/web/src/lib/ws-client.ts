@@ -11,6 +11,7 @@ import {
   ColumnSchema,
   Comment,
   CommentSchema,
+  CopyColumnResponseSchema,
   WSMessageSchema,
 } from "@kinetix/contracts";
 
@@ -128,6 +129,14 @@ export class BoardWebSocketClient {
               const col = ColumnSchema.safeParse(data);
               if (col.success) {
                 this.handlers?.onColumnCreated(col.data);
+              } else {
+                const copied = CopyColumnResponseSchema.safeParse(data);
+                if (copied.success) {
+                  this.handlers?.onColumnCreated(copied.data.column);
+                  for (const card of copied.data.cards) {
+                    this.handlers?.onCardCreated(card);
+                  }
+                }
               }
               break;
             }

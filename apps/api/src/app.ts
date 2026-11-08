@@ -627,10 +627,7 @@ export async function buildApp(
 
           estimatedStoryPoints = enrichResult.estimated_story_points;
           suggestedPriority = enrichResult.suggested_priority;
-          if (
-            !existingCard.description.trim() &&
-            enrichResult.structured_description
-          ) {
+          if (enrichResult.structured_description) {
             structuredDescription = enrichResult.structured_description;
           }
 
@@ -785,7 +782,30 @@ export async function buildApp(
           is_completed: it.is_completed,
           position: it.position,
         }));
+
+        if (!existingCard.description.includes("## Acceptance Criteria")) {
+          structuredDescription = `## Objective\nDeliver **${existingCard.title}**${
+            existingCard.description.trim()
+              ? ` — ${existingCard.description.trim()}`
+              : ""
+          }.\n\n## Acceptance Criteria\n- Implementation satisfies shared @kinetix/contracts schemas\n- Automated regression and integration checks pass\n\n## Technical Notes\n- Preserve lexicographical fractional indexing (a0, a1, a0V).`;
+        }
+
+        if (board) {
+          const aiLabel = board.labels.find(
+            (bl) => bl.color === "purple" || bl.color === "blue"
+          );
+          if (aiLabel) {
+            matchedLabelIds = Array.from(
+              new Set([...existingCard.label_ids, aiLabel.id])
+            );
+          }
+        }
       }
+
+      const nextTags = Array.from(
+        new Set([...existingCard.tags, "ai-decomposed"])
+      );
 
       const updatedCard = await repository.updateCard(
         cardId,
@@ -794,6 +814,7 @@ export async function buildApp(
           subtasks: generatedSubtasks,
           story_points: estimatedStoryPoints,
           priority: suggestedPriority,
+          tags: nextTags,
           ...(structuredDescription !== undefined
             ? { description: structuredDescription }
             : {}),
