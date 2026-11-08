@@ -321,10 +321,17 @@ function BoardNavItem({
           };
 
   return (
-    <button
-      type="button"
+    <div
       onClick={onSelect}
-      className={`group flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left transition-all ${
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`group flex w-full cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-left transition-all ${
         isActive
           ? "bg-zinc-200/80 font-semibold text-zinc-900 shadow-2xs dark:bg-zinc-800/90 dark:text-white"
           : "text-zinc-700 hover:bg-zinc-100/90 dark:text-zinc-300 dark:hover:bg-zinc-900/80"
@@ -353,7 +360,10 @@ function BoardNavItem({
 
         <button
           type="button"
-          onClick={onToggleStar}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleStar(e);
+          }}
           title={board.is_starred ? "Unstar board" : "Star board"}
           className={`rounded p-0.5 transition-colors ${
             board.is_starred
@@ -368,6 +378,6 @@ function BoardNavItem({
           />
         </button>
       </div>
-    </button>
+    </div>
   );
 }
