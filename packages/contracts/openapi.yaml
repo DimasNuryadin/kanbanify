@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: Kinetix Core API & Internal AI Engine Contract
-  version: 1.0.0
+  version: 2.0.0
   description: >
     Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kinetix
-    High-Performance Real-Time Kanban & AI Workspace.
+    High-Performance Real-Time Kanban & AI Workspace (Phase 2 Full Trello Parity).
 servers:
   - url: http://localhost:8000
     description: Fastify Core API Server (apps/api)
@@ -38,7 +38,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Board"
     post:
-      summary: Create board (auto-creates 4 default columns Backlog "a0", In Progress "a1", Review "a2", Done "a3")
+      summary: Create board (auto-creates 4 default columns, 6 Trello color labels, and seeded members)
       operationId: createBoard
       requestBody:
         required: true
@@ -48,7 +48,7 @@ paths:
               $ref: "#/components/schemas/CreateBoardRequest"
       responses:
         "201":
-          description: Created board with default columns
+          description: Created board with default columns, labels, and members
           content:
             application/json:
               schema:
@@ -62,7 +62,7 @@ paths:
 
   /api/v1/boards/{boardId}:
     get:
-      summary: Get full board state (columns + cards sorted lexicographically by position)
+      summary: Get full board state (columns, cards, labels, members, activities)
       operationId: getBoardById
       parameters:
         - name: boardId
@@ -84,10 +84,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StandardError"
+    patch:
+      summary: Update board title, is_starred, background, or manage board labels/members
+      operationId: updateBoard
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBoardRequest"
+      responses:
+        "200":
+          description: Updated board
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Board"
 
   /api/v1/boards/{boardId}/columns:
     post:
-      summary: Create column in board
+      summary: Create column (Trello list) in board
       operationId: createColumn
       parameters:
         - name: boardId
@@ -109,6 +132,81 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Column"
+
+  /api/v1/columns/{columnId}:
+    patch:
+      summary: Rename list title, set list color, wip_limit, or archive list (is_archived)
+      operationId: updateColumn
+      parameters:
+        - name: columnId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateColumnRequest"
+      responses:
+        "200":
+          description: Updated column
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Column"
+
+  /api/v1/columns/{columnId}/move:
+    patch:
+      summary: Reorder list horizontally using fractional index new_position
+      operationId: moveColumn
+      parameters:
+        - name: columnId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveColumnRequest"
+      responses:
+        "200":
+          description: Moved column
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Column"
+
+  /api/v1/columns/{columnId}/copy:
+    post:
+      summary: Duplicate list with all its cards
+      operationId: copyColumn
+      parameters:
+        - name: columnId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyColumnRequest"
+      responses:
+        "201":
+          description: Duplicated column and its cloned cards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopyColumnResponse"
 
   /api/v1/boards/{boardId}/cards:
     post:
@@ -137,7 +235,7 @@ paths:
 
   /api/v1/cards/{cardId}:
     patch:
-      summary: Update card details, blocked_by_card_ids, or subtasks
+      summary: Update card details including cover, label_ids, member_ids, checklists, attachments, dates, archive & watch state
       operationId: updateCard
       parameters:
         - name: cardId
@@ -159,6 +257,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Card"
+    delete:
+      summary: Permanently delete an archived card
+      operationId: deleteCard
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Card permanently deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  deleted:
+                    type: boolean
 
   /api/v1/cards/{cardId}/move:
     patch:
@@ -185,9 +307,89 @@ paths:
               schema:
                 $ref: "#/components/schemas/Card"
 
+  /api/v1/cards/{cardId}/copy:
+    post:
+      summary: Copy card to same or another list
+      operationId: copyCard
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyCardRequest"
+      responses:
+        "201":
+          description: Cloned card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+
+  /api/v1/cards/{cardId}/comments:
+    post:
+      summary: Add a comment to a card and append an ActivitySchema record
+      operationId: createCardComment
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Created comment (or updated card)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+
+  /api/v1/cards/{cardId}/comments/{commentId}:
+    delete:
+      summary: Delete a comment from a card
+      operationId: deleteCardComment
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Comment deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+
   /api/v1/cards/{cardId}/ai-decompose:
     post:
-      summary: Decompose card via services/ai-engine, persist subtasks/points/priority, broadcast CARD_UPDATED
+      summary: Decompose & enrich card via services/ai-engine, persist checklists/subtasks/points/priority, broadcast CARD_UPDATED
       operationId: aiDecomposeCard
       parameters:
         - name: cardId
@@ -198,7 +400,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: Updated card with AI-generated subtasks, story_points, and priority
+          description: Updated card with AI-generated subtasks/checklists, story_points, and priority
           content:
             application/json:
               schema:
@@ -228,11 +430,79 @@ paths:
               schema:
                 $ref: "#/components/schemas/AIDecomposeResponse"
 
+  /internal/v1/enrich-card:
+    post:
+      summary: Internal AI Engine rich Trello card enrichment endpoint (Port 8001)
+      operationId: internalEnrichCard
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AISuggestCardEnrichmentRequest"
+      responses:
+        "200":
+          description: Structured AI card enrichment result (description, checklists, labels, points, priority)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AISuggestCardEnrichmentResponse"
+
 components:
   schemas:
     PriorityEnum:
       type: string
       enum: [LOW, MEDIUM, HIGH, URGENT]
+
+    LabelColorEnum:
+      type: string
+      enum: [green, yellow, orange, red, purple, blue, sky, lime, pink, black]
+
+    ActivityActionTypeEnum:
+      type: string
+      enum:
+        - CARD_CREATED
+        - CARD_MOVED
+        - CARD_ARCHIVED
+        - COMMENT_ADDED
+        - CHECKLIST_COMPLETED
+        - MEMBER_ASSIGNED
+
+    Member:
+      type: object
+      required: [id, name, email, avatar_url, initials, color]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        avatar_url:
+          type: [string, "null"]
+        initials:
+          type: string
+        color:
+          type: string
+
+    Label:
+      type: object
+      required: [id, board_id, name, color]
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        name:
+          type: string
+        color:
+          $ref: "#/components/schemas/LabelColorEnum"
 
     Subtask:
       type: object
@@ -240,12 +510,141 @@ components:
       properties:
         id:
           type: string
-          format: uuid
         title:
           type: string
         is_completed:
           type: boolean
         position:
+          type: string
+
+    ChecklistItem:
+      type: object
+      required: [id, title, is_completed, position, due_date, assignee_id]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        is_completed:
+          type: boolean
+        position:
+          type: string
+        due_date:
+          type: [string, "null"]
+        assignee_id:
+          type: [string, "null"]
+
+    Checklist:
+      type: object
+      required: [id, title, position, items]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        position:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChecklistItem"
+
+    Comment:
+      type: object
+      required:
+        - id
+        - card_id
+        - author_id
+        - author_name
+        - author_initials
+        - content
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+        card_id:
+          type: string
+        author_id:
+          type: string
+        author_name:
+          type: string
+        author_initials:
+          type: string
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Activity:
+      type: object
+      required:
+        - id
+        - board_id
+        - card_id
+        - actor_name
+        - action_type
+        - description
+        - created_at
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        card_id:
+          type: [string, "null"]
+        actor_name:
+          type: string
+        action_type:
+          $ref: "#/components/schemas/ActivityActionTypeEnum"
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Attachment:
+      type: object
+      required: [id, name, url, type, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        type:
+          type: string
+          enum: [link, image, file]
+        created_at:
+          type: string
+          format: date-time
+
+    CardCover:
+      type: object
+      required: [type, value, size]
+      properties:
+        type:
+          type: string
+          enum: [none, color, image]
+        value:
+          type: [string, "null"]
+        size:
+          type: string
+          enum: [normal, full]
+
+    BoardBackground:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [gradient, solid, image]
+        value:
           type: string
 
     Card:
@@ -264,6 +663,16 @@ components:
         - blocked_by_card_ids
         - due_date
         - updated_at
+        - cover
+        - label_ids
+        - member_ids
+        - checklists
+        - comments
+        - attachments
+        - start_date
+        - is_due_complete
+        - is_archived
+        - is_watching
       properties:
         id:
           type: string
@@ -303,10 +712,41 @@ components:
         updated_at:
           type: string
           format: date-time
+        cover:
+          $ref: "#/components/schemas/CardCover"
+        label_ids:
+          type: array
+          items:
+            type: string
+        member_ids:
+          type: array
+          items:
+            type: string
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Checklist"
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        start_date:
+          type: [string, "null"]
+          format: date-time
+        is_due_complete:
+          type: boolean
+        is_archived:
+          type: boolean
+        is_watching:
+          type: boolean
 
     Column:
       type: object
-      required: [id, board_id, title, position, wip_limit]
+      required: [id, board_id, title, position, wip_limit, color, is_archived]
       properties:
         id:
           type: string
@@ -320,10 +760,26 @@ components:
           type: string
         wip_limit:
           type: [integer, "null"]
+        color:
+          type: [string, "null"]
+        is_archived:
+          type: boolean
 
     Board:
       type: object
-      required: [id, workspace_id, title, columns, cards, created_at]
+      required:
+        - id
+        - workspace_id
+        - title
+        - columns
+        - cards
+        - created_at
+        - description
+        - is_starred
+        - background
+        - labels
+        - members
+        - activities
       properties:
         id:
           type: string
@@ -344,6 +800,24 @@ components:
         created_at:
           type: string
           format: date-time
+        description:
+          type: string
+        is_starred:
+          type: boolean
+        background:
+          $ref: "#/components/schemas/BoardBackground"
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Label"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+        activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
 
     HealthCheckResponse:
       type: object
@@ -366,6 +840,32 @@ components:
           format: uuid
         title:
           type: string
+        description:
+          type: string
+        is_starred:
+          type: boolean
+        background:
+          $ref: "#/components/schemas/BoardBackground"
+
+    UpdateBoardRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        is_starred:
+          type: boolean
+        background:
+          $ref: "#/components/schemas/BoardBackground"
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Label"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
 
     CreateColumnRequest:
       type: object
@@ -377,6 +877,48 @@ components:
           type: string
         wip_limit:
           type: [integer, "null"]
+        color:
+          type: [string, "null"]
+
+    UpdateColumnRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        position:
+          type: string
+        wip_limit:
+          type: [integer, "null"]
+        color:
+          type: [string, "null"]
+        is_archived:
+          type: boolean
+
+    MoveColumnRequest:
+      type: object
+      required: [new_position]
+      properties:
+        new_position:
+          type: string
+
+    CopyColumnRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        position:
+          type: string
+
+    CopyColumnResponse:
+      type: object
+      required: [column, cards]
+      properties:
+        column:
+          $ref: "#/components/schemas/Column"
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Card"
 
     CreateCardRequest:
       type: object
@@ -411,6 +953,37 @@ components:
         due_date:
           type: [string, "null"]
           format: date-time
+        cover:
+          $ref: "#/components/schemas/CardCover"
+        label_ids:
+          type: array
+          items:
+            type: string
+        member_ids:
+          type: array
+          items:
+            type: string
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Checklist"
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        start_date:
+          type: [string, "null"]
+          format: date-time
+        is_due_complete:
+          type: boolean
+        is_archived:
+          type: boolean
+        is_watching:
+          type: boolean
 
     UpdateCardRequest:
       type: object
@@ -444,6 +1017,37 @@ components:
         due_date:
           type: [string, "null"]
           format: date-time
+        cover:
+          $ref: "#/components/schemas/CardCover"
+        label_ids:
+          type: array
+          items:
+            type: string
+        member_ids:
+          type: array
+          items:
+            type: string
+        checklists:
+          type: array
+          items:
+            $ref: "#/components/schemas/Checklist"
+        comments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Comment"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        start_date:
+          type: [string, "null"]
+          format: date-time
+        is_due_complete:
+          type: boolean
+        is_archived:
+          type: boolean
+        is_watching:
+          type: boolean
 
     MoveCardRequest:
       type: object
@@ -453,6 +1057,38 @@ components:
           type: string
           format: uuid
         new_position:
+          type: string
+
+    CopyCardRequest:
+      type: object
+      properties:
+        target_column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        position:
+          type: string
+        keep_checklists:
+          type: boolean
+        keep_labels:
+          type: boolean
+        keep_members:
+          type: boolean
+        keep_attachments:
+          type: boolean
+
+    CreateCommentRequest:
+      type: object
+      required: [content]
+      properties:
+        author_id:
+          type: string
+        author_name:
+          type: string
+        author_initials:
+          type: string
+        content:
           type: string
 
     AIDecomposeRequest:
@@ -486,6 +1122,74 @@ components:
                 type: string
               position:
                 type: string
+        estimated_story_points:
+          type: integer
+        suggested_priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        potential_risks:
+          type: array
+          items:
+            type: string
+
+    AISuggestCardEnrichmentRequest:
+      type: object
+      required: [card_title]
+      properties:
+        card_title:
+          type: string
+        card_description:
+          type: string
+        board_context:
+          type: array
+          items:
+            type: string
+        available_labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Label"
+
+    AISuggestCardEnrichmentResponse:
+      type: object
+      required:
+        - structured_description
+        - suggested_checklists
+        - suggested_labels
+        - estimated_story_points
+        - suggested_priority
+        - potential_risks
+      properties:
+        structured_description:
+          type: string
+        suggested_checklists:
+          type: array
+          items:
+            type: object
+            required: [title, position, items]
+            properties:
+              title:
+                type: string
+              position:
+                type: string
+              items:
+                type: array
+                items:
+                  type: object
+                  required: [title, position]
+                  properties:
+                    title:
+                      type: string
+                    position:
+                      type: string
+        suggested_labels:
+          type: array
+          items:
+            type: object
+            required: [name, color]
+            properties:
+              name:
+                type: string
+              color:
+                $ref: "#/components/schemas/LabelColorEnum"
         estimated_story_points:
           type: integer
         suggested_priority:
