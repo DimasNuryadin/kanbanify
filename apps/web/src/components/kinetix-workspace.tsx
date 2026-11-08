@@ -3,24 +3,42 @@
 import React, { useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Board,
+  Card,
   CopyCardRequest,
   CopyColumnRequest,
+  CreateAutomationRuleRequest,
+  CreateBoardRequest,
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateWorkspaceRequest,
+  UpdateAutomationRuleRequest,
   UpdateBoardRequest,
   UpdateCardRequest,
   UpdateColumnRequest,
+  WorkspaceWithBoards,
 } from "@kinetix/contracts";
 import { apiClient } from "@/lib/api-client";
-import { createDeterministicUuid, mockApi, SEED_BOARD_ID } from "@/lib/mock-data";
+import {
+  createDeterministicUuid,
+  INITIAL_SEED_BOARDS,
+  mockApi,
+  SEED_BOARD_ID,
+} from "@/lib/mock-data";
 import { boardWsClient } from "@/lib/ws-client";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import {
   getDueDateStatus,
   resolveBoardCanvasClasses,
 } from "@/lib/trello-theme";
+import {
+  ButlerExecutionToast,
+  evaluateAndExecuteAutomations,
+} from "@/lib/automation-engine";
+
 import { WorkspaceHeader } from "./workspace-header";
+import { WorkspaceSidebar } from "./workspace-sidebar";
 import { KanbanBoard } from "./kanban-board";
 import { TableView } from "./table-view";
 import { CalendarView } from "./calendar-view";
@@ -29,6 +47,11 @@ import { ArchivedItemsDrawer } from "./archived-items-drawer";
 import { BoardMenuDrawer } from "./board-menu-drawer";
 import { CommandPalette } from "./command-palette";
 import { CreateCardModal } from "./create-card-modal";
+import { CreateBoardModal } from "./create-board-modal";
+import { CreateWorkspaceModal } from "./create-workspace-modal";
+import { BoardTemplatesModal } from "./board-templates-modal";
+import { ButlerAutomationModal } from "./butler-automation-modal";
+import { ButlerToastContainer } from "./butler-toast";
 
 export function KinetixWorkspace() {
   const queryClient = useQueryClient();
@@ -59,6 +82,24 @@ export function KinetixWorkspace() {
   const removeColumn = useWorkspaceStore((s) => s.removeColumn);
   const appendCardComment = useWorkspaceStore((s) => s.appendCardComment);
 
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const setWorkspaces = useWorkspaceStore((s) => s.setWorkspaces);
+  const currentWorkspaceId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const setCurrentWorkspaceId = useWorkspaceStore(
+    (s) => s.setCurrentWorkspaceId
+  );
+  const boardSummaries = useWorkspaceStore((s) => s.boardSummaries);
+  const setBoardSummaries = useWorkspaceStore((s) => s.setBoardSummaries);
+  const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar);
+
+  const setAutomationRules = useWorkspaceStore((s) => s.setAutomationRules);
+  const upsertAutomationRule = useWorkspaceStore((s) => s.upsertAutomationRule);
+  const removeAutomationRule = useWorkspaceStore((s) => s.removeAutomationRule);
+
+  const toasts = useWorkspaceStore((s) => s.toasts);
+  const addToast = useWorkspaceStore((s) => s.addToast);
+  const removeToast = useWorkspaceStore((s) => s.removeToast);
+
   const handleFallbackToMock = useCallback(
     (reason: string) => {
       setUseMockMode(
@@ -84,6 +125,70 @@ export function KinetixWorkspace() {
       setBoard(fetchedBoard);
     }
   }, [fetchedBoard, setBoard]);
+
+  // Fetch Board Templates
+  const { data: templates = [] } = useQuery({
+    queryKey: ["board-templates", useMockMode],
+    queryFn: () =>
+      apiClient.getBoardTemplates({
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      }),
+  });
+
+  // Fetch Workspaces
+  const { data: fetchedWorkspaces } = useQuery({
+    queryKey: ["workspaces", useMockMode],
+    queryFn: () =>
+      apiClient.getWorkspaces({
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      }),
+  });
+
+  useEffect(() => {
+    if (fetchedWorkspaces && fetchedWorkspaces.length > 0) {
+      setWorkspaces(fetchedWorkspaces);
+    }
+  }, [fetchedWorkspaces, setWorkspaces]);
+
+  // Fetch Board Summaries
+  const { data: fetchedSummaries } = useQuery({
+    queryKey: ["board-summaries", currentWorkspaceId, useMockMode],
+    queryFn: () =>
+      apiClient.getBoardSummaries({
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      }),
+  });
+
+  useEffect(() => {
+    if (fetchedSummaries && fetchedSummaries.length > 0) {
+      setBoardSummaries(fetchedSummaries);
+    }
+  }, [fetchedSummaries, setBoardSummaries]);
+
+  // Keyboard shortcut: '[' to toggle sidebar (unless focus is on an input/textarea)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "[") {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleSidebar]);
 
   // Connect WebSocket client for real-time sync
   useEffect(() => {
@@ -129,6 +234,34 @@ export function KinetixWorkspace() {
         setBoard(updatedBoard);
         queryClient.invalidateQueries({ queryKey: ["board"] });
       },
+      onAutomationTriggered: (data) => {
+        const cardTitle = data.card_id
+          ? board.cards.find((c) => c.id === data.card_id)?.title || "Card"
+          : "Card";
+        addToast({
+          id: createDeterministicUuid(),
+          ruleName: data.rule_name || "Butler Automation",
+          cardTitle,
+          actionSummary: data.action_types
+            .map((t) => t.toLowerCase().replace(/_/g, " "))
+            .join(" • "),
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+        });
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      },
+      onAutomationRuleCreated: (rule) => {
+        upsertAutomationRule(rule);
+      },
+      onAutomationRuleUpdated: (rule) => {
+        upsertAutomationRule(rule);
+      },
+      onAutomationRuleDeleted: (data) => {
+        removeAutomationRule(data.id);
+      },
     });
 
     return () => {
@@ -136,6 +269,7 @@ export function KinetixWorkspace() {
     };
   }, [
     board.id,
+    board.cards,
     useMockMode,
     setWsStatus,
     applyRemoteCardMove,
@@ -145,6 +279,9 @@ export function KinetixWorkspace() {
     upsertColumn,
     appendCardComment,
     setBoard,
+    upsertAutomationRule,
+    removeAutomationRule,
+    addToast,
     queryClient,
   ]);
 
@@ -207,6 +344,62 @@ export function KinetixWorkspace() {
     searchQuery,
   ]);
 
+  // Board Switching Handler
+  const handleSelectBoard = useCallback(
+    async (boardId: string) => {
+      try {
+        const target = await apiClient.getBoard(boardId, {
+          useMock: useMockMode,
+          onFallbackToMock: handleFallbackToMock,
+        });
+        setBoard(target);
+      } catch (err) {
+        console.error("Failed to switch board:", err);
+      }
+    },
+    [useMockMode, handleFallbackToMock, setBoard]
+  );
+
+  // Board Star Toggle Handler
+  const handleToggleStarBoard = useCallback(
+    async (boardId: string, currentStarred: boolean) => {
+      const nextStarred = !currentStarred;
+      if (board.id === boardId) {
+        setBoard({ ...board, is_starred: nextStarred });
+        await apiClient.updateBoard(
+          boardId,
+          { is_starred: nextStarred },
+          {
+            useMock: useMockMode,
+            onFallbackToMock: handleFallbackToMock,
+          }
+        );
+      } else {
+        await apiClient.updateBoard(
+          boardId,
+          { is_starred: nextStarred },
+          {
+            useMock: useMockMode,
+            onFallbackToMock: handleFallbackToMock,
+          }
+        );
+        setBoardSummaries(
+          boardSummaries.map((s) =>
+            s.id === boardId ? { ...s, is_starred: nextStarred } : s
+          )
+        );
+      }
+    },
+    [
+      board,
+      useMockMode,
+      handleFallbackToMock,
+      setBoard,
+      boardSummaries,
+      setBoardSummaries,
+    ]
+  );
+
   // Board Customization Handler
   const handleUpdateBoard = useCallback(
     async (payload: UpdateBoardRequest) => {
@@ -233,6 +426,89 @@ export function KinetixWorkspace() {
       setBoard(updated);
     },
     [board, setBoard, useMockMode, handleFallbackToMock]
+  );
+
+  // Create New Board
+  const handleCreateBoard = useCallback(
+    async (payload: CreateBoardRequest) => {
+      const created = await apiClient.createBoard(payload, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      setBoard(created);
+      queryClient.invalidateQueries({ queryKey: ["board-summaries"] });
+    },
+    [useMockMode, handleFallbackToMock, setBoard, queryClient]
+  );
+
+  // Create New Workspace
+  const handleCreateWorkspace = useCallback(
+    async (payload: CreateWorkspaceRequest) => {
+      const created = await apiClient.createWorkspace(payload, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      const wsWithBoards: WorkspaceWithBoards = {
+        ...created,
+        boards: [],
+      };
+      setWorkspaces([...workspaces, wsWithBoards]);
+      setCurrentWorkspaceId(created.id);
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+    [
+      useMockMode,
+      handleFallbackToMock,
+      workspaces,
+      setWorkspaces,
+      setCurrentWorkspaceId,
+      queryClient,
+    ]
+  );
+
+  // Butler Automation CRUD & AI Generation Handlers
+  const handleCreateAutomationRule = useCallback(
+    async (payload: CreateAutomationRuleRequest) => {
+      const created = await apiClient.createAutomation(board.id, payload, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      upsertAutomationRule(created);
+    },
+    [board.id, useMockMode, handleFallbackToMock, upsertAutomationRule]
+  );
+
+  const handleUpdateAutomationRule = useCallback(
+    async (ruleId: string, payload: UpdateAutomationRuleRequest) => {
+      const updated = await apiClient.updateAutomation(ruleId, payload, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      upsertAutomationRule(updated);
+    },
+    [useMockMode, handleFallbackToMock, upsertAutomationRule]
+  );
+
+  const handleDeleteAutomationRule = useCallback(
+    async (ruleId: string) => {
+      removeAutomationRule(ruleId);
+      await apiClient.deleteAutomation(ruleId, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+    },
+    [useMockMode, handleFallbackToMock, removeAutomationRule]
+  );
+
+  const handleAiGenerateAutomationRule = useCallback(
+    async (prompt: string) => {
+      const parsed = await apiClient.aiGenerateAutomation(board.id, prompt, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      return parsed;
+    },
+    [board.id, useMockMode, handleFallbackToMock]
   );
 
   // Column (List) Handlers
@@ -331,7 +607,7 @@ export function KinetixWorkspace() {
     ]
   );
 
-  // Card Handlers
+  // Card Handlers with Runtime Automation Evaluation
   const handlePersistCardMove = useCallback(
     async (
       cardId: string,
@@ -353,8 +629,57 @@ export function KinetixWorkspace() {
         }
       );
       upsertCard(updated);
+
+      // Evaluate active Butler automations for card move
+      const targetCol = board.columns.find((c) => c.id === targetColumnId);
+      const card = board.cards.find((c) => c.id === cardId);
+      if (card) {
+        const movedCard: Card = {
+          ...card,
+          column_id: targetColumnId,
+          position: newPosition,
+        };
+        const autoResult = evaluateAndExecuteAutomations({
+          board,
+          card: movedCard,
+          event: {
+            type: "WHEN_CARD_MOVED_TO_COLUMN",
+            targetColumnId,
+            targetColumnTitle: targetCol?.title,
+          },
+        });
+        if (autoResult.toasts.length > 0) {
+          for (const t of autoResult.toasts) {
+            addToast(t);
+          }
+          upsertCard(autoResult.updatedCard);
+          setAutomationRules(autoResult.updatedRules);
+          if (autoResult.newActivities.length > 0) {
+            setBoard({
+              ...board,
+              cards: board.cards.map((c) =>
+                c.id === autoResult.updatedCard.id ? autoResult.updatedCard : c
+              ),
+              activities: [...autoResult.newActivities, ...board.activities],
+              automation_rules: autoResult.updatedRules,
+            });
+          }
+          if (useMockMode) {
+            mockApi.updateCard(cardId, autoResult.updatedCard);
+          }
+        }
+      }
     },
-    [optimisticMoveCard, useMockMode, handleFallbackToMock, upsertCard]
+    [
+      optimisticMoveCard,
+      useMockMode,
+      handleFallbackToMock,
+      upsertCard,
+      board,
+      addToast,
+      setAutomationRules,
+      setBoard,
+    ]
   );
 
   const handleCreateCard = useCallback(
@@ -364,8 +689,44 @@ export function KinetixWorkspace() {
         onFallbackToMock: handleFallbackToMock,
       });
       upsertCard(created);
+
+      // Evaluate active Butler automations for card creation
+      const autoResult = evaluateAndExecuteAutomations({
+        board,
+        card: created,
+        event: { type: "WHEN_CARD_CREATED" },
+      });
+      if (autoResult.toasts.length > 0) {
+        for (const t of autoResult.toasts) {
+          addToast(t);
+        }
+        upsertCard(autoResult.updatedCard);
+        setAutomationRules(autoResult.updatedRules);
+        if (autoResult.newActivities.length > 0) {
+          setBoard({
+            ...board,
+            cards: [
+              ...board.cards.filter((c) => c.id !== autoResult.updatedCard.id),
+              autoResult.updatedCard,
+            ],
+            activities: [...autoResult.newActivities, ...board.activities],
+            automation_rules: autoResult.updatedRules,
+          });
+        }
+        if (useMockMode) {
+          mockApi.updateCard(autoResult.updatedCard.id, autoResult.updatedCard);
+        }
+      }
     },
-    [board.id, useMockMode, handleFallbackToMock, upsertCard]
+    [
+      board,
+      useMockMode,
+      handleFallbackToMock,
+      upsertCard,
+      addToast,
+      setAutomationRules,
+      setBoard,
+    ]
   );
 
   const handleUpdateCard = useCallback(
@@ -383,8 +744,108 @@ export function KinetixWorkspace() {
         onFallbackToMock: handleFallbackToMock,
       });
       upsertCard(updated);
+
+      if (existing) {
+        let currentCard = updated;
+        const allToasts: ButlerExecutionToast[] = [];
+        let finalRules = board.automation_rules ?? [];
+        const newActivities: Board["activities"] = [];
+
+        // 1. Checklist completed trigger check
+        if (payload.checklists) {
+          const wasCompleted = (existing.checklists ?? []).some(
+            (cl) => cl.items.length > 0 && cl.items.every((i) => i.is_completed)
+          );
+          const isNowCompleted = (payload.checklists ?? []).some(
+            (cl) => cl.items.length > 0 && cl.items.every((i) => i.is_completed)
+          );
+          if (!wasCompleted && isNowCompleted) {
+            const autoRes = evaluateAndExecuteAutomations({
+              board,
+              card: currentCard,
+              event: { type: "WHEN_CHECKLIST_COMPLETED" },
+            });
+            if (autoRes.toasts.length > 0) {
+              currentCard = autoRes.updatedCard;
+              finalRules = autoRes.updatedRules;
+              newActivities.push(...autoRes.newActivities);
+              allToasts.push(...autoRes.toasts);
+            }
+          }
+        }
+
+        // 2. Priority changed trigger check
+        if (payload.priority && payload.priority !== existing.priority) {
+          const autoRes = evaluateAndExecuteAutomations({
+            board,
+            card: currentCard,
+            event: {
+              type: "WHEN_PRIORITY_CHANGED",
+              priority: payload.priority,
+            },
+          });
+          if (autoRes.toasts.length > 0) {
+            currentCard = autoRes.updatedCard;
+            finalRules = autoRes.updatedRules;
+            newActivities.push(...autoRes.newActivities);
+            allToasts.push(...autoRes.toasts);
+          }
+        }
+
+        // 3. Label added trigger check
+        if (payload.label_ids) {
+          const addedLabelIds = payload.label_ids.filter(
+            (id) => !(existing.label_ids ?? []).includes(id)
+          );
+          for (const labelId of addedLabelIds) {
+            const autoRes = evaluateAndExecuteAutomations({
+              board,
+              card: currentCard,
+              event: {
+                type: "WHEN_LABEL_ADDED",
+                labelId,
+              },
+            });
+            if (autoRes.toasts.length > 0) {
+              currentCard = autoRes.updatedCard;
+              finalRules = autoRes.updatedRules;
+              newActivities.push(...autoRes.newActivities);
+              allToasts.push(...autoRes.toasts);
+            }
+          }
+        }
+
+        if (allToasts.length > 0) {
+          for (const t of allToasts) {
+            addToast(t);
+          }
+          upsertCard(currentCard);
+          setAutomationRules(finalRules);
+          if (newActivities.length > 0) {
+            setBoard({
+              ...board,
+              cards: board.cards.map((c) =>
+                c.id === currentCard.id ? currentCard : c
+              ),
+              activities: [...newActivities, ...board.activities],
+              automation_rules: finalRules,
+            });
+          }
+          if (useMockMode) {
+            mockApi.updateCard(cardId, currentCard);
+          }
+        }
+      }
     },
-    [board.cards, upsertCard, useMockMode, handleFallbackToMock]
+    [
+      board,
+      upsertCard,
+      useMockMode,
+      handleFallbackToMock,
+      addToast,
+      setAutomationRules,
+      setBoard,
+    ]
   );
 
   const handleCopyCard = useCallback(
@@ -454,7 +915,7 @@ export function KinetixWorkspace() {
     async (nextUseMock: boolean) => {
       if (nextUseMock) {
         setUseMockMode(true, null);
-        const mockBoard = await mockApi.getBoard(SEED_BOARD_ID);
+        const mockBoard = await mockApi.getBoard(board.id || SEED_BOARD_ID);
         setBoard(mockBoard);
         return;
       }
@@ -470,13 +931,26 @@ export function KinetixWorkspace() {
 
       setUseMockMode(false, null);
     },
-    [setUseMockMode, setBoard]
+    [board.id, setUseMockMode, setBoard]
   );
 
   const handleResetMockData = useCallback(() => {
     const fresh = mockApi.resetToSeed();
     setBoard(fresh);
-  }, [setBoard]);
+    setBoardSummaries(
+      INITIAL_SEED_BOARDS.map((b) => ({
+        id: b.id,
+        workspace_id: b.workspace_id,
+        title: b.title,
+        is_starred: b.is_starred,
+        background: b.background,
+        card_count: b.cards.filter((c) => !c.is_archived).length,
+        updated_at: b.created_at,
+        created_at: b.created_at,
+        description: b.description,
+      }))
+    );
+  }, [setBoard, setBoardSummaries]);
 
   const canvasSurface = resolveBoardCanvasClasses(board.background);
 
@@ -491,31 +965,41 @@ export function KinetixWorkspace() {
         onUpdateBoard={handleUpdateBoard}
       />
 
-      <main className="mx-auto max-w-[1640px] px-4 py-5 sm:px-6">
-        {viewMode === "kanban" ? (
-          <KanbanBoard
-            filteredCards={filteredCards}
-            onPersistCardMove={handlePersistCardMove}
-            onPersistColumnMove={handlePersistColumnMove}
-            onCreateCard={handleCreateCard}
-            onUpdateCard={handleUpdateCard}
-            onCreateColumn={handleCreateColumn}
-            onUpdateColumn={handleUpdateColumn}
-            onCopyColumn={handleCopyColumn}
-          />
-        ) : viewMode === "table" ? (
-          <TableView
-            filteredCards={filteredCards}
-            onPersistCardMove={handlePersistCardMove}
-          />
-        ) : (
-          <CalendarView
-            filteredCards={filteredCards}
-            onUpdateCard={handleUpdateCard}
-          />
-        )}
-      </main>
+      <div className="flex min-h-[calc(100vh-65px)]">
+        {/* Collapsible Trello Multi-Board Sidebar */}
+        <WorkspaceSidebar
+          onSelectBoard={handleSelectBoard}
+          onToggleStarBoard={handleToggleStarBoard}
+        />
 
+        {/* Main Board View Canvas */}
+        <main className="min-w-0 flex-1 px-4 py-5 sm:px-6">
+          {viewMode === "kanban" ? (
+            <KanbanBoard
+              filteredCards={filteredCards}
+              onPersistCardMove={handlePersistCardMove}
+              onPersistColumnMove={handlePersistColumnMove}
+              onCreateCard={handleCreateCard}
+              onUpdateCard={handleUpdateCard}
+              onCreateColumn={handleCreateColumn}
+              onUpdateColumn={handleUpdateColumn}
+              onCopyColumn={handleCopyColumn}
+            />
+          ) : viewMode === "table" ? (
+            <TableView
+              filteredCards={filteredCards}
+              onPersistCardMove={handlePersistCardMove}
+            />
+          ) : (
+            <CalendarView
+              filteredCards={filteredCards}
+              onUpdateCard={handleUpdateCard}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* Drawers & Modals */}
       <CardDetailDrawer
         onUpdateCard={handleUpdateCard}
         onMoveCard={handlePersistCardMove}
@@ -535,9 +1019,34 @@ export function KinetixWorkspace() {
 
       <BoardMenuDrawer onUpdateBoard={handleUpdateBoard} />
 
-      <CommandPalette onToggleMockMode={handleToggleMockMode} />
+      <CommandPalette
+        onToggleMockMode={handleToggleMockMode}
+        onSelectBoard={handleSelectBoard}
+      />
 
       <CreateCardModal onCreateCard={handleCreateCard} />
+
+      <CreateBoardModal
+        templates={templates}
+        onCreateBoard={handleCreateBoard}
+      />
+
+      <CreateWorkspaceModal onCreateWorkspace={handleCreateWorkspace} />
+
+      <BoardTemplatesModal
+        templates={templates}
+        onCreateBoardFromTemplate={handleCreateBoard}
+      />
+
+      <ButlerAutomationModal
+        board={board}
+        onCreateRule={handleCreateAutomationRule}
+        onUpdateRule={handleUpdateAutomationRule}
+        onDeleteRule={handleDeleteAutomationRule}
+        onAiGenerateRule={handleAiGenerateAutomationRule}
+      />
+
+      <ButlerToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

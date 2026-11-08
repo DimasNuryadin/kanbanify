@@ -1,4 +1,8 @@
 import {
+  AutomationRule,
+  AutomationRuleSchema,
+  AutomationTriggeredEventData,
+  AutomationTriggeredEventDataSchema,
   Board,
   BoardSchema,
   Card,
@@ -35,6 +39,11 @@ export interface WSBoardHandlers {
   onColumnUpdated?: (column: Column) => void;
   onCommentAdded?: (comment: Comment) => void;
   onBoardUpdated?: (board: Board) => void;
+  onAutomationTriggered?: (data: AutomationTriggeredEventData) => void;
+  onAutomationRuleCreated?: (rule: AutomationRule) => void;
+  onAutomationRuleUpdated?: (rule: AutomationRule) => void;
+  onAutomationRuleDeleted?: (data: { id: string }) => void;
+  onBoardDeleted?: (data: { id: string }) => void;
 }
 
 export class BoardWebSocketClient {
@@ -175,6 +184,49 @@ export class BoardWebSocketClient {
               const board = BoardSchema.safeParse(data);
               if (board.success) {
                 this.handlers?.onBoardUpdated?.(board.data);
+              }
+              break;
+            }
+            case "AUTOMATION_TRIGGERED": {
+              const autoData = AutomationTriggeredEventDataSchema.safeParse(data);
+              if (autoData.success) {
+                this.handlers?.onAutomationTriggered?.(autoData.data);
+              }
+              break;
+            }
+            case "AUTOMATION_RULE_CREATED": {
+              const rule = AutomationRuleSchema.safeParse(data);
+              if (rule.success) {
+                this.handlers?.onAutomationRuleCreated?.(rule.data);
+              }
+              break;
+            }
+            case "AUTOMATION_RULE_UPDATED": {
+              const rule = AutomationRuleSchema.safeParse(data);
+              if (rule.success) {
+                this.handlers?.onAutomationRuleUpdated?.(rule.data);
+              }
+              break;
+            }
+            case "AUTOMATION_RULE_DELETED": {
+              if (
+                data &&
+                typeof data === "object" &&
+                "id" in data &&
+                typeof (data as { id: unknown }).id === "string"
+              ) {
+                this.handlers?.onAutomationRuleDeleted?.(data as { id: string });
+              }
+              break;
+            }
+            case "BOARD_DELETED": {
+              if (
+                data &&
+                typeof data === "object" &&
+                "id" in data &&
+                typeof (data as { id: unknown }).id === "string"
+              ) {
+                this.handlers?.onBoardDeleted?.(data as { id: string });
               }
               break;
             }

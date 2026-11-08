@@ -1,6 +1,14 @@
 import {
+  AIParseAutomationResponse,
+  AIParseAutomationResponseSchema,
+  AutomationRule,
+  AutomationRuleSchema,
   Board,
   BoardSchema,
+  BoardSummary,
+  BoardSummarySchema,
+  BoardTemplate,
+  BoardTemplateSchema,
   Card,
   CardSchema,
   Column,
@@ -11,16 +19,23 @@ import {
   CopyColumnRequest,
   CopyColumnResponse,
   CopyColumnResponseSchema,
+  CreateAutomationRuleRequest,
   CreateBoardRequest,
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateWorkspaceRequest,
   MoveCardRequest,
   MoveColumnRequest,
   StandardErrorSchema,
+  UpdateAutomationRuleRequest,
   UpdateBoardRequest,
   UpdateCardRequest,
   UpdateColumnRequest,
+  Workspace,
+  WorkspaceSchema,
+  WorkspaceWithBoards,
+  WorkspaceWithBoardsSchema,
 } from "@kinetix/contracts";
 import { mockApi } from "./mock-data";
 
@@ -459,6 +474,244 @@ export const apiClient = {
         err instanceof Error ? err.message : "AI Engine / API unreachable"
       );
       return mockApi.aiDecomposeCard(cardId);
+    }
+  },
+
+  async getWorkspaces(opts: ApiClientOptions): Promise<WorkspaceWithBoards[]> {
+    if (opts.useMock) {
+      return mockApi.listWorkspaces();
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/workspaces",
+        { method: "GET" },
+        (raw) =>
+          Array.isArray(raw)
+            ? raw.map((w) => WorkspaceWithBoardsSchema.parse(w))
+            : []
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.listWorkspaces();
+    }
+  },
+
+  async getWorkspace(
+    workspaceId: string,
+    opts: ApiClientOptions
+  ): Promise<WorkspaceWithBoards> {
+    if (opts.useMock) {
+      return mockApi.getWorkspace(workspaceId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/workspaces/${workspaceId}`,
+        { method: "GET" },
+        (raw) => WorkspaceWithBoardsSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.getWorkspace(workspaceId);
+    }
+  },
+
+  async createWorkspace(
+    payload: CreateWorkspaceRequest,
+    opts: ApiClientOptions
+  ): Promise<Workspace> {
+    if (opts.useMock) {
+      return mockApi.createWorkspace(payload);
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/workspaces",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => WorkspaceSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.createWorkspace(payload);
+    }
+  },
+
+  async getBoardTemplates(opts: ApiClientOptions): Promise<BoardTemplate[]> {
+    if (opts.useMock) {
+      return mockApi.getBoardTemplates();
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/board-templates",
+        { method: "GET" },
+        (raw) =>
+          Array.isArray(raw)
+            ? raw.map((t) => BoardTemplateSchema.parse(t))
+            : []
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.getBoardTemplates();
+    }
+  },
+
+  async listBoards(opts: ApiClientOptions): Promise<Board[]> {
+    if (opts.useMock) {
+      return mockApi.listBoards();
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/boards",
+        { method: "GET" },
+        (raw) =>
+          Array.isArray(raw) ? raw.map((b) => BoardSchema.parse(b)) : []
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.listBoards();
+    }
+  },
+
+  async getBoardSummaries(opts: ApiClientOptions): Promise<BoardSummary[]> {
+    if (opts.useMock) {
+      return mockApi.getBoardSummaries();
+    }
+    try {
+      const workspaces = await this.getWorkspaces(opts);
+      return workspaces.flatMap((w) => w.boards);
+    } catch {
+      return mockApi.getBoardSummaries();
+    }
+  },
+
+  async getAutomations(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<AutomationRule[]> {
+    if (opts.useMock) {
+      return mockApi.getAutomations(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/automations`,
+        { method: "GET" },
+        (raw) =>
+          Array.isArray(raw)
+            ? raw.map((r) => AutomationRuleSchema.parse(r))
+            : []
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.getAutomations(boardId);
+    }
+  },
+
+  async createAutomation(
+    boardId: string,
+    payload: CreateAutomationRuleRequest,
+    opts: ApiClientOptions
+  ): Promise<AutomationRule> {
+    if (opts.useMock) {
+      return mockApi.createAutomation(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/automations`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => AutomationRuleSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.createAutomation(boardId, payload);
+    }
+  },
+
+  async updateAutomation(
+    ruleId: string,
+    payload: UpdateAutomationRuleRequest,
+    opts: ApiClientOptions
+  ): Promise<AutomationRule> {
+    if (opts.useMock) {
+      return mockApi.updateAutomation(ruleId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/automations/${ruleId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => AutomationRuleSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.updateAutomation(ruleId, payload);
+    }
+  },
+
+  async deleteAutomation(
+    ruleId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; deleted: boolean }> {
+    if (opts.useMock) {
+      return mockApi.deleteAutomation(ruleId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/automations/${ruleId}`,
+        { method: "DELETE" },
+        () => ({ id: ruleId, deleted: true })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Backend API unreachable"
+      );
+      return mockApi.deleteAutomation(ruleId);
+    }
+  },
+
+  async aiGenerateAutomation(
+    boardId: string,
+    prompt: string,
+    opts: ApiClientOptions
+  ): Promise<AIParseAutomationResponse> {
+    if (opts.useMock) {
+      return mockApi.parseAutomationWithAi(boardId, prompt);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/automations/ai-generate`,
+        {
+          method: "POST",
+          body: JSON.stringify({ prompt }),
+        },
+        (raw) => AIParseAutomationResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "AI Automation builder unreachable"
+      );
+      return mockApi.parseAutomationWithAi(boardId, prompt);
     }
   },
 };

@@ -12,6 +12,7 @@ import {
   Laptop,
   Moon,
   Palette,
+  PanelLeft,
   Plus,
   Radio,
   RotateCcw,
@@ -21,6 +22,7 @@ import {
   Sun,
   Table2,
   X,
+  Zap,
 } from "lucide-react";
 import { Priority, UpdateBoardRequest } from "@kinetix/contracts";
 import {
@@ -89,6 +91,13 @@ export function WorkspaceHeader({
     (s) => s.setArchivedDrawerOpen
   );
   const setBoardMenuOpen = useWorkspaceStore((s) => s.setBoardMenuOpen);
+  const isSidebarOpen = useWorkspaceStore((s) => s.isSidebarOpen);
+  const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar);
+  const setAutomationModalOpen = useWorkspaceStore(
+    (s) => s.setAutomationModalOpen
+  );
+  const automationRules = useWorkspaceStore((s) => s.automationRules);
+  const activeRulesCount = automationRules.filter((r) => r.is_enabled).length;
   const lastMoveMetrics = useWorkspaceStore((s) => s.lastMoveMetrics);
 
   // Inline Board Title Editing
@@ -166,6 +175,19 @@ export function WorkspaceHeader({
       <div className="mx-auto flex max-w-[1640px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
         {/* Left: Brand, Inline-Editable Board Title, Star Toggle & O(1) Telemetry */}
         <div className="flex items-center gap-3">
+          {/* Sidebar Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title={isSidebarOpen ? "Collapse sidebar ([)" : "Expand sidebar ([)"}
+            className="flex items-center gap-1 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-white dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:border-zinc-700"
+          >
+            <PanelLeft className="h-4 w-4" />
+            <kbd className="hidden rounded border border-zinc-200 bg-white px-1 py-0.2 font-mono text-[9px] font-medium text-zinc-400 sm:inline dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
+              [
+            </kbd>
+          </button>
+
           <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-indigo-500/30 bg-gradient-to-br from-indigo-500/20 via-violet-500/15 to-transparent text-indigo-600 shadow-xs dark:border-indigo-400/30 dark:text-indigo-400">
             <Sparkles className="h-4 w-4" />
           </div>
@@ -362,6 +384,20 @@ export function WorkspaceHeader({
                 {archivedCount}
               </span>
             )}
+          </button>
+
+          {/* Trello Butler Automation Center Button */}
+          <button
+            type="button"
+            onClick={() => setAutomationModalOpen(true)}
+            title="Open Trello Butler Automation Center"
+            className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-500/20 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300 dark:hover:bg-amber-400/20"
+          >
+            <Zap className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+            <span className="hidden sm:inline">Automation</span>
+            <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 font-mono text-[10px] font-bold text-amber-800 dark:bg-amber-400/20 dark:text-amber-200">
+              {activeRulesCount}
+            </span>
           </button>
 
           {/* Board Menu / Background Picker Button */}
