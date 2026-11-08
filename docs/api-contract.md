@@ -1,4 +1,4 @@
-# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 2: Full Trello Parity)
+# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 3: Multi-Board Workspaces, Templates & Butler Automation)
 
 All payloads MUST strictly validate against `packages/contracts/index.ts` (Zod) and `packages/contracts/schemas.py` (Pydantic v2).
 
@@ -46,7 +46,128 @@ All error responses across `apps/api` (`8000`) and `services/ai-engine` (`8001`)
 
 ## 3. Core API (`apps/api` — Fastify Port `8000`)
 
-### 3.1 Board & Customization Endpoints
+### 3.1 Workspaces & Multi-Board Sidebar Navigation Endpoints
+
+#### `GET /api/v1/workspaces` — List Workspaces with Board Summaries
+Fetches all workspaces along with lightweight `BoardSummarySchema[]` for instant left sidebar navigation and board switching without loading heavy board payloads.
+- **Response `200 OK` (`WorkspaceWithBoardsSchema[]`)**:
+```json
+[
+  {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "Kinetix Engineering",
+    "slug": "kinetix-engineering",
+    "description": "Core workspace for high-velocity software engineering and releases",
+    "logo_color": "#6366f1",
+    "created_at": "2026-11-08T00:00:00.000Z",
+    "boards": [
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "workspace_id": "22222222-2222-4222-8222-222222222222",
+        "title": "Kinetix Platform Launch",
+        "is_starred": true,
+        "background": {
+          "type": "gradient",
+          "value": "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"
+        },
+        "card_count": 14,
+        "updated_at": "2026-11-08T10:05:00.000Z",
+        "created_at": "2026-11-08T10:00:00.000Z",
+        "description": "High-performance real-time Trello & AI workspace"
+      }
+    ]
+  }
+]
+```
+
+#### `POST /api/v1/workspaces` — Create Workspace
+- **Request Body (`CreateWorkspaceRequestSchema`)**:
+```json
+{
+  "name": "Product Design",
+  "slug": "product-design",
+  "description": "Design systems, prototypes, and user experience research",
+  "logo_color": "#ec4899"
+}
+```
+- **Response `201 Created` (`WorkspaceSchema`)**:
+```json
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "name": "Product Design",
+  "slug": "product-design",
+  "description": "Design systems, prototypes, and user experience research",
+  "logo_color": "#ec4899",
+  "created_at": "2026-11-08T11:00:00.000Z"
+}
+```
+
+#### `GET /api/v1/workspaces/:workspaceId` — Get Workspace Details
+- **Response `200 OK` (`WorkspaceWithBoardsSchema`)**
+
+---
+
+### 3.2 Board Templates Endpoints
+
+#### `GET /api/v1/board-templates` — List Curated Board Templates
+Returns curated board templates across Engineering, Marketing, Product, and Personal Kanban.
+- **Response `200 OK` (`BoardTemplateSchema[]`)**:
+```json
+[
+  {
+    "id": "template-engineering-sprint",
+    "name": "Engineering Sprint",
+    "description": "Agile 2-week sprint board with Backlog, In Progress, Review, and Done columns with Butler automation.",
+    "category": "ENGINEERING",
+    "background": {
+      "type": "gradient",
+      "value": "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"
+    },
+    "default_columns": ["Backlog", "In Progress", "Review", "Done"],
+    "sample_cards_count": 5
+  },
+  {
+    "id": "template-marketing-launch",
+    "name": "Marketing Launch",
+    "description": "Campaign pipeline for content creation, asset review, approvals, and scheduled deployment.",
+    "category": "MARKETING",
+    "background": {
+      "type": "gradient",
+      "value": "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%)"
+    },
+    "default_columns": ["Ideas", "Drafting", "Creative Review", "Scheduled", "Published"],
+    "sample_cards_count": 4
+  },
+  {
+    "id": "template-product-roadmap",
+    "name": "Product Roadmap",
+    "description": "Quarterly strategic roadmap tracking feature discovery, validation, active builds, and releases.",
+    "category": "PRODUCT",
+    "background": {
+      "type": "gradient",
+      "value": "linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)"
+    },
+    "default_columns": ["Discovery", "Planned Q1", "Planned Q2", "In Development", "Shipped"],
+    "sample_cards_count": 6
+  },
+  {
+    "id": "template-personal-kanban",
+    "name": "Personal Kanban",
+    "description": "Simple WIP-limited personal productivity board for daily focus, todos, and weekly review.",
+    "category": "PERSONAL",
+    "background": {
+      "type": "gradient",
+      "value": "linear-gradient(135deg, #18181b 0%, #27272a 50%, #3f3f46 100%)"
+    },
+    "default_columns": ["To Do", "Doing (Today)", "Waiting / On Hold", "Done"],
+    "sample_cards_count": 3
+  }
+]
+```
+
+---
+
+### 3.3 Board & Customization Endpoints
 
 #### `GET /api/v1/boards` — List Boards
 - **Response `200 OK` (`BoardSchema[]`)**:
@@ -67,30 +188,32 @@ All error responses across `apps/api` (`8000`) and `services/ai-engine` (`8001`)
     "labels": [],
     "members": [],
     "activities": [],
+    "automation_rules": [],
     "created_at": "2026-11-08T10:00:00.000Z"
   }
 ]
 ```
 
-#### `POST /api/v1/boards` — Create Board
-Auto-creates 4 default columns (`Backlog` `"a0"`, `In Progress` `"a1"`, `Review` `"a2"`, `Done` `"a3"`), 6 default Trello color labels (`DEFAULT_BOARD_LABELS`), and pre-seeded team members (`DEFAULT_BOARD_MEMBERS`).
+#### `POST /api/v1/boards` — Create Board (With Optional Template & Butler Rules)
+If `template_id` is provided, automatically pre-populates template columns, default labels, sample cards, and default Butler automation rules.
 - **Request Body (`CreateBoardRequestSchema`)**:
 ```json
 {
   "workspace_id": "22222222-2222-4222-8222-222222222222",
-  "title": "Kinetix Platform Launch",
-  "description": "Core roadmap and sprint execution board",
+  "title": "Q1 2027 Engineering Sprint",
+  "description": "Sprint board pre-configured from Engineering Sprint template",
   "is_starred": false,
   "background": {
     "type": "gradient",
     "value": "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"
-  }
+  },
+  "template_id": "template-engineering-sprint"
 }
 ```
 - **Response `201 Created` (`BoardSchema`)**
 
 #### `GET /api/v1/boards/:boardId` — Get Full Board State
-Returns board with `columns` and `cards` sorted lexicographically by `position`, along with `labels`, `members`, and `activities`.
+Returns board with `columns` and `cards` sorted lexicographically by `position`, along with `labels`, `members`, `activities`, and `automation_rules`.
 - **Response `200 OK` (`BoardSchema`)**:
 ```json
 {
@@ -114,87 +237,51 @@ Returns board with `columns` and `cards` sorted lexicographically by `position`,
       "is_archived": false
     }
   ],
-  "cards": [
+  "cards": [],
+  "labels": [],
+  "members": [],
+  "activities": [],
+  "automation_rules": [
     {
-      "id": "44444444-4444-4444-8444-444444444444",
+      "id": "66666666-6666-4666-8666-666666666661",
       "board_id": "11111111-1111-4111-8111-111111111111",
-      "column_id": "33333333-3333-4333-8333-333333333331",
-      "title": "Implement OAuth2 PKCE flow",
-      "description": "Support GitHub and Google providers",
-      "position": "a0",
-      "priority": "HIGH",
-      "story_points": 5,
-      "tags": ["auth", "security"],
-      "subtasks": [
-        {
-          "id": "55555555-5555-4555-8555-555555555555",
-          "title": "Configure callback routes",
-          "is_completed": false,
-          "position": "a0"
-        }
-      ],
-      "blocked_by_card_ids": [],
-      "due_date": "2026-11-15T00:00:00.000Z",
-      "updated_at": "2026-11-08T10:05:00.000Z",
-      "cover": {
-        "type": "color",
-        "value": "#3b82f6",
-        "size": "normal"
+      "name": "Auto-Complete & Tag Done Cards",
+      "description": "When card is moved to Done, mark due date as complete and add Ship Ready label",
+      "is_enabled": true,
+      "trigger": {
+        "type": "WHEN_CARD_MOVED_TO_COLUMN",
+        "column_id": null,
+        "column_title_match": "Done",
+        "priority": null,
+        "label_id": null
       },
-      "label_ids": ["77777777-7777-4777-8777-777777777771"],
-      "member_ids": ["88888888-8888-4888-8888-888888888881"],
-      "checklists": [
+      "actions": [
         {
-          "id": "99999999-9999-4999-8999-999999999991",
-          "title": "Implementation Steps",
-          "position": "a0",
-          "items": [
-            {
-              "id": "55555555-5555-4555-8555-555555555555",
-              "title": "Configure callback routes",
-              "is_completed": false,
-              "position": "a0",
-              "due_date": null,
-              "assignee_id": "88888888-8888-4888-8888-888888888881"
-            }
-          ]
+          "type": "MARK_DUE_DATE_COMPLETE",
+          "due_complete_value": true,
+          "member_id": null,
+          "label_id": null,
+          "priority": null,
+          "target_column_id": null,
+          "checklist_title": null,
+          "checklist_items": null,
+          "comment_text": null
+        },
+        {
+          "type": "ADD_LABEL",
+          "label_id": "77777777-7777-4777-8777-777777777771",
+          "member_id": null,
+          "priority": null,
+          "target_column_id": null,
+          "checklist_title": null,
+          "checklist_items": null,
+          "comment_text": null,
+          "due_complete_value": null
         }
       ],
-      "comments": [],
-      "attachments": [],
-      "start_date": "2026-11-08T00:00:00.000Z",
-      "is_due_complete": false,
-      "is_archived": false,
-      "is_watching": true
-    }
-  ],
-  "labels": [
-    {
-      "id": "77777777-7777-4777-8777-777777777771",
-      "board_id": "11111111-1111-4111-8111-111111111111",
-      "name": "Ship Ready",
-      "color": "green"
-    }
-  ],
-  "members": [
-    {
-      "id": "88888888-8888-4888-8888-888888888881",
-      "name": "Alex Rivera",
-      "email": "alex@kinetix.dev",
-      "avatar_url": null,
-      "initials": "AR",
-      "color": "#3b82f6"
-    }
-  ],
-  "activities": [
-    {
-      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
-      "board_id": "11111111-1111-4111-8111-111111111111",
-      "card_id": "44444444-4444-4444-8444-444444444444",
-      "actor_name": "Alex Rivera",
-      "action_type": "CARD_CREATED",
-      "description": "added Implement OAuth2 PKCE flow to Backlog",
-      "created_at": "2026-11-08T10:05:00.000Z"
+      "execution_count": 4,
+      "last_triggered_at": "2026-11-08T10:15:00.000Z",
+      "created_at": "2026-11-08T00:00:00.000Z"
     }
   ],
   "created_at": "2026-11-08T10:00:00.000Z"
@@ -206,27 +293,29 @@ Update board `title`, `description`, `is_starred`, `background`, or manage board
 - **Request Body (`UpdateBoardRequestSchema`)**:
 ```json
 {
-  "title": "Kinetix v2 Workspace",
+  "title": "Kinetix v3 Workspace",
   "is_starred": true,
   "background": {
     "type": "gradient",
     "value": "linear-gradient(135deg, #090d16 0%, #1e293b 100%)"
-  },
-  "labels": [
-    {
-      "id": "77777777-7777-4777-8777-777777777771",
-      "board_id": "11111111-1111-4111-8111-111111111111",
-      "name": "Ship Ready",
-      "color": "green"
-    }
-  ]
+  }
 }
 ```
 - **Response `200 OK` (`BoardSchema`)**
 
+#### `DELETE /api/v1/boards/:boardId` — Delete Board
+Deletes a board and its associated columns, cards, activities, and automation rules. Broadcasts `BOARD_DELETED` via WebSocket.
+- **Response `200 OK`**:
+```json
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "deleted": true
+}
+```
+
 ---
 
-### 3.2 Column (Trello List) Management Endpoints
+### 3.4 Column (Trello List) Management Endpoints
 
 #### `POST /api/v1/boards/:boardId/columns` — Create Column
 Broadcasts `COLUMN_CREATED` via WebSocket.
@@ -239,18 +328,7 @@ Broadcasts `COLUMN_CREATED` via WebSocket.
   "color": "#8b5cf6"
 }
 ```
-- **Response `201 Created` (`ColumnSchema`)**:
-```json
-{
-  "id": "33333333-3333-4333-8333-333333333339",
-  "board_id": "11111111-1111-4111-8111-111111111111",
-  "title": "QA Verification",
-  "position": "a2V",
-  "wip_limit": 3,
-  "color": "#8b5cf6",
-  "is_archived": false
-}
-```
+- **Response `201 Created` (`ColumnSchema`)**
 
 #### `PATCH /api/v1/columns/:columnId` — Update Column
 Rename list `title`, set list `color`, update `wip_limit`, or archive list (`is_archived`). Broadcasts `COLUMN_UPDATED` via WebSocket.
@@ -276,7 +354,7 @@ Reorder list horizontally using fractional index `new_position`. Broadcasts `COL
 - **Response `200 OK` (`ColumnSchema`)**
 
 #### `POST /api/v1/columns/:columnId/copy` — Copy Column with All Cards
-Duplicate a list along with all its non-archived cards (classic Trello action). Broadcasts `COLUMN_CREATED` via WebSocket.
+Duplicate a list along with all its non-archived cards. Broadcasts `COLUMN_CREATED` via WebSocket.
 - **Request Body (`CopyColumnRequestSchema`, optional)**:
 ```json
 {
@@ -284,28 +362,14 @@ Duplicate a list along with all its non-archived cards (classic Trello action). 
   "position": "a0V"
 }
 ```
-- **Response `201 Created` (`CopyColumnResponseSchema`)**:
-```json
-{
-  "column": {
-    "id": "33333333-3333-4333-8333-333333333399",
-    "board_id": "11111111-1111-4111-8111-111111111111",
-    "title": "Backlog (Copy)",
-    "position": "a0V",
-    "wip_limit": null,
-    "color": "#3b82f6",
-    "is_archived": false
-  },
-  "cards": []
-}
-```
+- **Response `201 Created` (`CopyColumnResponseSchema`)**
 
 ---
 
-### 3.3 Rich Card & Trello Modal Endpoints
+### 3.5 Rich Card & Trello Modal Endpoints
 
 #### `POST /api/v1/boards/:boardId/cards` — Create Card
-Broadcasts `CARD_CREATED` via WebSocket and records a `CARD_CREATED` activity entry.
+Broadcasts `CARD_CREATED` via WebSocket and records a `CARD_CREATED` activity entry. Triggers any enabled `WHEN_CARD_CREATED` Butler automation rules.
 - **Request Body (`CreateCardRequestSchema`)**:
 ```json
 {
@@ -332,47 +396,21 @@ Broadcasts `CARD_CREATED` via WebSocket and records a `CARD_CREATED` activity en
 ```
 - **Response `201 Created` (`CardSchema`)**
 
-#### `PATCH /api/v1/cards/:cardId` — Update Card (Full Trello Modal Support)
-Full support for updating `title`, `description`, `priority`, `story_points`, `tags`, `subtasks`, `blocked_by_card_ids`, `cover`, `label_ids`, `member_ids`, `checklists`, `attachments`, `start_date`, `due_date`, `is_due_complete`, `is_archived`, `is_watching`. Keeps `subtasks` synced with `checklists` items for backward compatibility. Broadcasts `CARD_UPDATED` (or `CARD_ARCHIVED` when `is_archived` becomes `true`) via WebSocket.
+#### `PATCH /api/v1/cards/:cardId` — Update Card
+Full support for updating title, description, priority, story points, checklists, cover, labels, members, etc. Automatically evaluates matching Butler automation rules (`WHEN_PRIORITY_CHANGED`, `WHEN_LABEL_ADDED`, `WHEN_CHECKLIST_COMPLETED`). Broadcasts `CARD_UPDATED` via WebSocket.
 - **Request Body (`UpdateCardRequestSchema`)**:
 ```json
 {
   "title": "Implement OAuth2 PKCE & Session Rotation",
   "priority": "URGENT",
   "story_points": 8,
-  "cover": {
-    "type": "color",
-    "value": "#8b5cf6",
-    "size": "normal"
-  },
-  "label_ids": ["77777777-7777-4777-8777-777777777771"],
-  "member_ids": ["88888888-8888-4888-8888-888888888881"],
-  "checklists": [
-    {
-      "id": "99999999-9999-4999-8999-999999999991",
-      "title": "Security Audit Checklist",
-      "position": "a0",
-      "items": [
-        {
-          "id": "55555555-5555-4555-8555-555555555555",
-          "title": "Configure callback routes",
-          "is_completed": true,
-          "position": "a0",
-          "due_date": null,
-          "assignee_id": "88888888-8888-4888-8888-888888888881"
-        }
-      ]
-    }
-  ],
-  "is_due_complete": true,
-  "is_archived": false,
-  "is_watching": true
+  "is_due_complete": true
 }
 ```
 - **Response `200 OK` (`CardSchema`)**
 
 #### `PATCH /api/v1/cards/:cardId/move` — Move Card (O(1) Fractional Index)
-Updates a single row in PostgreSQL (`column_id = target_column_id`, `position = new_position`), appends a `CARD_MOVED` activity record, and broadcasts `CARD_MOVED` via WebSocket.
+Updates `column_id` and `position` in O(1). Automatically triggers enabled `WHEN_CARD_MOVED_TO_COLUMN` Butler automation rules. Appends activity records and broadcasts `CARD_MOVED` (plus `AUTOMATION_TRIGGERED` if rules fired) via WebSocket.
 - **Request Body (`MoveCardRequestSchema`)**:
 ```json
 {
@@ -383,74 +421,223 @@ Updates a single row in PostgreSQL (`column_id = target_column_id`, `position = 
 - **Response `200 OK` (`CardSchema`)**
 
 #### `POST /api/v1/cards/:cardId/copy` — Copy Card
-Copy card to the same or another list with its checklists, labels, members, and attachments. Broadcasts `CARD_CREATED` via WebSocket.
-- **Request Body (`CopyCardRequestSchema`, optional)**:
-```json
-{
-  "target_column_id": "33333333-3333-4333-8333-333333333332",
-  "title": "Implement OAuth2 PKCE flow (Copy)",
-  "position": "a1",
-  "keep_checklists": true,
-  "keep_labels": true,
-  "keep_members": true,
-  "keep_attachments": true
-}
-```
+Broadcasts `CARD_CREATED` via WebSocket.
+- **Request Body (`CopyCardRequestSchema`, optional)**
 - **Response `201 Created` (`CardSchema`)**
 
 #### `DELETE /api/v1/cards/:cardId` — Permanently Delete Card
-Permanently deletes an archived card and broadcasts `CARD_ARCHIVED` via WebSocket.
-- **Response `200 OK`**:
-```json
-{
-  "id": "44444444-4444-4444-8444-444444444444",
-  "deleted": true
-}
-```
+- **Response `200 OK`**: `{"id": "...", "deleted": true}`
 
 #### `POST /api/v1/cards/:cardId/comments` — Add Card Comment
-Adds a Markdown comment (`CommentSchema`) to a card, appends a `COMMENT_ADDED` `ActivitySchema` record to the board, and broadcasts `COMMENT_ADDED` via WebSocket.
-- **Request Body (`CreateCommentRequestSchema`)**:
-```json
-{
-  "author_id": "88888888-8888-4888-8888-888888888881",
-  "author_name": "Alex Rivera",
-  "author_initials": "AR",
-  "content": "Verified PKCE challenge generation with SHA-256."
-}
-```
-- **Response `201 Created` (`CommentSchema`)**:
-```json
-{
-  "id": "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
-  "card_id": "44444444-4444-4444-8444-444444444444",
-  "author_id": "88888888-8888-4888-8888-888888888881",
-  "author_name": "Alex Rivera",
-  "author_initials": "AR",
-  "content": "Verified PKCE challenge generation with SHA-256.",
-  "created_at": "2026-11-08T10:20:00.000Z",
-  "updated_at": "2026-11-08T10:20:00.000Z"
-}
-```
+Adds a comment, appends an `ActivitySchema` entry, and broadcasts `COMMENT_ADDED` via WebSocket.
+- **Request Body (`CreateCommentRequestSchema`)**
+- **Response `201 Created` (`CommentSchema`)**
 
 #### `DELETE /api/v1/cards/:cardId/comments/:commentId` — Delete Card Comment
-Deletes a comment from a card and broadcasts `CARD_UPDATED` via WebSocket.
-- **Response `200 OK`**:
-```json
-{
-  "id": "cccccccc-cccc-4ccc-8ccc-ccccccccccc1",
-  "deleted": true
-}
-```
+- **Response `200 OK`**: `{"id": "...", "deleted": true}`
 
-#### `POST /api/v1/cards/:cardId/ai-decompose` — AI Task Decomposition & Trello Card Enrichment
-Calls `services/ai-engine` (`POST http://localhost:8001/internal/v1/decompose-task` or `/internal/v1/enrich-card`), persists the generated `subtasks`, `checklists`, `story_points`, and `priority` to PostgreSQL, broadcasts `CARD_UPDATED` via WebSocket, and returns the updated `CardSchema`.
-- **Request Body**: Empty `{}` (or optional `{"board_context": ["string"]}`)
+#### `POST /api/v1/cards/:cardId/ai-decompose` — AI Task Decomposition & Card Enrichment
 - **Response `200 OK` (`CardSchema`)**
 
 ---
 
-## 4. WebSocket Real-Time Contract (`WS /ws/boards/:boardId`)
+### 3.6 Trello Butler Automation Endpoints
+
+#### `GET /api/v1/boards/:boardId/automations` — List Board Automation Rules
+Returns all Butler automation rules configured on the board.
+- **Response `200 OK` (`AutomationRuleSchema[]`)**:
+```json
+[
+  {
+    "id": "66666666-6666-4666-8666-666666666661",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "name": "Auto-Complete & Tag Done Cards",
+    "description": "When card is moved to Done, mark due date as complete and add Ship Ready label",
+    "is_enabled": true,
+    "trigger": {
+      "type": "WHEN_CARD_MOVED_TO_COLUMN",
+      "column_id": null,
+      "column_title_match": "Done",
+      "priority": null,
+      "label_id": null
+    },
+    "actions": [
+      {
+        "type": "MARK_DUE_DATE_COMPLETE",
+        "due_complete_value": true,
+        "member_id": null,
+        "label_id": null,
+        "priority": null,
+        "target_column_id": null,
+        "checklist_title": null,
+        "checklist_items": null,
+        "comment_text": null
+      },
+      {
+        "type": "ADD_LABEL",
+        "label_id": "77777777-7777-4777-8777-777777777771",
+        "member_id": null,
+        "priority": null,
+        "target_column_id": null,
+        "checklist_title": null,
+        "checklist_items": null,
+        "comment_text": null,
+        "due_complete_value": null
+      }
+    ],
+    "execution_count": 0,
+    "last_triggered_at": null,
+    "created_at": "2026-11-08T00:00:00.000Z"
+  }
+]
+```
+
+#### `POST /api/v1/boards/:boardId/automations` — Create Automation Rule
+Creates a new automation rule on the board and broadcasts `AUTOMATION_RULE_CREATED` via WebSocket.
+- **Request Body (`CreateAutomationRuleRequestSchema`)**:
+```json
+{
+  "name": "Assign Lead on High Priority",
+  "description": "When priority changed to HIGH, assign Alex Rivera",
+  "is_enabled": true,
+  "trigger": {
+    "type": "WHEN_PRIORITY_CHANGED",
+    "priority": "HIGH"
+  },
+  "actions": [
+    {
+      "type": "ASSIGN_MEMBER",
+      "member_id": "88888888-8888-4888-8888-888888888881"
+    }
+  ]
+}
+```
+- **Response `201 Created` (`AutomationRuleSchema`)**
+
+#### `PATCH /api/v1/automations/:ruleId` — Update Automation Rule
+Toggle `is_enabled`, update trigger filters, or modify actions list. Broadcasts `AUTOMATION_RULE_UPDATED` via WebSocket.
+- **Request Body (`UpdateAutomationRuleRequestSchema`)**:
+```json
+{
+  "is_enabled": false
+}
+```
+- **Response `200 OK` (`AutomationRuleSchema`)**
+
+#### `DELETE /api/v1/automations/:ruleId` — Delete Automation Rule
+Permanently deletes a Butler automation rule and broadcasts `AUTOMATION_RULE_DELETED` via WebSocket.
+- **Response `200 OK`**:
+```json
+{
+  "id": "66666666-6666-4666-8666-666666666661",
+  "deleted": true
+}
+```
+
+#### `POST /api/v1/boards/:boardId/automations/ai-generate` — AI Natural Language Automation Builder
+Proxies a user's natural language automation command along with current board context (`columns`, `members`, `labels`) to `services/ai-engine` (`POST http://localhost:8001/internal/v1/parse-automation`), returning a structured rule ready for review or immediate persistence.
+- **Request Body**:
+```json
+{
+  "prompt": "Whenever someone moves a card into Review, set priority to HIGH and assign Samir Patel"
+}
+```
+- **Response `200 OK` (`AIParseAutomationResponseSchema`)**:
+```json
+{
+  "name": "Review Escalation",
+  "description": "When card moved to Review, set priority to HIGH and assign Samir Patel",
+  "trigger": {
+    "type": "WHEN_CARD_MOVED_TO_COLUMN",
+    "column_id": "33333333-3333-4333-8333-333333333333",
+    "column_title_match": "Review",
+    "priority": null,
+    "label_id": null
+  },
+  "actions": [
+    {
+      "type": "SET_PRIORITY",
+      "priority": "HIGH",
+      "member_id": null,
+      "label_id": null,
+      "target_column_id": null,
+      "checklist_title": null,
+      "checklist_items": null,
+      "comment_text": null,
+      "due_complete_value": null
+    },
+    {
+      "type": "ASSIGN_MEMBER",
+      "member_id": "88888888-8888-4888-8888-888888888883",
+      "label_id": null,
+      "priority": null,
+      "target_column_id": null,
+      "checklist_title": null,
+      "checklist_items": null,
+      "comment_text": null,
+      "due_complete_value": null
+    }
+  ]
+}
+```
+
+---
+
+## 4. Runtime Automation Execution Contract
+
+Whenever a card mutation endpoint is executed on `apps/api` (`PATCH /api/v1/cards/:cardId/move`, `POST /api/v1/boards/:boardId/cards`, or `PATCH /api/v1/cards/:cardId`), the backend executes the **Butler Automation Pipeline**:
+
+1. **Trigger Evaluation**:
+   - Query all `automation_rules` for the board where `is_enabled = true`.
+   - Match rules against the event trigger:
+     - `WHEN_CARD_MOVED_TO_COLUMN`: matches target `column_id` or case-insensitive `column_title_match` (e.g., target column title contains `"Done"`).
+     - `WHEN_CARD_CREATED`: matches on card creation.
+     - `WHEN_CHECKLIST_COMPLETED`: matches when all items in a checklist become completed.
+     - `WHEN_PRIORITY_CHANGED`: matches when card priority equals trigger filter priority.
+     - `WHEN_LABEL_ADDED`: matches when trigger filter `label_id` is attached.
+
+2. **Sequential Action Execution**:
+   - Execute each action defined on matching rules against the card:
+     - `MARK_DUE_DATE_COMPLETE`: Mutates `is_due_complete = true` (or action's `due_complete_value`).
+     - `ASSIGN_MEMBER`: Adds `member_id` to `member_ids` (if not already present).
+     - `ADD_LABEL`: Adds `label_id` to `label_ids` (if not already present).
+     - `SET_PRIORITY`: Updates `priority` to action's priority value.
+     - `MOVE_CARD_TO_COLUMN`: Moves card to `target_column_id` with new fractional position.
+     - `ADD_CHECKLIST`: Appends new checklist titled `checklist_title` with items `checklist_items`.
+     - `POST_COMMENT`: Appends a new Butler automated comment with `comment_text`.
+
+3. **Audit & Activity Trail**:
+   - Increments rule's `execution_count` by 1 and updates `last_triggered_at = now()`.
+   - Appends an `ActivitySchema` entry to the board with:
+     - `actor_name`: `"Kinetix Butler"`
+     - `action_type`: `"AUTOMATION_TRIGGERED"`
+     - `is_automated`: `true`
+     - `description`: `"🤖 Butler executed rule '{rule.name}' on '{card.title}'"`
+
+4. **Real-Time WebSocket Broadcast**:
+   - Broadcasts `AUTOMATION_TRIGGERED` event with `AutomationTriggeredEventDataSchema`:
+     ```json
+     {
+       "event": "AUTOMATION_TRIGGERED",
+       "board_id": "11111111-1111-4111-8111-111111111111",
+       "data": {
+         "rule_id": "66666666-6666-4666-8666-666666666661",
+         "rule_name": "Auto-Complete & Tag Done Cards",
+         "card_id": "44444444-4444-4444-8444-444444444444",
+         "trigger_type": "WHEN_CARD_MOVED_TO_COLUMN",
+         "action_types": ["MARK_DUE_DATE_COMPLETE", "ADD_LABEL"],
+         "execution_count": 5,
+         "triggered_at": "2026-11-08T10:15:00.000Z"
+       },
+       "actor_id": "system_butler",
+       "timestamp": "2026-11-08T10:15:00.000Z"
+     }
+     ```
+   - Also broadcasts `CARD_UPDATED` with the mutated card so all connected clients reflect the automation immediately.
+
+---
+
+## 5. WebSocket Real-Time Contract (`WS /ws/boards/:boardId`)
 
 - **Endpoint**: `ws://localhost:8000/ws/boards/:boardId`
 - **Envelope Schema (`WSMessageSchema`)**:
@@ -478,12 +665,17 @@ Calls `services/ai-engine` (`POST http://localhost:8001/internal/v1/decompose-ta
   - `"COLUMN_UPDATED"`
   - `"COMMENT_ADDED"`
   - `"BOARD_UPDATED"`
+  - `"BOARD_DELETED"`
+  - `"AUTOMATION_TRIGGERED"`
+  - `"AUTOMATION_RULE_CREATED"`
+  - `"AUTOMATION_RULE_UPDATED"`
+  - `"AUTOMATION_RULE_DELETED"`
 
 ---
 
-## 5. Internal AI Engine (`services/ai-engine` — FastAPI Port `8001`)
+## 6. Internal AI Engine (`services/ai-engine` — FastAPI Port `8001`)
 
-### 5.1 `POST /internal/v1/decompose-task`
+### 6.1 `POST /internal/v1/decompose-task`
 - **Required Header**: `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>` (returns `401 UNAUTHORIZED` with `StandardErrorSchema` if missing or invalid).
 - **Request Body (`AIDecomposeRequestSchema`)**:
 ```json
@@ -510,10 +702,10 @@ Calls `services/ai-engine` (`POST http://localhost:8001/internal/v1/decompose-ta
 }
 ```
 
-### 5.2 `POST /internal/v1/enrich-card`
+### 6.2 `POST /internal/v1/enrich-card`
 Allows the AI Engine to generate multiple named checklists, suggest Trello color labels, and write a structured Markdown description template from a brief card title.
 - **Required Header**: `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>`
-- **Request Body (`AISuggestCardEnrichmentRequest` / `AISuggestCardEnrichmentRequestSchema`)**:
+- **Request Body (`AISuggestCardEnrichmentRequestSchema`)**:
 ```json
 {
   "card_title": "Implement OAuth2 PKCE flow",
@@ -529,7 +721,7 @@ Allows the AI Engine to generate multiple named checklists, suggest Trello color
   ]
 }
 ```
-- **Response `200 OK` (`AISuggestCardEnrichmentResponse` / `AISuggestCardEnrichmentResponseSchema`)**:
+- **Response `200 OK` (`AISuggestCardEnrichmentResponseSchema`)**:
 ```json
 {
   "structured_description": "## Objective\nImplement OAuth2 PKCE authentication flow for GitHub and Google.\n\n## Acceptance Criteria\n- S256 code challenge verification\n- Secure HTTP-only session rotation",
@@ -558,6 +750,64 @@ Allows the AI Engine to generate multiple named checklists, suggest Trello color
   "suggested_priority": "HIGH",
   "potential_risks": [
     "Callback URL mismatch across local and staging environments"
+  ]
+}
+```
+
+### 6.3 `POST /internal/v1/parse-automation` (Phase 3 Natural Language Butler Parser)
+Translates freeform plain text instructions into structured trigger conditions and executable actions matching the board's existing columns, labels, and members.
+- **Required Header**: `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>`
+- **Request Body (`AIParseAutomationRequestSchema`)**:
+```json
+{
+  "prompt": "When any card moves to Done, mark due date complete and add green label Ship Ready",
+  "board_columns": [
+    { "id": "33333333-3333-4333-8333-333333333331", "title": "Backlog" },
+    { "id": "33333333-3333-4333-8333-333333333334", "title": "Done" }
+  ],
+  "board_members": [
+    { "id": "88888888-8888-4888-8888-888888888881", "name": "Alex Rivera" }
+  ],
+  "board_labels": [
+    { "id": "77777777-7777-4777-8777-777777777771", "name": "Ship Ready", "color": "green" }
+  ]
+}
+```
+- **Response `200 OK` (`AIParseAutomationResponseSchema`)**:
+```json
+{
+  "name": "Auto-Complete & Tag Done Cards",
+  "description": "When card is moved to Done, mark due date complete and attach Ship Ready label",
+  "trigger": {
+    "type": "WHEN_CARD_MOVED_TO_COLUMN",
+    "column_id": "33333333-3333-4333-8333-333333333334",
+    "column_title_match": "Done",
+    "priority": null,
+    "label_id": null
+  },
+  "actions": [
+    {
+      "type": "MARK_DUE_DATE_COMPLETE",
+      "due_complete_value": true,
+      "member_id": null,
+      "label_id": null,
+      "priority": null,
+      "target_column_id": null,
+      "checklist_title": null,
+      "checklist_items": null,
+      "comment_text": null
+    },
+    {
+      "type": "ADD_LABEL",
+      "label_id": "77777777-7777-4777-8777-777777777771",
+      "member_id": null,
+      "priority": null,
+      "target_column_id": null,
+      "checklist_title": null,
+      "checklist_items": null,
+      "comment_text": null,
+      "due_complete_value": null
+    }
   ]
 }
 ```

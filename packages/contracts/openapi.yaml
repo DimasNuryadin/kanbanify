@@ -1,10 +1,11 @@
 openapi: 3.1.0
 info:
   title: Kinetix Core API & Internal AI Engine Contract
-  version: 2.0.0
+  version: 3.0.0
   description: >
     Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kinetix
-    High-Performance Real-Time Kanban & AI Workspace (Phase 2 Full Trello Parity).
+    High-Performance Real-Time Kanban & AI Workspace (Phase 3 Multi-Board Workspace,
+    Board Templates & Trello Butler Automation Engine).
 servers:
   - url: http://localhost:8000
     description: Fastify Core API Server (apps/api)
@@ -24,6 +25,89 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthCheckResponse"
 
+  # ============================================================================
+  # WORKSPACE ENDPOINTS (Phase 3)
+  # ============================================================================
+  /api/v1/workspaces:
+    get:
+      summary: List all workspaces with their nested lightweight board summaries
+      operationId: listWorkspaces
+      responses:
+        "200":
+          description: Array of workspaces with board summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkspaceWithBoards"
+    post:
+      summary: Create a new workspace
+      operationId: createWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Created workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/workspaces/{workspaceId}:
+    get:
+      summary: Get workspace details by ID with board summaries
+      operationId: getWorkspaceById
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workspace details with board summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceWithBoards"
+        "404":
+          description: Workspace not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # BOARD TEMPLATE ENDPOINTS (Phase 3)
+  # ============================================================================
+  /api/v1/board-templates:
+    get:
+      summary: List curated board templates (Engineering Sprint, Marketing Launch, Product Roadmap, Personal Kanban)
+      operationId: listBoardTemplates
+      responses:
+        "200":
+          description: Array of curated board templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BoardTemplate"
+
+  # ============================================================================
+  # BOARD ENDPOINTS
+  # ============================================================================
   /api/v1/boards:
     get:
       summary: List all boards
@@ -38,7 +122,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Board"
     post:
-      summary: Create board (auto-creates 4 default columns, 6 Trello color labels, and seeded members)
+      summary: Create board (supports template_id pre-seeding columns, labels, sample cards, and default Butler rules)
       operationId: createBoard
       requestBody:
         required: true
@@ -48,7 +132,7 @@ paths:
               $ref: "#/components/schemas/CreateBoardRequest"
       responses:
         "201":
-          description: Created board with default columns, labels, and members
+          description: Created board with columns, labels, members, and Butler automation rules
           content:
             application/json:
               schema:
@@ -62,7 +146,7 @@ paths:
 
   /api/v1/boards/{boardId}:
     get:
-      summary: Get full board state (columns, cards, labels, members, activities)
+      summary: Get full board state (columns, cards, labels, members, activities, automation rules)
       operationId: getBoardById
       parameters:
         - name: boardId
@@ -107,7 +191,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Board"
+    delete:
+      summary: Delete a board and its associated columns, cards, and automation rules
+      operationId: deleteBoard
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Board deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  deleted:
+                    type: boolean
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
 
+  # ============================================================================
+  # COLUMN ENDPOINTS
+  # ============================================================================
   /api/v1/boards/{boardId}/columns:
     post:
       summary: Create column (Trello list) in board
@@ -208,9 +325,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/CopyColumnResponse"
 
+  # ============================================================================
+  # CARD ENDPOINTS
+  # ============================================================================
   /api/v1/boards/{boardId}/cards:
     post:
-      summary: Create card in board
+      summary: Create card in board (evaluates WHEN_CARD_CREATED Butler automation rules)
       operationId: createCard
       parameters:
         - name: boardId
@@ -235,7 +355,7 @@ paths:
 
   /api/v1/cards/{cardId}:
     patch:
-      summary: Update card details including cover, label_ids, member_ids, checklists, attachments, dates, archive & watch state
+      summary: Update card details (evaluates WHEN_PRIORITY_CHANGED, WHEN_LABEL_ADDED, WHEN_CHECKLIST_COMPLETED Butler rules)
       operationId: updateCard
       parameters:
         - name: cardId
@@ -284,7 +404,7 @@ paths:
 
   /api/v1/cards/{cardId}/move:
     patch:
-      summary: Move card (target_column_id, new_position) in O(1) and broadcast CARD_MOVED
+      summary: Move card (target_column_id, new_position) and evaluate WHEN_CARD_MOVED_TO_COLUMN Butler automation rules
       operationId: moveCard
       parameters:
         - name: cardId
@@ -334,7 +454,7 @@ paths:
 
   /api/v1/cards/{cardId}/comments:
     post:
-      summary: Add a comment to a card and append an ActivitySchema record
+      summary: Add a comment to a card and append an Activity record
       operationId: createCardComment
       parameters:
         - name: cardId
@@ -351,7 +471,7 @@ paths:
               $ref: "#/components/schemas/CreateCommentRequest"
       responses:
         "201":
-          description: Created comment (or updated card)
+          description: Created comment
           content:
             application/json:
               schema:
@@ -406,6 +526,163 @@ paths:
               schema:
                 $ref: "#/components/schemas/Card"
 
+  # ============================================================================
+  # TRELLO BUTLER AUTOMATION ENDPOINTS (Phase 3)
+  # ============================================================================
+  /api/v1/boards/{boardId}/automations:
+    get:
+      summary: List all automation rules for a board
+      operationId: listBoardAutomations
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Array of automation rules for the board
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AutomationRule"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    post:
+      summary: Create a new Butler automation rule on a board
+      operationId: createBoardAutomation
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAutomationRuleRequest"
+      responses:
+        "201":
+          description: Created automation rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRule"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/automations/{ruleId}:
+    patch:
+      summary: Toggle is_enabled, rename, or update trigger/actions for an automation rule
+      operationId: updateAutomationRule
+      parameters:
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAutomationRuleRequest"
+      responses:
+        "200":
+          description: Updated automation rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRule"
+        "404":
+          description: Automation rule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    delete:
+      summary: Delete an automation rule
+      operationId: deleteAutomationRule
+      parameters:
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rule deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+        "404":
+          description: Automation rule not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/automations/ai-generate:
+    post:
+      summary: Proxies natural language automation prompt + board context to AI Engine (POST /internal/v1/parse-automation)
+      operationId: aiGenerateAutomationRule
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                  minLength: 1
+                  maxLength: 1000
+      responses:
+        "200":
+          description: Parsed automation rule draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIParseAutomationResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # INTERNAL AI ENGINE ENDPOINTS (Port 8001)
+  # ============================================================================
   /internal/v1/decompose-task:
     post:
       summary: Internal AI Engine task decomposition endpoint (Port 8001)
@@ -454,6 +731,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/AISuggestCardEnrichmentResponse"
 
+  /internal/v1/parse-automation:
+    post:
+      summary: Internal AI Engine natural language Butler automation parser (Port 8001)
+      operationId: internalParseAutomation
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIParseAutomationRequest"
+      responses:
+        "200":
+          description: Structured automation trigger and action parsed from prompt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIParseAutomationResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
 components:
   schemas:
     PriorityEnum:
@@ -473,6 +780,31 @@ components:
         - COMMENT_ADDED
         - CHECKLIST_COMPLETED
         - MEMBER_ASSIGNED
+        - AUTOMATION_TRIGGERED
+
+    BoardTemplateCategoryEnum:
+      type: string
+      enum: [ENGINEERING, MARKETING, PRODUCT, PERSONAL]
+
+    AutomationTriggerTypeEnum:
+      type: string
+      enum:
+        - WHEN_CARD_MOVED_TO_COLUMN
+        - WHEN_CARD_CREATED
+        - WHEN_CHECKLIST_COMPLETED
+        - WHEN_PRIORITY_CHANGED
+        - WHEN_LABEL_ADDED
+
+    AutomationActionTypeEnum:
+      type: string
+      enum:
+        - MARK_DUE_DATE_COMPLETE
+        - ASSIGN_MEMBER
+        - ADD_LABEL
+        - SET_PRIORITY
+        - MOVE_CARD_TO_COLUMN
+        - ADD_CHECKLIST
+        - POST_COMMENT
 
     Member:
       type: object
@@ -606,6 +938,9 @@ components:
         created_at:
           type: string
           format: date-time
+        is_automated:
+          type: boolean
+          default: false
 
     Attachment:
       type: object
@@ -646,6 +981,169 @@ components:
           enum: [gradient, solid, image]
         value:
           type: string
+
+    AutomationTrigger:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/AutomationTriggerTypeEnum"
+        column_id:
+          type: [string, "null"]
+        column_title_match:
+          type: [string, "null"]
+        priority:
+          anyOf:
+            - $ref: "#/components/schemas/PriorityEnum"
+            - type: "null"
+        label_id:
+          type: [string, "null"]
+
+    AutomationAction:
+      type: object
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/AutomationActionTypeEnum"
+        member_id:
+          type: [string, "null"]
+        label_id:
+          type: [string, "null"]
+        priority:
+          anyOf:
+            - $ref: "#/components/schemas/PriorityEnum"
+            - type: "null"
+        target_column_id:
+          type: [string, "null"]
+        checklist_title:
+          type: [string, "null"]
+        checklist_items:
+          type: [array, "null"]
+          items:
+            type: string
+        comment_text:
+          type: [string, "null"]
+        due_complete_value:
+          type: [boolean, "null"]
+
+    AutomationRule:
+      type: object
+      required:
+        - id
+        - board_id
+        - name
+        - description
+        - is_enabled
+        - trigger
+        - actions
+        - execution_count
+        - created_at
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        is_enabled:
+          type: boolean
+          default: true
+        trigger:
+          $ref: "#/components/schemas/AutomationTrigger"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
+        execution_count:
+          type: integer
+          default: 0
+        last_triggered_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    Workspace:
+      type: object
+      required: [id, name, slug, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+          default: ""
+        logo_color:
+          type: string
+          default: "#6366f1"
+        created_at:
+          type: string
+          format: date-time
+
+    BoardSummary:
+      type: object
+      required: [id, workspace_id, title, is_starred, background]
+      properties:
+        id:
+          type: string
+        workspace_id:
+          type: string
+        title:
+          type: string
+        is_starred:
+          type: boolean
+          default: false
+        background:
+          $ref: "#/components/schemas/BoardBackground"
+        card_count:
+          type: integer
+          default: 0
+        updated_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        description:
+          type: string
+
+    WorkspaceWithBoards:
+      allOf:
+        - $ref: "#/components/schemas/Workspace"
+        - type: object
+          properties:
+            boards:
+              type: array
+              items:
+                $ref: "#/components/schemas/BoardSummary"
+
+    BoardTemplate:
+      type: object
+      required: [id, name, description, category, background, default_columns, sample_cards_count]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          $ref: "#/components/schemas/BoardTemplateCategoryEnum"
+        background:
+          $ref: "#/components/schemas/BoardBackground"
+        default_columns:
+          type: array
+          items:
+            type: string
+        sample_cards_count:
+          type: integer
+          default: 0
 
     Card:
       type: object
@@ -786,7 +1284,6 @@ components:
           format: uuid
         workspace_id:
           type: string
-          format: uuid
         title:
           type: string
         columns:
@@ -818,6 +1315,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Activity"
+        automation_rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationRule"
 
     HealthCheckResponse:
       type: object
@@ -831,13 +1332,30 @@ components:
         version:
           type: string
 
+    CreateWorkspaceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+        logo_color:
+          type: string
+          default: "#6366f1"
+
     CreateBoardRequest:
       type: object
       required: [title]
       properties:
         workspace_id:
           type: string
-          format: uuid
         title:
           type: string
         description:
@@ -846,6 +1364,8 @@ components:
           type: boolean
         background:
           $ref: "#/components/schemas/BoardBackground"
+        template_id:
+          type: string
 
     UpdateBoardRequest:
       type: object
@@ -1091,6 +1611,44 @@ components:
         content:
           type: string
 
+    CreateAutomationRuleRequest:
+      type: object
+      required: [name, trigger, actions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+        description:
+          type: string
+        is_enabled:
+          type: boolean
+          default: true
+        trigger:
+          $ref: "#/components/schemas/AutomationTrigger"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
+
+    UpdateAutomationRuleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+        description:
+          type: string
+        is_enabled:
+          type: boolean
+        trigger:
+          $ref: "#/components/schemas/AutomationTrigger"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
+
     AIDecomposeRequest:
       type: object
       required: [card_title, card_description, board_context]
@@ -1198,6 +1756,62 @@ components:
           type: array
           items:
             type: string
+
+    AIParseAutomationRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        board_columns:
+          type: array
+          items:
+            type: object
+            required: [id, title]
+            properties:
+              id:
+                type: string
+              title:
+                type: string
+        board_members:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+        board_labels:
+          type: array
+          items:
+            type: object
+            required: [id, name, color]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              color:
+                type: string
+
+    AIParseAutomationResponse:
+      type: object
+      required: [name, trigger, actions]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        trigger:
+          $ref: "#/components/schemas/AutomationTrigger"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationAction"
 
     StandardError:
       type: object
