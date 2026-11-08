@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "kinetix-ai-engine"
 version = "0.1.0"
 description = "Kinetix AI Engine Service - Task decomposition, smart triage, and board copilot"
-readme = "../../README.md"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.12,<1.0.0",
@@ -26,6 +26,14 @@ dev = [
     "ruff>=0.11.2",
     "mypy>=1.15.0",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
