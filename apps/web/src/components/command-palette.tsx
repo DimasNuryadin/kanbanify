@@ -3,17 +3,21 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Archive,
   ArrowRight,
+  Calendar,
   Command,
   Filter,
   Kanban,
   Laptop,
   Moon,
+  Palette,
   Plus,
   Radio,
   Search,
   Sun,
   Table2,
+  Tag,
   X,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspace-store";
@@ -43,6 +47,12 @@ export function CommandPalette({
   const onlyBlockedFilter = useWorkspaceStore((s) => s.onlyBlockedFilter);
   const openCreateCardModal = useWorkspaceStore((s) => s.openCreateCardModal);
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
+  const setArchivedDrawerOpen = useWorkspaceStore(
+    (s) => s.setArchivedDrawerOpen
+  );
+  const setBoardMenuOpen = useWorkspaceStore((s) => s.setBoardMenuOpen);
+  const toggleLabelsExpanded = useWorkspaceStore((s) => s.toggleLabelsExpanded);
+  const clearAllFilters = useWorkspaceStore((s) => s.clearAllFilters);
   const useMockMode = useWorkspaceStore((s) => s.useMockMode);
 
   const [query, setQuery] = useState("");
@@ -65,26 +75,58 @@ export function CommandPalette({
       {
         id: "create-card",
         group: "Actions",
-        label: "Create New Issue / Card",
+        label: "Create New Trello Card",
         shortcut: "C",
         icon: <Plus className="h-4 w-4 text-indigo-500" />,
         action: run(() => openCreateCardModal(null)),
       },
       {
+        id: "toggle-labels-expanded",
+        group: "Actions",
+        label: "Toggle Label Text Visibility Across All Cards",
+        shortcut: "L",
+        icon: <Tag className="h-4 w-4 text-emerald-500" />,
+        action: run(() => toggleLabelsExpanded()),
+      },
+      {
+        id: "open-board-menu",
+        group: "Actions",
+        label: "Open Board Menu & Background Picker",
+        shortcut: "B M",
+        icon: <Palette className="h-4 w-4 text-violet-500" />,
+        action: run(() => setBoardMenuOpen(true)),
+      },
+      {
+        id: "open-archived-drawer",
+        group: "Actions",
+        label: "Open Archived Cards & Lists Drawer",
+        shortcut: "A",
+        icon: <Archive className="h-4 w-4 text-amber-500" />,
+        action: run(() => setArchivedDrawerOpen(true)),
+      },
+      {
         id: "view-kanban",
         group: "Workspace Views",
-        label: "Switch to Kanban Board View",
-        shortcut: "V K",
+        label: "Switch to Trello Board View",
+        shortcut: "V B",
         icon: <Kanban className="h-4 w-4 text-zinc-500" />,
         action: run(() => setViewMode("kanban")),
       },
       {
         id: "view-table",
         group: "Workspace Views",
-        label: "Switch to High-Density Table / List View",
+        label: "Switch to High-Density Table View",
         shortcut: "V T",
         icon: <Table2 className="h-4 w-4 text-zinc-500" />,
         action: run(() => setViewMode("table")),
+      },
+      {
+        id: "view-calendar",
+        group: "Workspace Views",
+        label: "Switch to Calendar / Due Date View",
+        shortcut: "V C",
+        icon: <Calendar className="h-4 w-4 text-zinc-500" />,
+        action: run(() => setViewMode("calendar")),
       },
       {
         id: "theme-light",
@@ -112,53 +154,26 @@ export function CommandPalette({
       },
       {
         id: "filter-urgent",
-        group: "Filter by Priority",
+        group: "Filters",
         label: "Filter Priority: URGENT only",
         shortcut: "F U",
         icon: <Filter className="h-4 w-4 text-rose-500" />,
         action: run(() => setPriorityFilter("URGENT")),
       },
       {
-        id: "filter-high",
-        group: "Filter by Priority",
-        label: "Filter Priority: HIGH only",
-        shortcut: "F H",
-        icon: <Filter className="h-4 w-4 text-amber-500" />,
-        action: run(() => setPriorityFilter("HIGH")),
-      },
-      {
-        id: "filter-medium",
-        group: "Filter by Priority",
-        label: "Filter Priority: MEDIUM only",
-        shortcut: "F M",
-        icon: <Filter className="h-4 w-4 text-indigo-500" />,
-        action: run(() => setPriorityFilter("MEDIUM")),
-      },
-      {
-        id: "filter-low",
-        group: "Filter by Priority",
-        label: "Filter Priority: LOW only",
-        shortcut: "F L",
-        icon: <Filter className="h-4 w-4 text-zinc-400" />,
-        action: run(() => setPriorityFilter("LOW")),
-      },
-      {
-        id: "filter-all",
-        group: "Filter by Priority",
-        label: "Reset Priority Filter (Show ALL)",
-        shortcut: "F A",
+        id: "filter-reset",
+        group: "Filters",
+        label: "Reset All Board Filters",
+        shortcut: "F R",
         icon: <Filter className="h-4 w-4 text-emerald-500" />,
-        action: run(() => {
-          setPriorityFilter("ALL");
-          setOnlyBlockedFilter(false);
-        }),
+        action: run(() => clearAllFilters()),
       },
       {
         id: "toggle-blockers",
         group: "Blocker Radar",
         label: onlyBlockedFilter
           ? "Show All Cards (Disable Blocker Radar Filter)"
-          : "Filter Blocked Issues Only (Blocker Radar)",
+          : "Filter Blocked Cards Only (Blocker Radar)",
         icon: <AlertTriangle className="h-4 w-4 text-red-500" />,
         action: run(() => setOnlyBlockedFilter(!onlyBlockedFilter)),
       },
@@ -173,28 +188,34 @@ export function CommandPalette({
       },
     ];
 
-    const cardItems: CommandItem[] = board.cards.map((card) => ({
-      id: `card-${card.id}`,
-      group: "Jump to Issue",
-      label: `${card.title} (${card.priority})`,
-      shortcut: card.position,
-      icon: <ArrowRight className="h-4 w-4 text-zinc-400" />,
-      action: run(() => setSelectedCardId(card.id)),
-    }));
+    const cardItems: CommandItem[] = board.cards
+      .filter((c) => !c.is_archived)
+      .map((card) => ({
+        id: `card-${card.id}`,
+        group: "Jump to Card",
+        label: `${card.title} (${card.priority})`,
+        shortcut: card.position,
+        icon: <ArrowRight className="h-4 w-4 text-zinc-400" />,
+        action: run(() => setSelectedCardId(card.id)),
+      }));
 
     return [...base, ...cardItems];
   }, [
     board.cards,
+    clearAllFilters,
+    onToggleMockMode,
     onlyBlockedFilter,
     openCreateCardModal,
-     setOnlyBlockedFilter,
+    setArchivedDrawerOpen,
+    setBoardMenuOpen,
+    setOnlyBlockedFilter,
     setOpen,
     setPriorityFilter,
     setSelectedCardId,
     setThemeMode,
     setViewMode,
+    toggleLabelsExpanded,
     useMockMode,
-    onToggleMockMode,
   ]);
 
   const filtered = useMemo(() => {
@@ -242,15 +263,12 @@ export function CommandPalette({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] px-4">
-      {/* Backdrop */}
       <div
         onClick={() => setOpen(false)}
         className="fixed inset-0 bg-zinc-950/50 backdrop-blur-xs"
       />
 
-      {/* Modal */}
       <div className="relative z-10 w-full max-w-xl overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
-        {/* Search Input Header */}
         <div className="flex items-center border-b border-zinc-200/80 px-4 py-3 dark:border-zinc-800">
           <Search className="mr-3 h-4 w-4 text-zinc-400" />
           <input
@@ -258,7 +276,7 @@ export function CommandPalette({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type a command or search issues (e.g., 'dark', 'table', 'urgent', 'create')..."
+            placeholder="Type a command or search cards (e.g., 'calendar', 'background', 'archive')..."
             className="flex-1 bg-transparent text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
           />
           <button
@@ -270,7 +288,6 @@ export function CommandPalette({
           </button>
         </div>
 
-        {/* Command Results */}
         <div className="max-h-96 overflow-y-auto p-2">
           {filtered.map((item, idx) => {
             const active = idx === activeIndex;
@@ -310,12 +327,11 @@ export function CommandPalette({
 
           {filtered.length === 0 && (
             <div className="py-10 text-center text-xs text-zinc-400">
-              No matching commands or issues found.
+              No matching commands or cards found.
             </div>
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-between border-t border-zinc-200/80 bg-zinc-50 px-4 py-2 text-[11px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-400">
           <div className="flex items-center gap-3">
             <span>

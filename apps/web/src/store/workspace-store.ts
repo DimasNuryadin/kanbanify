@@ -4,6 +4,8 @@ import {
   Card,
   CardMovedEventData,
   Column,
+  ColumnMovedEventData,
+  Comment,
   Priority,
 } from "@kinetix/contracts";
 import { INITIAL_SEED_BOARD } from "@/lib/mock-data";
@@ -11,8 +13,9 @@ import { DEFAULT_USE_MOCK } from "@/lib/api-client";
 import { WSConnectionStatus } from "@/lib/ws-client";
 import { comparePositions } from "@/lib/fractional-index";
 
-export type ViewMode = "kanban" | "table";
+export type ViewMode = "kanban" | "table" | "calendar";
 export type ThemeMode = "light" | "dark" | "system";
+export type DueFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "COMPLETED" | "NO_DATE";
 
 export interface LastMoveMetrics {
   cardTitle: string;
@@ -30,16 +33,24 @@ interface WorkspaceState {
   wsStatus: WSConnectionStatus;
   fallbackNotice: string | null;
 
+  // Trello Board-Wide Label Expansion Toggle
+  areLabelsExpanded: boolean;
+
   // Filters
   priorityFilter: Priority | "ALL";
   searchQuery: string;
   onlyBlockedFilter: boolean;
+  memberFilterId: string | null;
+  labelFilterIds: string[];
+  dueFilter: DueFilter;
 
   // Modals / Drawers
   selectedCardId: string | null;
   isCommandPaletteOpen: boolean;
   isCreateCardModalOpen: boolean;
   createCardDefaultColumnId: string | null;
+  isArchivedDrawerOpen: boolean;
+  isBoardMenuOpen: boolean;
 
   // O(1) Fractional Index Telemetry pill
   lastMoveMetrics: LastMoveMetrics | null;
@@ -52,14 +63,22 @@ interface WorkspaceState {
   setWsStatus: (status: WSConnectionStatus) => void;
   setFallbackNotice: (notice: string | null) => void;
 
+  toggleLabelsExpanded: () => void;
+
   setPriorityFilter: (priority: Priority | "ALL") => void;
   setSearchQuery: (query: string) => void;
   setOnlyBlockedFilter: (onlyBlocked: boolean) => void;
+  setMemberFilterId: (memberId: string | null) => void;
+  toggleLabelFilterId: (labelId: string) => void;
+  setDueFilter: (due: DueFilter) => void;
+  clearAllFilters: () => void;
 
   setSelectedCardId: (cardId: string | null) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   openCreateCardModal: (columnId?: string | null) => void;
   closeCreateCardModal: () => void;
+  setArchivedDrawerOpen: (open: boolean) => void;
+  setBoardMenuOpen: (open: boolean) => void;
 
   optimisticMoveCard: (
     cardId: string,
@@ -68,9 +87,18 @@ interface WorkspaceState {
     prevPos?: string,
     nextPos?: string
   ) => void;
+  optimisticMoveColumn: (
+    columnId: string,
+    newPosition: string,
+    prevPos?: string,
+    nextPos?: string
+  ) => void;
   applyRemoteCardMove: (data: CardMovedEventData) => void;
+  applyRemoteColumnMove: (data: ColumnMovedEventData) => void;
   upsertCard: (card: Card) => void;
+  removeCard: (cardId: string) => void;
   upsertColumn: (column: Column) => void;
+  appendCardComment: (comment: Comment) => void;
 }
 
 function sortBoard(board: Board): Board {
@@ -85,6 +113,14 @@ function sortBoard(board: Board): Board {
         subtasks: [...c.subtasks].sort((a, b) =>
           comparePositions(a.position, b.position)
         ),
+        checklists: [...(c.checklists ?? [])]
+          .map((cl) => ({
+            ...cl,
+            items: [...cl.items].sort((a, b) =>
+              comparePositions(a.position, b.position)
+            ),
+          }))
+          .sort((a, b) => comparePositions(a.position, b.position)),
       }))
       .sort((a, b) => comparePositions(a.position, b.position)),
   };
@@ -98,14 +134,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   wsStatus: DEFAULT_USE_MOCK ? "mock" : "connecting",
   fallbackNotice: null,
 
+  areLabelsExpanded: true,
+
   priorityFilter: "ALL",
   searchQuery: "",
   onlyBlockedFilter: false,
+  memberFilterId: null,
+  labelFilterIds: [],
+  dueFilter: "ALL",
 
   selectedCardId: null,
   isCommandPaletteOpen: false,
   isCreateCardModalOpen: false,
   createCardDefaultColumnId: null,
+  isArchivedDrawerOpen: false,
+  isBoardMenuOpen: false,
 
   lastMoveMetrics: {
     cardTitle: "Real-Time WebSocket Broadcast",
@@ -127,9 +170,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setWsStatus: (wsStatus) => set({ wsStatus }),
   setFallbackNotice: (fallbackNotice) => set({ fallbackNotice }),
 
+  toggleLabelsExpanded: () =>
+    set((state) => ({ areLabelsExpanded: !state.areLabelsExpanded })),
+
   setPriorityFilter: (priorityFilter) => set({ priorityFilter }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setOnlyBlockedFilter: (onlyBlockedFilter) => set({ onlyBlockedFilter }),
+  setMemberFilterId: (memberFilterId) => set({ memberFilterId }),
+  toggleLabelFilterId: (labelId) =>
+    set((state) => ({
+      labelFilterIds: state.labelFilterIds.includes(labelId)
+        ? state.labelFilterIds.filter((id) => id !== labelId)
+        : [...state.labelFilterIds, labelId],
+    })),
+  setDueFilter: (dueFilter) => set({ dueFilter }),
+  clearAllFilters: () =>
+    set({
+      priorityFilter: "ALL",
+      searchQuery: "",
+      onlyBlockedFilter: false,
+      memberFilterId: null,
+      labelFilterIds: [],
+      dueFilter: "ALL",
+    }),
 
   setSelectedCardId: (selectedCardId) => set({ selectedCardId }),
   setCommandPaletteOpen: (isCommandPaletteOpen) =>
@@ -144,6 +207,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       isCreateCardModalOpen: false,
       createCardDefaultColumnId: null,
     }),
+  setArchivedDrawerOpen: (isArchivedDrawerOpen) =>
+    set({ isArchivedDrawerOpen }),
+  setBoardMenuOpen: (isBoardMenuOpen) => set({ isBoardMenuOpen }),
 
   optimisticMoveCard: (
     cardId,
@@ -183,6 +249,31 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       };
     }),
 
+  optimisticMoveColumn: (columnId, newPosition, prevPos, nextPos) =>
+    set((state) => {
+      const targetCol = state.board.columns.find((col) => col.id === columnId);
+      const updatedColumns = state.board.columns.map((col) =>
+        col.id === columnId ? { ...col, position: newPosition } : col
+      );
+      return {
+        board: sortBoard({
+          ...state.board,
+          columns: updatedColumns,
+        }),
+        lastMoveMetrics: {
+          cardTitle: `List: ${targetCol?.title ?? "List"}`,
+          prevPos,
+          nextPos,
+          computedPos: newPosition,
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+        },
+      };
+    }),
+
   applyRemoteCardMove: (data) =>
     set((state) => {
       const updatedCards = state.board.cards.map((card) =>
@@ -203,6 +294,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       };
     }),
 
+  applyRemoteColumnMove: (data) =>
+    set((state) => {
+      const updatedColumns = state.board.columns.map((col) =>
+        col.id === data.column_id
+          ? { ...col, position: data.new_position }
+          : col
+      );
+      return {
+        board: sortBoard({
+          ...state.board,
+          columns: updatedColumns,
+        }),
+      };
+    }),
+
   upsertCard: (card) =>
     set((state) => {
       const exists = state.board.cards.some((c) => c.id === card.id);
@@ -216,6 +322,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         }),
       };
     }),
+
+  removeCard: (cardId) =>
+    set((state) => ({
+      selectedCardId:
+        state.selectedCardId === cardId ? null : state.selectedCardId,
+      board: sortBoard({
+        ...state.board,
+        cards: state.board.cards.filter((c) => c.id !== cardId),
+      }),
+    })),
 
   upsertColumn: (column) =>
     set((state) => {
@@ -232,4 +348,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         }),
       };
     }),
+
+  appendCardComment: (comment) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        cards: state.board.cards.map((c) => {
+          if (c.id !== comment.card_id) return c;
+          const alreadyExists = c.comments.some((cm) => cm.id === comment.id);
+          return alreadyExists
+            ? c
+            : { ...c, comments: [...c.comments, comment] };
+        }),
+      }),
+    })),
 }));
