@@ -1255,7 +1255,14 @@ export function CardDetailDrawer({
                       className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs text-zinc-500 dark:text-zinc-400"
                     >
                       <div className="flex items-center gap-2">
-                        <ActivityIcon className="h-3.5 w-3.5 text-zinc-400" />
+                        {act.is_automated ||
+                        act.action_type === "AUTOMATION_TRIGGERED" ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-400/20 dark:text-amber-300">
+                            🤖 Butler
+                          </span>
+                        ) : (
+                          <ActivityIcon className="h-3.5 w-3.5 text-zinc-400" />
+                        )}
                         <span>
                           <strong className="text-zinc-700 dark:text-zinc-300">
                             {act.actor_name}

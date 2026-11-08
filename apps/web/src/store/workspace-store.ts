@@ -1,17 +1,27 @@
 import { create } from "zustand";
 import {
+  AutomationRule,
   Board,
+  BoardSummary,
   Card,
   CardMovedEventData,
   Column,
   ColumnMovedEventData,
   Comment,
+  DEFAULT_WORKSPACE,
   Priority,
+  WorkspaceWithBoards,
 } from "@kinetix/contracts";
-import { INITIAL_SEED_BOARD } from "@/lib/mock-data";
+import {
+  INITIAL_SEED_BOARD,
+  INITIAL_SEED_BOARDS,
+  SEED_BOARD_ID,
+  SEED_WORKSPACE_ID,
+} from "@/lib/mock-data";
 import { DEFAULT_USE_MOCK } from "@/lib/api-client";
 import { WSConnectionStatus } from "@/lib/ws-client";
 import { comparePositions } from "@/lib/fractional-index";
+import { ButlerExecutionToast } from "@/lib/automation-engine";
 
 export type ViewMode = "kanban" | "table" | "calendar";
 export type ThemeMode = "light" | "dark" | "system";
@@ -26,12 +36,20 @@ export interface LastMoveMetrics {
 }
 
 interface WorkspaceState {
+  // Active Board & Canvas
   board: Board;
+  activeBoardId: string;
   viewMode: ViewMode;
   themeMode: ThemeMode;
   useMockMode: boolean;
   wsStatus: WSConnectionStatus;
   fallbackNotice: string | null;
+
+  // Workspace Navigation & Summaries
+  workspaces: WorkspaceWithBoards[];
+  currentWorkspaceId: string;
+  boardSummaries: BoardSummary[];
+  isSidebarOpen: boolean;
 
   // Trello Board-Wide Label Expansion Toggle
   areLabelsExpanded: boolean;
@@ -51,17 +69,33 @@ interface WorkspaceState {
   createCardDefaultColumnId: string | null;
   isArchivedDrawerOpen: boolean;
   isBoardMenuOpen: boolean;
+  isAutomationModalOpen: boolean;
+  isTemplatesModalOpen: boolean;
+  isCreateBoardModalOpen: boolean;
+  isCreateWorkspaceModalOpen: boolean;
+
+  // Butler Active Rules & Execution Toasts
+  automationRules: AutomationRule[];
+  toasts: ButlerExecutionToast[];
 
   // O(1) Fractional Index Telemetry pill
   lastMoveMetrics: LastMoveMetrics | null;
 
   // Actions
   setBoard: (board: Board) => void;
+  setActiveBoardId: (id: string) => void;
   setViewMode: (view: ViewMode) => void;
   setThemeMode: (theme: ThemeMode) => void;
   setUseMockMode: (useMock: boolean, fallbackNotice?: string | null) => void;
   setWsStatus: (status: WSConnectionStatus) => void;
   setFallbackNotice: (notice: string | null) => void;
+
+  // Sidebar & Workspaces
+  toggleSidebar: () => void;
+  setSidebarOpen: (open: boolean) => void;
+  setWorkspaces: (workspaces: WorkspaceWithBoards[]) => void;
+  setCurrentWorkspaceId: (id: string) => void;
+  setBoardSummaries: (summaries: BoardSummary[]) => void;
 
   toggleLabelsExpanded: () => void;
 
@@ -73,13 +107,28 @@ interface WorkspaceState {
   setDueFilter: (due: DueFilter) => void;
   clearAllFilters: () => void;
 
+  // Modals
   setSelectedCardId: (cardId: string | null) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   openCreateCardModal: (columnId?: string | null) => void;
   closeCreateCardModal: () => void;
   setArchivedDrawerOpen: (open: boolean) => void;
   setBoardMenuOpen: (open: boolean) => void;
+  setAutomationModalOpen: (open: boolean) => void;
+  setTemplatesModalOpen: (open: boolean) => void;
+  setCreateBoardModalOpen: (open: boolean) => void;
+  setCreateWorkspaceModalOpen: (open: boolean) => void;
 
+  // Butler Automation Rules
+  setAutomationRules: (rules: AutomationRule[]) => void;
+  upsertAutomationRule: (rule: AutomationRule) => void;
+  removeAutomationRule: (ruleId: string) => void;
+
+  // Butler Execution Toasts
+  addToast: (toast: ButlerExecutionToast) => void;
+  removeToast: (id: string) => void;
+
+  // Optimistic & WebSocket Mutations
   optimisticMoveCard: (
     cardId: string,
     targetColumnId: string,
@@ -129,11 +178,42 @@ function sortBoard(board: Board): Board {
 
 export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   board: sortBoard(INITIAL_SEED_BOARD),
+  activeBoardId: SEED_BOARD_ID,
   viewMode: "kanban",
   themeMode: "dark",
   useMockMode: DEFAULT_USE_MOCK,
   wsStatus: DEFAULT_USE_MOCK ? "mock" : "connecting",
   fallbackNotice: null,
+
+  workspaces: [
+    {
+      ...DEFAULT_WORKSPACE,
+      boards: INITIAL_SEED_BOARDS.map((b) => ({
+        id: b.id,
+        workspace_id: b.workspace_id,
+        title: b.title,
+        is_starred: b.is_starred,
+        background: b.background,
+        card_count: b.cards.filter((c) => !c.is_archived).length,
+        updated_at: b.created_at,
+        created_at: b.created_at,
+        description: b.description,
+      })),
+    },
+  ],
+  currentWorkspaceId: SEED_WORKSPACE_ID,
+  boardSummaries: INITIAL_SEED_BOARDS.map((b) => ({
+    id: b.id,
+    workspace_id: b.workspace_id,
+    title: b.title,
+    is_starred: b.is_starred,
+    background: b.background,
+    card_count: b.cards.filter((c) => !c.is_archived).length,
+    updated_at: b.created_at,
+    created_at: b.created_at,
+    description: b.description,
+  })),
+  isSidebarOpen: true,
 
   areLabelsExpanded: true,
 
@@ -150,6 +230,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   createCardDefaultColumnId: null,
   isArchivedDrawerOpen: false,
   isBoardMenuOpen: false,
+  isAutomationModalOpen: false,
+  isTemplatesModalOpen: false,
+  isCreateBoardModalOpen: false,
+  isCreateWorkspaceModalOpen: false,
+
+  automationRules: [...(INITIAL_SEED_BOARD.automation_rules ?? [])],
+  toasts: [],
 
   lastMoveMetrics: {
     cardTitle: "Real-Time WebSocket Broadcast",
@@ -159,7 +246,44 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     timestamp: "Ready",
   },
 
-  setBoard: (board) => set({ board: sortBoard(board) }),
+  setBoard: (board) =>
+    set((state) => {
+      const exists = state.boardSummaries.some((s) => s.id === board.id);
+      const updatedSummaries = exists
+        ? state.boardSummaries.map((s) =>
+            s.id === board.id
+              ? {
+                  ...s,
+                  title: board.title,
+                  is_starred: board.is_starred,
+                  background: board.background,
+                  card_count: board.cards.filter((c) => !c.is_archived).length,
+                }
+              : s
+          )
+        : [
+            ...state.boardSummaries,
+            {
+              id: board.id,
+              workspace_id: board.workspace_id,
+              title: board.title,
+              is_starred: board.is_starred,
+              background: board.background,
+              card_count: board.cards.filter((c) => !c.is_archived).length,
+              updated_at: new Date().toISOString(),
+              created_at: board.created_at,
+              description: board.description,
+            },
+          ];
+
+      return {
+        board: sortBoard(board),
+        activeBoardId: board.id,
+        automationRules: board.automation_rules ?? [],
+        boardSummaries: updatedSummaries,
+      };
+    }),
+  setActiveBoardId: (activeBoardId) => set({ activeBoardId }),
   setViewMode: (viewMode) => set({ viewMode }),
   setThemeMode: (themeMode) => set({ themeMode }),
   setUseMockMode: (useMockMode, fallbackNotice = null) =>
@@ -170,6 +294,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     }),
   setWsStatus: (wsStatus) => set({ wsStatus }),
   setFallbackNotice: (fallbackNotice) => set({ fallbackNotice }),
+
+  toggleSidebar: () =>
+    set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+  setSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
+  setWorkspaces: (workspaces) => set({ workspaces }),
+  setCurrentWorkspaceId: (currentWorkspaceId) =>
+    set({ currentWorkspaceId }),
+  setBoardSummaries: (boardSummaries) => set({ boardSummaries }),
 
   toggleLabelsExpanded: () =>
     set((state) => ({ areLabelsExpanded: !state.areLabelsExpanded })),
@@ -211,6 +343,50 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setArchivedDrawerOpen: (isArchivedDrawerOpen) =>
     set({ isArchivedDrawerOpen }),
   setBoardMenuOpen: (isBoardMenuOpen) => set({ isBoardMenuOpen }),
+  setAutomationModalOpen: (isAutomationModalOpen) =>
+    set({ isAutomationModalOpen }),
+  setTemplatesModalOpen: (isTemplatesModalOpen) =>
+    set({ isTemplatesModalOpen }),
+  setCreateBoardModalOpen: (isCreateBoardModalOpen) =>
+    set({ isCreateBoardModalOpen }),
+  setCreateWorkspaceModalOpen: (isCreateWorkspaceModalOpen) =>
+    set({ isCreateWorkspaceModalOpen }),
+
+  setAutomationRules: (automationRules) => set({ automationRules }),
+  upsertAutomationRule: (rule) =>
+    set((state) => {
+      const exists = state.automationRules.some((r) => r.id === rule.id);
+      const nextRules = exists
+        ? state.automationRules.map((r) => (r.id === rule.id ? rule : r))
+        : [...state.automationRules, rule];
+      return {
+        automationRules: nextRules,
+        board: {
+          ...state.board,
+          automation_rules: nextRules,
+        },
+      };
+    }),
+  removeAutomationRule: (ruleId) =>
+    set((state) => {
+      const nextRules = state.automationRules.filter((r) => r.id !== ruleId);
+      return {
+        automationRules: nextRules,
+        board: {
+          ...state.board,
+          automation_rules: nextRules,
+        },
+      };
+    }),
+
+  addToast: (toast) =>
+    set((state) => ({
+      toasts: [toast, ...state.toasts.slice(0, 4)],
+    })),
+  removeToast: (id) =>
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id),
+    })),
 
   optimisticMoveCard: (
     cardId,
@@ -382,6 +558,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
               action_type: "COMMENT_ADDED" as const,
               description: `commented on ${targetCard?.title ?? "card"}: "${comment.content.slice(0, 80)}"`,
               created_at: comment.created_at,
+              is_automated: false,
             },
             ...state.board.activities,
           ];

@@ -8,10 +8,13 @@ import {
   Calendar,
   Command,
   Filter,
+  FolderPlus,
   Kanban,
   Laptop,
+  LayoutTemplate,
   Moon,
   Palette,
+  PanelLeft,
   Plus,
   Radio,
   Search,
@@ -19,8 +22,10 @@ import {
   Table2,
   Tag,
   X,
+  Zap,
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspace-store";
+import { INITIAL_SEED_BOARDS } from "@/lib/mock-data";
 
 interface CommandItem {
   id: string;
@@ -33,8 +38,10 @@ interface CommandItem {
 
 export function CommandPalette({
   onToggleMockMode,
+  onSelectBoard,
 }: {
   onToggleMockMode: (next: boolean) => void;
+  onSelectBoard?: (boardId: string) => void;
 }) {
   const isOpen = useWorkspaceStore((s) => s.isCommandPaletteOpen);
   const setOpen = useWorkspaceStore((s) => s.setCommandPaletteOpen);
@@ -54,6 +61,20 @@ export function CommandPalette({
   const toggleLabelsExpanded = useWorkspaceStore((s) => s.toggleLabelsExpanded);
   const clearAllFilters = useWorkspaceStore((s) => s.clearAllFilters);
   const useMockMode = useWorkspaceStore((s) => s.useMockMode);
+  const boardSummaries = useWorkspaceStore((s) => s.boardSummaries);
+  const setTemplatesModalOpen = useWorkspaceStore(
+    (s) => s.setTemplatesModalOpen
+  );
+  const setCreateBoardModalOpen = useWorkspaceStore(
+    (s) => s.setCreateBoardModalOpen
+  );
+  const setCreateWorkspaceModalOpen = useWorkspaceStore(
+    (s) => s.setCreateWorkspaceModalOpen
+  );
+  const setAutomationModalOpen = useWorkspaceStore(
+    (s) => s.setAutomationModalOpen
+  );
+  const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar);
 
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -188,33 +209,128 @@ export function CommandPalette({
       },
     ];
 
-    const cardItems: CommandItem[] = board.cards
-      .filter((c) => !c.is_archived)
-      .map((card) => ({
+    const boardItems: CommandItem[] = boardSummaries.map((b) => ({
+      id: `board-${b.id}`,
+      group: "Jump to Board",
+      label: `${b.title} (${b.card_count} cards)${b.is_starred ? " ⭐" : ""}`,
+      shortcut: b.id === board.id ? "Active" : "Jump",
+      icon: <Kanban className="h-4 w-4 text-indigo-500" />,
+      action: run(() => {
+        if (onSelectBoard) onSelectBoard(b.id);
+      }),
+    }));
+
+    const automationCommands: CommandItem[] = [
+      {
+        id: "open-automation-modal",
+        group: "Butler Automation",
+        label: "⚡ Open Trello Butler Automation Center (AI Rules & Triggers)",
+        shortcut: "⚡",
+        icon: <Zap className="h-4 w-4 text-amber-500" />,
+        action: run(() => setAutomationModalOpen(true)),
+      },
+    ];
+
+    const workspaceCommands: CommandItem[] = [
+      {
+        id: "open-templates-modal",
+        group: "Workspace & Templates",
+        label: "📋 Curated Board Templates Gallery (Sprint, Marketing, Roadmap)",
+        shortcut: "T G",
+        icon: <LayoutTemplate className="h-4 w-4 text-indigo-500" />,
+        action: run(() => setTemplatesModalOpen(true)),
+      },
+      {
+        id: "create-board-modal",
+        group: "Workspace & Templates",
+        label: "+ Create New Board (Custom Colors & Gradients)",
+        shortcut: "N B",
+        icon: <Plus className="h-4 w-4 text-indigo-500" />,
+        action: run(() => setCreateBoardModalOpen(true)),
+      },
+      {
+        id: "create-workspace-modal",
+        group: "Workspace & Templates",
+        label: "+ Create New Workspace",
+        icon: <FolderPlus className="h-4 w-4 text-violet-500" />,
+        action: run(() => setCreateWorkspaceModalOpen(true)),
+      },
+      {
+        id: "toggle-sidebar",
+        group: "Workspace & Templates",
+        label: "Toggle Collapsible Sidebar",
+        shortcut: "[",
+        icon: <PanelLeft className="h-4 w-4 text-zinc-500" />,
+        action: run(() => toggleSidebar()),
+      },
+    ];
+
+    const allCardsToSearch = useMockMode
+      ? INITIAL_SEED_BOARDS.flatMap((b) =>
+          b.cards
+            .filter((c) => !c.is_archived)
+            .map((c) => ({
+              ...c,
+              board_title: b.title,
+              board_id: b.id,
+            }))
+        )
+      : board.cards
+          .filter((c) => !c.is_archived)
+          .map((c) => ({
+            ...c,
+            board_title: board.title,
+            board_id: board.id,
+          }));
+
+    const cardItems: CommandItem[] = allCardsToSearch.map((card) => {
+      const isCurrent = card.board_id === board.id;
+      return {
         id: `card-${card.id}`,
-        group: "Jump to Card",
+        group: isCurrent ? "Cards (This Board)" : `Cards (${card.board_title})`,
         label: `${card.title} (${card.priority})`,
         shortcut: card.position,
         icon: <ArrowRight className="h-4 w-4 text-zinc-400" />,
-        action: run(() => setSelectedCardId(card.id)),
-      }));
+        action: run(() => {
+          if (!isCurrent && onSelectBoard) {
+            onSelectBoard(card.board_id);
+          }
+          setSelectedCardId(card.id);
+        }),
+      };
+    });
 
-    return [...base, ...cardItems];
+    return [
+      ...boardItems,
+      ...automationCommands,
+      ...workspaceCommands,
+      ...base,
+      ...cardItems,
+    ];
   }, [
     board.cards,
+    board.id,
+    board.title,
+    boardSummaries,
     clearAllFilters,
+    onSelectBoard,
     onToggleMockMode,
     onlyBlockedFilter,
     openCreateCardModal,
     setArchivedDrawerOpen,
+    setAutomationModalOpen,
     setBoardMenuOpen,
+    setCreateBoardModalOpen,
+    setCreateWorkspaceModalOpen,
     setOnlyBlockedFilter,
     setOpen,
     setPriorityFilter,
     setSelectedCardId,
+    setTemplatesModalOpen,
     setThemeMode,
     setViewMode,
     toggleLabelsExpanded,
+    toggleSidebar,
     useMockMode,
   ]);
 

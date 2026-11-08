@@ -1,7 +1,13 @@
 import {
   Activity,
+  AIParseAutomationResponse,
+  AutomationAction,
+  AutomationRule,
+  AutomationTrigger,
   Board,
   BoardSchema,
+  BoardSummary,
+  BoardTemplate,
   Card,
   CardSchema,
   Checklist,
@@ -12,23 +18,34 @@ import {
   CopyCardRequest,
   CopyColumnRequest,
   CopyColumnResponse,
+  CreateAutomationRuleRequest,
   CreateBoardRequest,
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateWorkspaceRequest,
+  DEFAULT_BOARD_AUTOMATION_RULES,
+  DEFAULT_BOARD_COLUMNS,
   DEFAULT_BOARD_LABELS,
   DEFAULT_BOARD_MEMBERS,
+  DEFAULT_BOARD_TEMPLATES,
+  DEFAULT_WORKSPACE,
   MoveCardRequest,
   MoveColumnRequest,
   Priority,
   Subtask,
+  UpdateAutomationRuleRequest,
   UpdateBoardRequest,
   UpdateCardRequest,
   UpdateColumnRequest,
+  Workspace,
+  WorkspaceWithBoards,
 } from "@kinetix/contracts";
 import { comparePositions, generatePositionBetween } from "./fractional-index";
 
 export const SEED_BOARD_ID = "11111111-1111-4111-8111-111111111111";
+export const SEED_BOARD_SPRINT_ID = "11111111-1111-4111-8111-111111111112";
+export const SEED_BOARD_MARKETING_ID = "11111111-1111-4111-8111-111111111113";
 export const SEED_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 
 export const COL_BACKLOG_ID = "33333333-3333-4333-8333-333333333331";
@@ -69,16 +86,49 @@ export function createDeterministicUuid(): string {
   });
 }
 
+export function cloneDefaultAutomationRules(
+  boardId = SEED_BOARD_ID
+): AutomationRule[] {
+  return DEFAULT_BOARD_AUTOMATION_RULES.map((r) => ({
+    id: r.id,
+    board_id: boardId,
+    name: r.name,
+    description: r.description,
+    is_enabled: r.is_enabled,
+    trigger: {
+      type: r.trigger.type,
+      column_id: r.trigger.column_id,
+      column_title_match: r.trigger.column_title_match,
+      priority: r.trigger.priority,
+      label_id: r.trigger.label_id,
+    },
+    actions: r.actions.map((a) => ({
+      type: a.type,
+      due_complete_value: a.due_complete_value,
+      member_id: a.member_id,
+      label_id: a.label_id,
+      priority: a.priority,
+      target_column_id: a.target_column_id,
+      checklist_title: a.checklist_title,
+      checklist_items: a.checklist_items ? [...a.checklist_items] : null,
+      comment_text: a.comment_text,
+    })),
+    execution_count: r.execution_count,
+    last_triggered_at: r.last_triggered_at,
+    created_at: r.created_at,
+  }));
+}
+
 export const INITIAL_SEED_BOARD: Board = {
   id: SEED_BOARD_ID,
   workspace_id: SEED_WORKSPACE_ID,
-  title: "Kinetix v2 — Full Trello Parity Launch",
+  title: "Kinetix Product Launch",
   description:
-    "High-craftsmanship real-time workspace uniting Trello visual fluidity with Linear engineering precision.",
+    "High-craftsmanship real-time workspace uniting Trello visual fluidity with Linear engineering precision and Butler automations.",
   is_starred: true,
   background: {
-    type: "solid",
-    value: "adaptive-default",
+    type: "gradient",
+    value: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)",
   },
   created_at: "2026-11-08T08:00:00.000Z",
   labels: DEFAULT_BOARD_LABELS.map((l) => ({
@@ -827,6 +877,7 @@ export const INITIAL_SEED_BOARD: Board = {
       description:
         "completed Algorithm Implementation on Lexicographical O(1) Fractional Indexing Engine",
       created_at: "2026-11-07T14:25:00.000Z",
+      is_automated: false,
     },
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0002",
@@ -837,6 +888,7 @@ export const INITIAL_SEED_BOARD: Board = {
       description:
         "commented on Real-Time WebSocket Broadcast & Redis Pub/Sub Bridge",
       created_at: "2026-11-08T09:30:00.000Z",
+      is_automated: false,
     },
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0003",
@@ -847,10 +899,459 @@ export const INITIAL_SEED_BOARD: Board = {
       description:
         "moved AI Smart Card Enrichment & Multi-Checklist Synthesis to In Progress",
       created_at: "2026-11-08T10:00:00.000Z",
+      is_automated: false,
     },
   ],
+  automation_rules: cloneDefaultAutomationRules(SEED_BOARD_ID),
 };
 
+export const INITIAL_SPRINT_BOARD: Board = {
+  id: SEED_BOARD_SPRINT_ID,
+  workspace_id: SEED_WORKSPACE_ID,
+  title: "Q4 Engineering Sprint",
+  description:
+    "Agile 2-week engineering sprint board for high-velocity software delivery",
+  is_starred: true,
+  background: {
+    type: "gradient",
+    value: "linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)",
+  },
+  created_at: "2026-11-08T08:00:00.000Z",
+  labels: DEFAULT_BOARD_LABELS.map((l) => ({
+    ...l,
+    board_id: SEED_BOARD_SPRINT_ID,
+  })),
+  members: DEFAULT_BOARD_MEMBERS.map((m) => ({ ...m })),
+  columns: [
+    {
+      id: "33333333-3333-4333-8333-333333333341",
+      board_id: SEED_BOARD_SPRINT_ID,
+      title: "Backlog",
+      position: "a0",
+      wip_limit: null,
+      color: "#64748b",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333342",
+      board_id: SEED_BOARD_SPRINT_ID,
+      title: "In Progress",
+      position: "a1",
+      wip_limit: 4,
+      color: "#3b82f6",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333343",
+      board_id: SEED_BOARD_SPRINT_ID,
+      title: "Review",
+      position: "a2",
+      wip_limit: 3,
+      color: "#8b5cf6",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333344",
+      board_id: SEED_BOARD_SPRINT_ID,
+      title: "Done",
+      position: "a3",
+      wip_limit: null,
+      color: "#10b981",
+      is_archived: false,
+    },
+  ],
+  cards: [
+    {
+      id: "44444444-4444-4444-8444-444444444501",
+      board_id: SEED_BOARD_SPRINT_ID,
+      column_id: "33333333-3333-4333-8333-333333333341",
+      title: "PostgreSQL Fractional Index Benchmarks",
+      description:
+        "Measure O(1) single row updates during bursty concurrent drags across 10,000 cards.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["perf", "db"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-20T12:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_BLUE],
+      member_ids: [MEMBER_SAMIR],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
+      updated_at: "2026-11-08T09:00:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444502",
+      board_id: SEED_BOARD_SPRINT_ID,
+      column_id: "33333333-3333-4333-8333-333333333341",
+      title: "Fastify Route Handler Type Validation",
+      description:
+        "Enforce strict Zod and Pydantic v2 parity across all backend JSON envelopes.",
+      position: "a1",
+      priority: "MEDIUM",
+      story_points: 3,
+      tags: ["types", "security"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-22T18:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_YELLOW],
+      member_ids: [MEMBER_ELENA],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T09:10:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444503",
+      board_id: SEED_BOARD_SPRINT_ID,
+      column_id: "33333333-3333-4333-8333-333333333342",
+      title: "Redis Pub/Sub WebSocket Load Test",
+      description:
+        "Verify message delivery latency < 50ms under 500 simultaneous connected clients.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 8,
+      tags: ["realtime", "redis"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-18T10:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_ORANGE],
+      member_ids: [MEMBER_ALEX, MEMBER_MAYA],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
+      updated_at: "2026-11-08T09:30:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444504",
+      board_id: SEED_BOARD_SPRINT_ID,
+      column_id: "33333333-3333-4333-8333-333333333342",
+      title: "Migrate Schema to Drizzle ORM v0.38",
+      description:
+        "Refactor database migrations to use clean relational queries and connection pooling.",
+      position: "a1",
+      priority: "MEDIUM",
+      story_points: 5,
+      tags: ["database"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-19T16:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_BLUE],
+      member_ids: [MEMBER_SAMIR],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T09:40:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444505",
+      board_id: SEED_BOARD_SPRINT_ID,
+      column_id: "33333333-3333-4333-8333-333333333343",
+      title: "End-to-End Playwright Parallel Tests",
+      description:
+        "Verify drag and drop optimistic UI updates and live WebSocket broadcast sync.",
+      position: "a0",
+      priority: "LOW",
+      story_points: 3,
+      tags: ["qa", "testing"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-15T15:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_GREEN],
+      member_ids: [MEMBER_ELENA],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T09:50:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444506",
+      board_id: SEED_BOARD_SPRINT_ID,
+      column_id: "33333333-3333-4333-8333-333333333344",
+      title: "Production Docker Container Hardening",
+      description:
+        "Multi-stage distroless node image builds with non-root user permissions.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 5,
+      tags: ["devops", "security"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-10T11:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_GREEN],
+      member_ids: [MEMBER_ALEX],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: true,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T10:00:00.000Z",
+    },
+  ],
+  activities: [
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010",
+      board_id: SEED_BOARD_SPRINT_ID,
+      card_id: "44444444-4444-4444-8444-444444444506",
+      actor_name: "Alex Rivera",
+      action_type: "CARD_MOVED",
+      description: 'moved "Production Docker Container Hardening" to Done',
+      created_at: "2026-11-08T10:00:00.000Z",
+      is_automated: false,
+    },
+  ],
+  automation_rules: cloneDefaultAutomationRules(SEED_BOARD_SPRINT_ID),
+};
+
+export const INITIAL_MARKETING_BOARD: Board = {
+  id: SEED_BOARD_MARKETING_ID,
+  workspace_id: SEED_WORKSPACE_ID,
+  title: "Growth & Marketing",
+  description:
+    "Campaign pipeline for content creation, asset review, approvals, and scheduled deployment",
+  is_starred: false,
+  background: {
+    type: "gradient",
+    value: "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%)",
+  },
+  created_at: "2026-11-08T08:00:00.000Z",
+  labels: DEFAULT_BOARD_LABELS.map((l) => ({
+    ...l,
+    board_id: SEED_BOARD_MARKETING_ID,
+  })),
+  members: DEFAULT_BOARD_MEMBERS.map((m) => ({ ...m })),
+  columns: [
+    {
+      id: "33333333-3333-4333-8333-333333333351",
+      board_id: SEED_BOARD_MARKETING_ID,
+      title: "Ideas",
+      position: "a0",
+      wip_limit: null,
+      color: "#64748b",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333352",
+      board_id: SEED_BOARD_MARKETING_ID,
+      title: "Drafting",
+      position: "a1",
+      wip_limit: 3,
+      color: "#3b82f6",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333353",
+      board_id: SEED_BOARD_MARKETING_ID,
+      title: "Creative Review",
+      position: "a2",
+      wip_limit: 2,
+      color: "#8b5cf6",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333354",
+      board_id: SEED_BOARD_MARKETING_ID,
+      title: "Scheduled",
+      position: "a3",
+      wip_limit: null,
+      color: "#f59e0b",
+      is_archived: false,
+    },
+    {
+      id: "33333333-3333-4333-8333-333333333355",
+      board_id: SEED_BOARD_MARKETING_ID,
+      title: "Published",
+      position: "a4",
+      wip_limit: null,
+      color: "#10b981",
+      is_archived: false,
+    },
+  ],
+  cards: [
+    {
+      id: "44444444-4444-4444-8444-444444444601",
+      board_id: SEED_BOARD_MARKETING_ID,
+      column_id: "33333333-3333-4333-8333-333333333351",
+      title: "Product Hunt Launch Day Campaign",
+      description:
+        "Prepare maker comment, high-res badge graphics, and launch team notification schedule.",
+      position: "a0",
+      priority: "URGENT",
+      story_points: 5,
+      tags: ["launch", "growth"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-25T08:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_RED],
+      member_ids: [MEMBER_MAYA],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
+      updated_at: "2026-11-08T09:00:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444602",
+      board_id: SEED_BOARD_MARKETING_ID,
+      column_id: "33333333-3333-4333-8333-333333333352",
+      title: "Technical Blog Post: Scaling Real-time Kanban",
+      description:
+        "Deep dive on fractional indexing algorithms and zero lock Redis pub/sub architectures.",
+      position: "a0",
+      priority: "HIGH",
+      story_points: 8,
+      tags: ["content", "tech"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-28T14:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_PURPLE],
+      member_ids: [MEMBER_ALEX],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T09:15:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444603",
+      board_id: SEED_BOARD_MARKETING_ID,
+      column_id: "33333333-3333-4333-8333-333333333353",
+      title: "Customer Case Study: Series-A Dev Team",
+      description:
+        "Interview CTO on how replacing Jira with Kinetix reduced cycle time by 42%.",
+      position: "a0",
+      priority: "MEDIUM",
+      story_points: 3,
+      tags: ["case-study"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-30T17:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_BLUE],
+      member_ids: [MEMBER_ELENA],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T09:30:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444604",
+      board_id: SEED_BOARD_MARKETING_ID,
+      column_id: "33333333-3333-4333-8333-333333333354",
+      title: "Interactive Demo Playground Asset Pack",
+      description:
+        "Interactive browser walkthrough with pre-loaded mock board for sandbox trial.",
+      position: "a0",
+      priority: "MEDIUM",
+      story_points: 5,
+      tags: ["assets", "design"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-22T12:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_YELLOW],
+      member_ids: [MEMBER_SAMIR],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T09:45:00.000Z",
+    },
+    {
+      id: "44444444-4444-4444-8444-444444444605",
+      board_id: SEED_BOARD_MARKETING_ID,
+      column_id: "33333333-3333-4333-8333-333333333355",
+      title: "X / Twitter Thread: Fractional Index Deep Dive",
+      description:
+        "Viral 8-tweet technical breakdown on base-62 lexicographical indexing.",
+      position: "a0",
+      priority: "LOW",
+      story_points: 2,
+      tags: ["social", "growth"],
+      subtasks: [],
+      blocked_by_card_ids: [],
+      due_date: "2026-11-07T10:00:00.000Z",
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: [LABEL_GREEN],
+      member_ids: [MEMBER_ALEX],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: true,
+      is_archived: false,
+      is_watching: false,
+      updated_at: "2026-11-08T10:00:00.000Z",
+    },
+  ],
+  activities: [
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0020",
+      board_id: SEED_BOARD_MARKETING_ID,
+      card_id: "44444444-4444-4444-8444-444444444605",
+      actor_name: "Alex Rivera",
+      action_type: "CARD_MOVED",
+      description: 'published "X / Twitter Thread: Fractional Index Deep Dive"',
+      created_at: "2026-11-08T10:00:00.000Z",
+      is_automated: false,
+    },
+  ],
+  automation_rules: cloneDefaultAutomationRules(SEED_BOARD_MARKETING_ID).slice(0, 1),
+};
+
+export const INITIAL_SEED_BOARDS = [
+  INITIAL_SEED_BOARD,
+  INITIAL_SPRINT_BOARD,
+  INITIAL_MARKETING_BOARD,
+];
+
+const STORAGE_KEY_BOARDS = "kinetix_mock_boards_v3";
+const STORAGE_KEY_WORKSPACES = "kinetix_mock_workspaces_v3";
 const STORAGE_KEY = "kinetix_mock_board_v2";
 
 export function syncSubtasksAndChecklists(
@@ -1114,43 +1615,354 @@ function synthesizeAICardEnrichment(
   };
 }
 
-export class MockApiService {
-  private board: Board;
+export function parseNaturalLanguageAutomation(
+  prompt: string,
+  board: Board
+): AIParseAutomationResponse {
+  const lower = prompt.toLowerCase();
 
-  constructor() {
-    this.board = sortBoardEntities(BoardSchema.parse(INITIAL_SEED_BOARD));
+  // 1. Trigger resolution
+  let trigger: AutomationTrigger = {
+    type: "WHEN_CARD_MOVED_TO_COLUMN",
+    column_id: null,
+    column_title_match: "Done",
+    priority: null,
+    label_id: null,
+  };
+
+  let ruleName = "Custom Butler Rule";
+  let ruleDesc = prompt;
+
+  if (
+    lower.includes("checklist selesai") ||
+    lower.includes("checklist 100%") ||
+    lower.includes("checklist completed") ||
+    lower.includes("when checklist is completed") ||
+    lower.includes("when checklist completed")
+  ) {
+    trigger = {
+      type: "WHEN_CHECKLIST_COMPLETED",
+      column_id: null,
+      column_title_match: null,
+      priority: null,
+      label_id: null,
+    };
+    ruleName = "Auto-Advance on Checklist 100%";
+    ruleDesc = "When checklist completed, trigger automated workflow";
+  } else if (
+    lower.includes("priority") ||
+    lower.includes("prioritas") ||
+    lower.includes("urgent")
+  ) {
+    let p: Priority = "URGENT";
+    if (lower.includes("high") || lower.includes("tinggi")) p = "HIGH";
+    else if (lower.includes("medium") || lower.includes("sedang")) p = "MEDIUM";
+    else if (lower.includes("low") || lower.includes("rendah")) p = "LOW";
+
+    trigger = {
+      type: "WHEN_PRIORITY_CHANGED",
+      column_id: null,
+      column_title_match: null,
+      priority: p,
+      label_id: null,
+    };
+    ruleName = `${p} Priority Triage`;
+    ruleDesc = `When card priority changes to ${p}, execute Butler actions`;
+  } else if (
+    lower.includes("kartu dibuat") ||
+    lower.includes("card is created") ||
+    lower.includes("card created") ||
+    lower.includes("kartu baru")
+  ) {
+    trigger = {
+      type: "WHEN_CARD_CREATED",
+      column_id: null,
+      column_title_match: null,
+      priority: null,
+      label_id: null,
+    };
+    ruleName = "New Card Intake Automations";
+    ruleDesc = "When a card is created, auto-configure card properties";
+  } else if (
+    lower.includes("label added") ||
+    lower.includes("label ditambahkan")
+  ) {
+    const matchedLabel = board.labels.find(
+      (l) =>
+        lower.includes(l.name.toLowerCase()) ||
+        lower.includes(l.color.toLowerCase())
+    );
+    trigger = {
+      type: "WHEN_LABEL_ADDED",
+      column_id: null,
+      column_title_match: null,
+      priority: null,
+      label_id: matchedLabel ? matchedLabel.id : null,
+    };
+    ruleName = `Tag Trigger: ${matchedLabel?.name ?? "Label"}`;
+    ruleDesc = `When label ${matchedLabel?.name ?? ""} is attached to card`;
+  } else {
+    // Default or moved to column
+    const matchedCol = board.columns.find((col) =>
+      lower.includes(col.title.toLowerCase())
+    );
+    trigger = {
+      type: "WHEN_CARD_MOVED_TO_COLUMN",
+      column_id: matchedCol ? matchedCol.id : null,
+      column_title_match: matchedCol ? matchedCol.title : "Done",
+      priority: null,
+      label_id: null,
+    };
+    ruleName = matchedCol
+      ? `Auto-Route to ${matchedCol.title}`
+      : "Auto-Complete & Tag Done Cards";
+    ruleDesc = `When card moved to ${matchedCol?.title ?? "target column"}, run Butler automations`;
   }
 
-  private loadState(): Board {
+  // 2. Actions resolution
+  const actions: AutomationAction[] = [];
+
+  // Check mark due date complete
+  if (
+    lower.includes("due date") ||
+    lower.includes("tenggat waktu") ||
+    lower.includes("mark due") ||
+    lower.includes("due complete") ||
+    lower.includes("selesai")
+  ) {
+    actions.push({
+      type: "MARK_DUE_DATE_COMPLETE",
+      due_complete_value: true,
+      member_id: null,
+      label_id: null,
+      priority: null,
+      target_column_id: null,
+      checklist_title: null,
+      checklist_items: null,
+      comment_text: null,
+    });
+  }
+
+  // Check assign member
+  if (
+    lower.includes("assign") ||
+    lower.includes("tugaskan") ||
+    board.members.some((m) =>
+      lower.includes(m.name.toLowerCase().split(" ")[0])
+    )
+  ) {
+    const matchedMember = board.members.find(
+      (m) =>
+        lower.includes(m.name.toLowerCase()) ||
+        lower.includes(m.name.toLowerCase().split(" ")[0])
+    );
+    if (matchedMember) {
+      actions.push({
+        type: "ASSIGN_MEMBER",
+        member_id: matchedMember.id,
+        label_id: null,
+        priority: null,
+        target_column_id: null,
+        checklist_title: null,
+        checklist_items: null,
+        comment_text: null,
+        due_complete_value: null,
+      });
+    }
+  }
+
+  // Check add label
+  if (
+    lower.includes("label") ||
+    lower.includes("tag") ||
+    board.labels.some(
+      (l) =>
+        lower.includes(l.color.toLowerCase()) ||
+        (l.name && lower.includes(l.name.toLowerCase()))
+    )
+  ) {
+    const matchedLabel = board.labels.find(
+      (l) =>
+        lower.includes(l.color.toLowerCase()) ||
+        (l.name && lower.includes(l.name.toLowerCase()))
+    );
+    if (matchedLabel) {
+      actions.push({
+        type: "ADD_LABEL",
+        label_id: matchedLabel.id,
+        member_id: null,
+        priority: null,
+        target_column_id: null,
+        checklist_title: null,
+        checklist_items: null,
+        comment_text: null,
+        due_complete_value: null,
+      });
+    }
+  }
+
+  // Check move card to column
+  if (
+    lower.includes("pindahkan kartu ke") ||
+    lower.includes("pindahkan ke") ||
+    lower.includes("move card to") ||
+    lower.includes("move to")
+  ) {
+    const targetCol = board.columns.find((col) => {
+      const colLower = col.title.toLowerCase();
+      if (
+        trigger.type === "WHEN_CARD_MOVED_TO_COLUMN" &&
+        trigger.column_title_match &&
+        colLower === trigger.column_title_match.toLowerCase()
+      ) {
+        return false;
+      }
+      return lower.includes(colLower);
+    });
+
+    if (targetCol) {
+      actions.push({
+        type: "MOVE_CARD_TO_COLUMN",
+        target_column_id: targetCol.id,
+        member_id: null,
+        label_id: null,
+        priority: null,
+        checklist_title: null,
+        checklist_items: null,
+        comment_text: null,
+        due_complete_value: null,
+      });
+    }
+  }
+
+  // Check set priority
+  if (
+    (lower.includes("set priority") ||
+      lower.includes("atur prioritas") ||
+      lower.includes("ubah prioritas")) &&
+    trigger.type !== "WHEN_PRIORITY_CHANGED"
+  ) {
+    let p: Priority = "HIGH";
+    if (lower.includes("urgent")) p = "URGENT";
+    else if (lower.includes("medium")) p = "MEDIUM";
+    else if (lower.includes("low")) p = "LOW";
+
+    actions.push({
+      type: "SET_PRIORITY",
+      priority: p,
+      member_id: null,
+      label_id: null,
+      target_column_id: null,
+      checklist_title: null,
+      checklist_items: null,
+      comment_text: null,
+      due_complete_value: null,
+    });
+  }
+
+  // Check add checklist
+  if (
+    lower.includes("checklist") &&
+    trigger.type !== "WHEN_CHECKLIST_COMPLETED"
+  ) {
+    actions.push({
+      type: "ADD_CHECKLIST",
+      checklist_title: "Quality Review Checklist",
+      checklist_items: ["Verify implementation", "Run automated test suite"],
+      member_id: null,
+      label_id: null,
+      priority: null,
+      target_column_id: null,
+      comment_text: null,
+      due_complete_value: null,
+    });
+  }
+
+  if (actions.length === 0) {
+    actions.push({
+      type: "POST_COMMENT",
+      comment_text: `🤖 Butler automated: Executed rule for "${prompt.slice(0, 50)}"`,
+      member_id: null,
+      label_id: null,
+      priority: null,
+      target_column_id: null,
+      checklist_title: null,
+      checklist_items: null,
+      due_complete_value: null,
+    });
+  }
+
+  return {
+    name: ruleName,
+    description: ruleDesc,
+    trigger,
+    actions,
+  };
+}
+
+export class MockApiService {
+  private boards: Map<string, Board> = new Map();
+  private workspaces: Workspace[] = [];
+
+  constructor() {
+    this.initDefaultSeed();
+  }
+
+  private initDefaultSeed(): void {
+    this.boards.clear();
+    for (const b of INITIAL_SEED_BOARDS) {
+      this.boards.set(b.id, sortBoardEntities(BoardSchema.parse(b)));
+    }
+    this.workspaces = [{ ...DEFAULT_WORKSPACE }];
+  }
+
+  private loadState(): Map<string, Board> {
     if (typeof window === "undefined") {
-      return this.board;
+      return this.boards;
     }
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      const raw = window.localStorage.getItem(STORAGE_KEY_BOARDS);
       if (raw) {
-        const parsed = BoardSchema.safeParse(JSON.parse(raw));
-        if (parsed.success) {
-          this.board = sortBoardEntities(parsed.data);
-          return this.board;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          this.boards.clear();
+          for (const b of parsed) {
+            const v = BoardSchema.safeParse(b);
+            if (v.success) {
+              this.boards.set(v.data.id, sortBoardEntities(v.data));
+            }
+          }
+          if (this.boards.size > 0) return this.boards;
         }
       }
     } catch {
       // Ignore storage errors
     }
-    return this.board;
+
+    this.initDefaultSeed();
+    return this.boards;
   }
 
-  private saveState(next: Board): Board {
-    const validated = sortBoardEntities(BoardSchema.parse(next));
-    this.board = validated;
+  private saveState(updatedBoard?: Board): void {
+    if (updatedBoard) {
+      const validated = sortBoardEntities(BoardSchema.parse(updatedBoard));
+      this.boards.set(validated.id, validated);
+    }
     if (typeof window !== "undefined") {
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(validated));
+        const boardsArr = Array.from(this.boards.values());
+        window.localStorage.setItem(
+          STORAGE_KEY_BOARDS,
+          JSON.stringify(boardsArr)
+        );
+        window.localStorage.setItem(
+          STORAGE_KEY_WORKSPACES,
+          JSON.stringify(this.workspaces)
+        );
       } catch {
         // Ignore quota errors
       }
     }
-    return validated;
   }
 
   private createActivity(
@@ -1158,7 +1970,8 @@ export class MockApiService {
     action_type: Activity["action_type"],
     description: string,
     card_id: string | null = null,
-    actor_name = "Alex Rivera"
+    actor_name = "Alex Rivera",
+    is_automated = false
   ): Activity {
     return {
       id: createDeterministicUuid(),
@@ -1168,42 +1981,152 @@ export class MockApiService {
       action_type,
       description,
       created_at: new Date().toISOString(),
+      is_automated,
     };
   }
 
   resetToSeed(): Board {
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(STORAGE_KEY_BOARDS);
+      window.localStorage.removeItem(STORAGE_KEY_WORKSPACES);
     }
-    this.board = sortBoardEntities(BoardSchema.parse(INITIAL_SEED_BOARD));
-    return this.saveState(this.board);
+    this.initDefaultSeed();
+    this.saveState();
+    return this.boards.get(SEED_BOARD_ID) ?? INITIAL_SEED_BOARD;
   }
 
+  // --- Workspaces Endpoints ---
+  async listWorkspaces(): Promise<WorkspaceWithBoards[]> {
+    this.loadState();
+    const boards = Array.from(this.boards.values());
+    const summaries: BoardSummary[] = boards.map((b) => ({
+      id: b.id,
+      workspace_id: b.workspace_id,
+      title: b.title,
+      is_starred: b.is_starred,
+      background: b.background,
+      card_count: b.cards.filter((c) => !c.is_archived).length,
+      updated_at: b.created_at,
+      created_at: b.created_at,
+      description: b.description,
+    }));
+
+    return this.workspaces.map((ws) => ({
+      ...ws,
+      boards: summaries.filter((s) => s.workspace_id === ws.id),
+    }));
+  }
+
+  async getWorkspace(id: string): Promise<WorkspaceWithBoards> {
+    const list = await this.listWorkspaces();
+    const found = list.find((w) => w.id === id);
+    if (!found) {
+      return {
+        ...DEFAULT_WORKSPACE,
+        boards: (await this.getBoardSummaries()).filter(
+          (b) => b.workspace_id === DEFAULT_WORKSPACE.id
+        ),
+      };
+    }
+    return found;
+  }
+
+  async createWorkspace(payload: CreateWorkspaceRequest): Promise<Workspace> {
+    const newWs: Workspace = {
+      id: createDeterministicUuid(),
+      name: payload.name,
+      slug:
+        payload.slug ||
+        payload.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "-")
+          .replace(/-+/g, "-"),
+      description: payload.description ?? "",
+      logo_color: payload.logo_color ?? "#6366f1",
+      created_at: new Date().toISOString(),
+    };
+    this.workspaces.push(newWs);
+    this.saveState();
+    return newWs;
+  }
+
+  // --- Board Templates ---
+  async getBoardTemplates(): Promise<BoardTemplate[]> {
+    return DEFAULT_BOARD_TEMPLATES.map((t) => ({
+      ...t,
+      default_columns: [...t.default_columns],
+    }));
+  }
+
+  // --- Boards Endpoints ---
   async listBoards(): Promise<Board[]> {
-    const board = this.loadState();
-    return [board];
+    this.loadState();
+    return Array.from(this.boards.values());
+  }
+
+  async getBoardSummaries(): Promise<BoardSummary[]> {
+    this.loadState();
+    return Array.from(this.boards.values()).map((b) => ({
+      id: b.id,
+      workspace_id: b.workspace_id,
+      title: b.title,
+      is_starred: b.is_starred,
+      background: b.background,
+      card_count: b.cards.filter((c) => !c.is_archived).length,
+      updated_at: b.created_at,
+      created_at: b.created_at,
+      description: b.description,
+    }));
   }
 
   async getBoard(boardId: string): Promise<Board> {
-    const board = this.loadState();
-    if (boardId && boardId !== board.id) {
-      return board;
-    }
-    return board;
+    this.loadState();
+    const found = this.boards.get(boardId);
+    if (found) return found;
+    return this.boards.get(SEED_BOARD_ID) ?? INITIAL_SEED_BOARD;
   }
 
   async createBoard(payload: CreateBoardRequest): Promise<Board> {
+    this.loadState();
     const boardId = createDeterministicUuid();
+    const template = payload.template_id
+      ? DEFAULT_BOARD_TEMPLATES.find((t) => t.id === payload.template_id)
+      : undefined;
+
+    const columnTitles = template
+      ? template.default_columns
+      : ["Backlog", "In Progress", "Review", "Done"];
+
+    const columns: Column[] = columnTitles.map((title, idx) => ({
+      id: createDeterministicUuid(),
+      board_id: boardId,
+      title,
+      position: `a${idx}`,
+      wip_limit: idx === 1 ? 4 : null,
+      color:
+        idx === 0
+          ? "#64748b"
+          : idx === 1
+            ? "#3b82f6"
+            : idx === 2
+              ? "#8b5cf6"
+              : "#10b981",
+      is_archived: false,
+    }));
+
     const nextBoard: Board = {
       id: boardId,
-      workspace_id: payload.workspace_id ?? SEED_WORKSPACE_ID,
+      workspace_id: payload.workspace_id ?? DEFAULT_WORKSPACE.id,
       title: payload.title,
-      description: payload.description ?? "",
+      description: payload.description ?? (template?.description ?? ""),
       is_starred: payload.is_starred ?? false,
-      background: payload.background ?? {
-        type: "solid",
-        value: "adaptive-default",
-      },
+      background:
+        payload.background ??
+        (template?.background ?? {
+          type: "gradient",
+          value:
+            "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)",
+        }),
       created_at: new Date().toISOString(),
       labels: DEFAULT_BOARD_LABELS.map((l) => ({
         ...l,
@@ -1211,54 +2134,20 @@ export class MockApiService {
       })),
       members: DEFAULT_BOARD_MEMBERS.map((m) => ({ ...m })),
       activities: [],
-      columns: [
-        {
-          id: createDeterministicUuid(),
-          board_id: boardId,
-          title: "Backlog",
-          position: "a0",
-          wip_limit: null,
-          color: "#64748b",
-          is_archived: false,
-        },
-        {
-          id: createDeterministicUuid(),
-          board_id: boardId,
-          title: "In Progress",
-          position: "a1",
-          wip_limit: 5,
-          color: "#3b82f6",
-          is_archived: false,
-        },
-        {
-          id: createDeterministicUuid(),
-          board_id: boardId,
-          title: "Review",
-          position: "a2",
-          wip_limit: null,
-          color: "#8b5cf6",
-          is_archived: false,
-        },
-        {
-          id: createDeterministicUuid(),
-          board_id: boardId,
-          title: "Done",
-          position: "a3",
-          wip_limit: null,
-          color: "#10b981",
-          is_archived: false,
-        },
-      ],
+      columns,
       cards: [],
+      automation_rules: cloneDefaultAutomationRules(boardId),
     };
-    return this.saveState(nextBoard);
+
+    this.saveState(nextBoard);
+    return nextBoard;
   }
 
   async updateBoard(
-    _boardId: string,
+    boardId: string,
     payload: UpdateBoardRequest
   ): Promise<Board> {
-    const board = this.loadState();
+    const board = await this.getBoard(boardId);
     const nextBoard: Board = {
       ...board,
       ...(payload.title !== undefined ? { title: payload.title } : {}),
@@ -1274,14 +2163,111 @@ export class MockApiService {
       ...(payload.labels !== undefined ? { labels: payload.labels } : {}),
       ...(payload.members !== undefined ? { members: payload.members } : {}),
     };
-    return this.saveState(nextBoard);
+    this.saveState(nextBoard);
+    return nextBoard;
   }
 
+  async deleteBoard(boardId: string): Promise<{ id: string; deleted: boolean }> {
+    this.loadState();
+    this.boards.delete(boardId);
+    this.saveState();
+    return { id: boardId, deleted: true };
+  }
+
+  // --- Automation Rules Endpoints ---
+  async getAutomations(boardId: string): Promise<AutomationRule[]> {
+    const board = await this.getBoard(boardId);
+    return board.automation_rules ?? [];
+  }
+
+  async createAutomation(
+    boardId: string,
+    payload: CreateAutomationRuleRequest
+  ): Promise<AutomationRule> {
+    const board = await this.getBoard(boardId);
+    const newRule: AutomationRule = {
+      id: createDeterministicUuid(),
+      board_id: boardId,
+      name: payload.name,
+      description: payload.description ?? "",
+      is_enabled: payload.is_enabled ?? true,
+      trigger: payload.trigger,
+      actions: payload.actions,
+      execution_count: 0,
+      last_triggered_at: null,
+      created_at: new Date().toISOString(),
+    };
+
+    const nextRules = [...(board.automation_rules ?? []), newRule];
+    this.saveState({
+      ...board,
+      automation_rules: nextRules,
+    });
+    return newRule;
+  }
+
+  async updateAutomation(
+    ruleId: string,
+    payload: UpdateAutomationRuleRequest
+  ): Promise<AutomationRule> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const idx = (board.automation_rules ?? []).findIndex(
+        (r) => r.id === ruleId
+      );
+      if (idx !== -1) {
+        const existing = board.automation_rules[idx];
+        const updated: AutomationRule = {
+          ...existing,
+          ...payload,
+          actions: payload.actions ?? existing.actions,
+          trigger: payload.trigger ?? existing.trigger,
+        };
+        const nextRules = [...board.automation_rules];
+        nextRules[idx] = updated;
+        this.saveState({
+          ...board,
+          automation_rules: nextRules,
+        });
+        return updated;
+      }
+    }
+    throw new Error(`Automation rule ${ruleId} not found`);
+  }
+
+  async deleteAutomation(
+    ruleId: string
+  ): Promise<{ id: string; deleted: boolean }> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const filtered = (board.automation_rules ?? []).filter(
+        (r) => r.id !== ruleId
+      );
+      if (filtered.length !== (board.automation_rules ?? []).length) {
+        this.saveState({
+          ...board,
+          automation_rules: filtered,
+        });
+        return { id: ruleId, deleted: true };
+      }
+    }
+    return { id: ruleId, deleted: true };
+  }
+
+  async parseAutomationWithAi(
+    boardId: string,
+    prompt: string
+  ): Promise<AIParseAutomationResponse> {
+    const board = await this.getBoard(boardId);
+    return parseNaturalLanguageAutomation(prompt, board);
+  }
+
+  // --- Column & Card Operations ---
   async createColumn(
-    _boardId: string,
+    boardId: string,
     payload: CreateColumnRequest
   ): Promise<Column> {
-    const board = this.loadState();
+    const board = await this.getBoard(boardId);
     const newCol: Column = ColumnSchema.parse({
       id: createDeterministicUuid(),
       board_id: board.id,
@@ -1302,111 +2288,119 @@ export class MockApiService {
     columnId: string,
     payload: UpdateColumnRequest
   ): Promise<Column> {
-    const board = this.loadState();
-    const existing = board.columns.find((c) => c.id === columnId);
-    if (!existing) {
-      throw new Error(`Column ${columnId} not found`);
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.columns.find((c) => c.id === columnId);
+      if (existing) {
+        const updated: Column = ColumnSchema.parse({
+          ...existing,
+          ...payload,
+        });
+        this.saveState({
+          ...board,
+          columns: board.columns.map((c) => (c.id === columnId ? updated : c)),
+        });
+        return updated;
+      }
     }
-    const updated: Column = ColumnSchema.parse({
-      ...existing,
-      ...payload,
-    });
-    this.saveState({
-      ...board,
-      columns: board.columns.map((c) => (c.id === columnId ? updated : c)),
-    });
-    return updated;
+    throw new Error(`Column ${columnId} not found`);
   }
 
   async moveColumn(
     columnId: string,
     payload: MoveColumnRequest
   ): Promise<Column> {
-    const board = this.loadState();
-    const existing = board.columns.find((c) => c.id === columnId);
-    if (!existing) {
-      throw new Error(`Column ${columnId} not found`);
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.columns.find((c) => c.id === columnId);
+      if (existing) {
+        const updated: Column = ColumnSchema.parse({
+          ...existing,
+          position: payload.new_position,
+        });
+        this.saveState({
+          ...board,
+          columns: board.columns.map((c) => (c.id === columnId ? updated : c)),
+        });
+        return updated;
+      }
     }
-    const updated: Column = ColumnSchema.parse({
-      ...existing,
-      position: payload.new_position,
-    });
-    this.saveState({
-      ...board,
-      columns: board.columns.map((c) => (c.id === columnId ? updated : c)),
-    });
-    return updated;
+    throw new Error(`Column ${columnId} not found`);
   }
 
   async copyColumn(
     columnId: string,
     payload?: CopyColumnRequest
   ): Promise<CopyColumnResponse> {
-    const board = this.loadState();
-    const sourceCol = board.columns.find((c) => c.id === columnId);
-    if (!sourceCol) {
-      throw new Error(`Column ${columnId} not found`);
-    }
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const sourceCol = board.columns.find((c) => c.id === columnId);
+      if (!sourceCol) continue;
 
-    const sortedCols = [...board.columns].sort((a, b) =>
-      comparePositions(a.position, b.position)
-    );
-    const sourceIdx = sortedCols.findIndex((c) => c.id === columnId);
-    const nextColPos = sortedCols[sourceIdx + 1]?.position;
-    const computedPos =
-      payload?.position ??
-      generatePositionBetween(sourceCol.position, nextColPos);
+      const sortedCols = [...board.columns].sort((a, b) =>
+        comparePositions(a.position, b.position)
+      );
+      const sourceIdx = sortedCols.findIndex((c) => c.id === columnId);
+      const nextColPos = sortedCols[sourceIdx + 1]?.position;
+      const computedPos =
+        payload?.position ??
+        generatePositionBetween(sourceCol.position, nextColPos);
 
-    const newCol: Column = ColumnSchema.parse({
-      id: createDeterministicUuid(),
-      board_id: board.id,
-      title: payload?.title?.trim() || `${sourceCol.title} (Copy)`,
-      position: computedPos,
-      wip_limit: sourceCol.wip_limit,
-      color: sourceCol.color,
-      is_archived: false,
-    });
-
-    const sourceCards = board.cards
-      .filter((c) => c.column_id === columnId && !c.is_archived)
-      .sort((a, b) => comparePositions(a.position, b.position));
-
-    const copiedCards: Card[] = sourceCards.map((c) =>
-      CardSchema.parse({
-        ...c,
+      const newCol: Column = ColumnSchema.parse({
         id: createDeterministicUuid(),
-        column_id: newCol.id,
-        checklists: c.checklists.map((cl) => ({
-          ...cl,
+        board_id: board.id,
+        title: payload?.title?.trim() || `${sourceCol.title} (Copy)`,
+        position: computedPos,
+        wip_limit: sourceCol.wip_limit,
+        color: sourceCol.color,
+        is_archived: false,
+      });
+
+      const sourceCards = board.cards
+        .filter((c) => c.column_id === columnId && !c.is_archived)
+        .sort((a, b) => comparePositions(a.position, b.position));
+
+      const copiedCards: Card[] = sourceCards.map((c) =>
+        CardSchema.parse({
+          ...c,
           id: createDeterministicUuid(),
-          items: cl.items.map((item) => ({
-            ...item,
+          column_id: newCol.id,
+          checklists: c.checklists.map((cl) => ({
+            ...cl,
+            id: createDeterministicUuid(),
+            items: cl.items.map((item) => ({
+              ...item,
+              id: createDeterministicUuid(),
+            })),
+          })),
+          subtasks: c.subtasks.map((s) => ({
+            ...s,
             id: createDeterministicUuid(),
           })),
-        })),
-        subtasks: c.subtasks.map((s) => ({
-          ...s,
-          id: createDeterministicUuid(),
-        })),
-        comments: [],
-        updated_at: new Date().toISOString(),
-      })
-    );
+          comments: [],
+          updated_at: new Date().toISOString(),
+        })
+      );
 
-    this.saveState({
-      ...board,
-      columns: [...board.columns, newCol],
-      cards: [...board.cards, ...copiedCards],
-    });
+      this.saveState({
+        ...board,
+        columns: [...board.columns, newCol],
+        cards: [...board.cards, ...copiedCards],
+      });
 
-    return {
-      column: newCol,
-      cards: copiedCards,
-    };
+      return {
+        column: newCol,
+        cards: copiedCards,
+      };
+    }
+    throw new Error(`Column ${columnId} not found`);
   }
 
-  async createCard(_boardId: string, payload: CreateCardRequest): Promise<Card> {
-    const board = this.loadState();
+  async createCard(
+    boardId: string,
+    payload: CreateCardRequest
+  ): Promise<Card> {
+    const board = await this.getBoard(boardId);
     const synced = syncSubtasksAndChecklists(
       payload.subtasks,
       payload.checklists
@@ -1454,166 +2448,175 @@ export class MockApiService {
   }
 
   async updateCard(cardId: string, payload: UpdateCardRequest): Promise<Card> {
-    const board = this.loadState();
-    const existing = board.cards.find((c) => c.id === cardId);
-    if (!existing) {
-      throw new Error(`Card ${cardId} not found`);
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
+
+      let nextSubtasks = payload.subtasks ?? existing.subtasks;
+      let nextChecklists = payload.checklists ?? existing.checklists;
+
+      if (payload.checklists !== undefined) {
+        const synced = syncSubtasksAndChecklists(undefined, payload.checklists);
+        nextSubtasks = synced.subtasks;
+        nextChecklists = synced.checklists;
+      } else if (payload.subtasks !== undefined) {
+        const synced = syncSubtasksAndChecklists(payload.subtasks, undefined);
+        nextSubtasks = synced.subtasks;
+        nextChecklists = synced.checklists;
+      }
+
+      const updated: Card = CardSchema.parse({
+        ...existing,
+        ...payload,
+        subtasks: nextSubtasks,
+        checklists: nextChecklists,
+        updated_at: new Date().toISOString(),
+      });
+
+      const nextActivities = [...board.activities];
+      if (payload.is_archived === true && !existing.is_archived) {
+        nextActivities.unshift(
+          this.createActivity(
+            board,
+            "CARD_ARCHIVED",
+            `archived "${updated.title}"`,
+            updated.id
+          )
+        );
+      }
+
+      this.saveState({
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updated : c)),
+        activities: nextActivities,
+      });
+      return updated;
     }
-
-    let nextSubtasks = payload.subtasks ?? existing.subtasks;
-    let nextChecklists = payload.checklists ?? existing.checklists;
-
-    if (payload.checklists !== undefined) {
-      const synced = syncSubtasksAndChecklists(undefined, payload.checklists);
-      nextSubtasks = synced.subtasks;
-      nextChecklists = synced.checklists;
-    } else if (payload.subtasks !== undefined) {
-      const synced = syncSubtasksAndChecklists(payload.subtasks, undefined);
-      nextSubtasks = synced.subtasks;
-      nextChecklists = synced.checklists;
-    }
-
-    const updated: Card = CardSchema.parse({
-      ...existing,
-      ...payload,
-      subtasks: nextSubtasks,
-      checklists: nextChecklists,
-      updated_at: new Date().toISOString(),
-    });
-
-    const nextActivities = [...board.activities];
-    if (payload.is_archived === true && !existing.is_archived) {
-      nextActivities.unshift(
-        this.createActivity(
-          board,
-          "CARD_ARCHIVED",
-          `archived "${updated.title}"`,
-          updated.id
-        )
-      );
-    }
-
-    this.saveState({
-      ...board,
-      cards: board.cards.map((c) => (c.id === cardId ? updated : c)),
-      activities: nextActivities,
-    });
-    return updated;
+    throw new Error(`Card ${cardId} not found`);
   }
 
   async moveCard(cardId: string, payload: MoveCardRequest): Promise<Card> {
-    const board = this.loadState();
-    const existing = board.cards.find((c) => c.id === cardId);
-    if (!existing) {
-      throw new Error(`Card ${cardId} not found`);
-    }
-    const updated: Card = CardSchema.parse({
-      ...existing,
-      column_id: payload.target_column_id,
-      position: payload.new_position,
-      updated_at: new Date().toISOString(),
-    });
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
 
-    const nextActivities = [...board.activities];
-    if (existing.column_id !== payload.target_column_id) {
-      const sourceCol = board.columns.find((c) => c.id === existing.column_id);
-      const targetCol = board.columns.find(
-        (c) => c.id === payload.target_column_id
-      );
-      nextActivities.unshift(
-        this.createActivity(
-          board,
-          "CARD_MOVED",
-          `moved "${updated.title}" from ${sourceCol?.title ?? "list"} to ${targetCol?.title ?? "list"}`,
-          updated.id
-        )
-      );
-    }
+      const updated: Card = CardSchema.parse({
+        ...existing,
+        column_id: payload.target_column_id,
+        position: payload.new_position,
+        updated_at: new Date().toISOString(),
+      });
 
-    this.saveState({
-      ...board,
-      cards: board.cards.map((c) => (c.id === cardId ? updated : c)),
-      activities: nextActivities,
-    });
-    return updated;
+      const nextActivities = [...board.activities];
+      if (existing.column_id !== payload.target_column_id) {
+        const sourceCol = board.columns.find((c) => c.id === existing.column_id);
+        const targetCol = board.columns.find(
+          (c) => c.id === payload.target_column_id
+        );
+        nextActivities.unshift(
+          this.createActivity(
+            board,
+            "CARD_MOVED",
+            `moved "${updated.title}" from ${sourceCol?.title ?? "list"} to ${targetCol?.title ?? "list"}`,
+            updated.id
+          )
+        );
+      }
+
+      this.saveState({
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updated : c)),
+        activities: nextActivities,
+      });
+      return updated;
+    }
+    throw new Error(`Card ${cardId} not found`);
   }
 
   async copyCard(cardId: string, payload?: CopyCardRequest): Promise<Card> {
-    const board = this.loadState();
-    const existing = board.cards.find((c) => c.id === cardId);
-    if (!existing) {
-      throw new Error(`Card ${cardId} not found`);
-    }
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
 
-    const targetColId = payload?.target_column_id ?? existing.column_id;
-    const colCards = board.cards
-      .filter((c) => c.column_id === targetColId && !c.is_archived)
-      .sort((a, b) => comparePositions(a.position, b.position));
-    const lastPos =
-      colCards.length > 0 ? colCards[colCards.length - 1].position : undefined;
-    const computedPos =
-      payload?.position ?? generatePositionBetween(lastPos, undefined);
+      const targetColId = payload?.target_column_id ?? existing.column_id;
+      const colCards = board.cards
+        .filter((c) => c.column_id === targetColId && !c.is_archived)
+        .sort((a, b) => comparePositions(a.position, b.position));
+      const lastPos =
+        colCards.length > 0 ? colCards[colCards.length - 1].position : undefined;
+      const computedPos =
+        payload?.position ?? generatePositionBetween(lastPos, undefined);
 
-    const keepChecklists = payload?.keep_checklists ?? true;
-    const keepLabels = payload?.keep_labels ?? true;
-    const keepMembers = payload?.keep_members ?? true;
-    const keepAttachments = payload?.keep_attachments ?? true;
+      const keepChecklists = payload?.keep_checklists ?? true;
+      const keepLabels = payload?.keep_labels ?? true;
+      const keepMembers = payload?.keep_members ?? true;
+      const keepAttachments = payload?.keep_attachments ?? true;
 
-    const checklists = keepChecklists
-      ? existing.checklists.map((cl) => ({
-          ...cl,
-          id: createDeterministicUuid(),
-          items: cl.items.map((item) => ({
-            ...item,
+      const checklists = keepChecklists
+        ? existing.checklists.map((cl) => ({
+            ...cl,
             id: createDeterministicUuid(),
-          })),
-        }))
-      : [];
-    const synced = syncSubtasksAndChecklists(undefined, checklists);
-
-    const copied: Card = CardSchema.parse({
-      ...existing,
-      id: createDeterministicUuid(),
-      column_id: targetColId,
-      title: payload?.title?.trim() || `${existing.title} (Copy)`,
-      position: computedPos,
-      checklists: synced.checklists,
-      subtasks: synced.subtasks,
-      label_ids: keepLabels ? [...existing.label_ids] : [],
-      member_ids: keepMembers ? [...existing.member_ids] : [],
-      attachments: keepAttachments
-        ? existing.attachments.map((a) => ({
-            ...a,
-            id: createDeterministicUuid(),
+            items: cl.items.map((item) => ({
+              ...item,
+              id: createDeterministicUuid(),
+            })),
           }))
-        : [],
-      comments: [],
-      is_archived: false,
-      updated_at: new Date().toISOString(),
-    });
+        : [];
+      const synced = syncSubtasksAndChecklists(undefined, checklists);
 
-    const targetCol = board.columns.find((c) => c.id === targetColId);
-    const activity = this.createActivity(
-      board,
-      "CARD_CREATED",
-      `copied "${existing.title}" to "${copied.title}" in ${targetCol?.title ?? "list"}`,
-      copied.id
-    );
+      const copied: Card = CardSchema.parse({
+        ...existing,
+        id: createDeterministicUuid(),
+        column_id: targetColId,
+        title: payload?.title?.trim() || `${existing.title} (Copy)`,
+        position: computedPos,
+        checklists: synced.checklists,
+        subtasks: synced.subtasks,
+        label_ids: keepLabels ? [...existing.label_ids] : [],
+        member_ids: keepMembers ? [...existing.member_ids] : [],
+        attachments: keepAttachments
+          ? existing.attachments.map((a) => ({
+              ...a,
+              id: createDeterministicUuid(),
+            }))
+          : [],
+        comments: [],
+        is_archived: false,
+        updated_at: new Date().toISOString(),
+      });
 
-    this.saveState({
-      ...board,
-      cards: [...board.cards, copied],
-      activities: [activity, ...board.activities],
-    });
-    return copied;
+      const targetCol = board.columns.find((c) => c.id === targetColId);
+      const activity = this.createActivity(
+        board,
+        "CARD_CREATED",
+        `copied "${existing.title}" to "${copied.title}" in ${targetCol?.title ?? "list"}`,
+        copied.id
+      );
+
+      this.saveState({
+        ...board,
+        cards: [...board.cards, copied],
+        activities: [activity, ...board.activities],
+      });
+      return copied;
+    }
+    throw new Error(`Card ${cardId} not found`);
   }
 
   async deleteCard(cardId: string): Promise<{ id: string; deleted: boolean }> {
-    const board = this.loadState();
-    this.saveState({
-      ...board,
-      cards: board.cards.filter((c) => c.id !== cardId),
-    });
+    this.loadState();
+    for (const board of this.boards.values()) {
+      if (board.cards.some((c) => c.id === cardId)) {
+        this.saveState({
+          ...board,
+          cards: board.cards.filter((c) => c.id !== cardId),
+        });
+        return { id: cardId, deleted: true };
+      }
+    }
     return { id: cardId, deleted: true };
   }
 
@@ -1621,98 +2624,100 @@ export class MockApiService {
     cardId: string,
     payload: CreateCommentRequest
   ): Promise<Comment> {
-    const board = this.loadState();
-    const existing = board.cards.find((c) => c.id === cardId);
-    if (!existing) {
-      throw new Error(`Card ${cardId} not found`);
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
+
+      const now = new Date().toISOString();
+      const comment: Comment = CommentSchema.parse({
+        id: createDeterministicUuid(),
+        card_id: cardId,
+        author_id: payload.author_id ?? MEMBER_ALEX,
+        author_name: payload.author_name ?? "Alex Rivera",
+        author_initials: payload.author_initials ?? "AR",
+        content: payload.content,
+        created_at: now,
+        updated_at: now,
+      });
+
+      const updatedCard: Card = CardSchema.parse({
+        ...existing,
+        comments: [...existing.comments, comment],
+        updated_at: now,
+      });
+
+      const activity = this.createActivity(
+        board,
+        "COMMENT_ADDED",
+        `commented on "${existing.title}": ${comment.content.slice(0, 60)}`,
+        cardId,
+        comment.author_name
+      );
+
+      this.saveState({
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
+        activities: [activity, ...board.activities],
+      });
+
+      return comment;
     }
-
-    const now = new Date().toISOString();
-    const comment: Comment = CommentSchema.parse({
-      id: createDeterministicUuid(),
-      card_id: cardId,
-      author_id: payload.author_id ?? MEMBER_ALEX,
-      author_name: payload.author_name ?? "Alex Rivera",
-      author_initials: payload.author_initials ?? "AR",
-      content: payload.content,
-      created_at: now,
-      updated_at: now,
-    });
-
-    const updatedCard: Card = CardSchema.parse({
-      ...existing,
-      comments: [...existing.comments, comment],
-      updated_at: now,
-    });
-
-    const activity = this.createActivity(
-      board,
-      "COMMENT_ADDED",
-      `commented on "${existing.title}": ${comment.content.slice(0, 60)}`,
-      cardId,
-      comment.author_name
-    );
-
-    this.saveState({
-      ...board,
-      cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
-      activities: [activity, ...board.activities],
-    });
-
-    return comment;
+    throw new Error(`Card ${cardId} not found`);
   }
 
   async deleteComment(
     cardId: string,
     commentId: string
   ): Promise<{ id: string; deleted: boolean }> {
-    const board = this.loadState();
-    const existing = board.cards.find((c) => c.id === cardId);
-    if (!existing) {
-      throw new Error(`Card ${cardId} not found`);
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
+
+      const updatedCard: Card = CardSchema.parse({
+        ...existing,
+        comments: existing.comments.filter((cm) => cm.id !== commentId),
+        updated_at: new Date().toISOString(),
+      });
+
+      this.saveState({
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
+      });
+
+      return { id: commentId, deleted: true };
     }
-
-    const updatedCard: Card = CardSchema.parse({
-      ...existing,
-      comments: existing.comments.filter((cm) => cm.id !== commentId),
-      updated_at: new Date().toISOString(),
-    });
-
-    this.saveState({
-      ...board,
-      cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
-    });
-
     return { id: commentId, deleted: true };
   }
 
   async aiDecomposeCard(cardId: string): Promise<Card> {
-    // Simulate realistic AI thinking latency (600ms) for shimmer UX
     await new Promise((resolve) => setTimeout(resolve, 600));
-    const board = this.loadState();
-    const existing = board.cards.find((c) => c.id === cardId);
-    if (!existing) {
-      throw new Error(`Card ${cardId} not found`);
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
+
+      const aiResult = synthesizeAICardEnrichment(existing, board);
+      const updated: Card = CardSchema.parse({
+        ...existing,
+        description: aiResult.description,
+        checklists: aiResult.checklists,
+        subtasks: aiResult.subtasks,
+        label_ids: aiResult.label_ids,
+        story_points: aiResult.story_points,
+        priority: aiResult.priority,
+        tags: Array.from(new Set([...existing.tags, "ai-decomposed"])),
+        updated_at: new Date().toISOString(),
+      });
+
+      this.saveState({
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updated : c)),
+      });
+      return updated;
     }
-
-    const aiResult = synthesizeAICardEnrichment(existing, board);
-    const updated: Card = CardSchema.parse({
-      ...existing,
-      description: aiResult.description,
-      checklists: aiResult.checklists,
-      subtasks: aiResult.subtasks,
-      label_ids: aiResult.label_ids,
-      story_points: aiResult.story_points,
-      priority: aiResult.priority,
-      tags: Array.from(new Set([...existing.tags, "ai-decomposed"])),
-      updated_at: new Date().toISOString(),
-    });
-
-    this.saveState({
-      ...board,
-      cards: board.cards.map((c) => (c.id === cardId ? updated : c)),
-    });
-    return updated;
+    throw new Error(`Card ${cardId} not found`);
   }
 }
 
