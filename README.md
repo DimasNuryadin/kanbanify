@@ -129,12 +129,15 @@ Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Automated E2E Smoke Test
 
-Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full lifecycle:
-1. Health checks on both `http://localhost:8001/health` and `http://localhost:8000/health`.
-2. Board creation (`POST /api/v1/boards`) and verification of the 4 default columns (`Backlog`, `In Progress`, `Review`, `Done`) with fractional positions `"a0"`, `"a1"`, `"a2"`, `"a3"`.
-3. Card creation (`POST /api/v1/boards/:boardId/cards`) and **O(1) Fractional Index Move** (`PATCH /api/v1/cards/:cardId/move`) to `In Progress` at position `"a0V"`.
-4. Live WebSocket broadcast verification on `/ws/boards/:boardId`.
-5. Cross-service **AI Task Decomposition** (`POST /api/v1/cards/:cardId/ai-decompose` -> `POST /internal/v1/decompose-task` with `X-Internal-Token` authentication) verifying populated `subtasks`, `story_points`, and `priority`.
+Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 + Phase 2 Trello lifecycle:
+1. **Health Checks:** Verifies `GET /health` on both `http://localhost:8001/health` and `http://localhost:8000/health` return `200 OK`.
+2. **Board & Trello Defaults:** Creates a board (`POST /api/v1/boards`) and asserts default Trello `labels` (length $\ge 6$), `members` (length $\ge 1$), and 4 default `columns` (`Backlog`, `In Progress`, `Review`, `Done`) with fractional positions `"a0"`, `"a1"`, `"a2"`, `"a3"`.
+3. **List (Column) Operations:** Reorders a column via `PATCH /api/v1/columns/:columnId/move` and copies a column via `POST /api/v1/columns/:columnId/copy`, verifying the duplicated column exists.
+4. **Rich Trello Card Lifecycle:** Creates a card (`POST /api/v1/boards/:boardId/cards`), moves it via **O(1) Fractional Index Move** (`PATCH /api/v1/cards/:cardId/move`), and updates it via `PATCH /api/v1/cards/:cardId` with `cover`, `label_ids`, `member_ids`, multiple named `checklists` (`"Frontend Checklist"` & `"QA Checklist"`), and `is_due_complete: true`.
+5. **Comments & Activity Feed:** Adds a Markdown comment via `POST /api/v1/cards/:cardId/comments` and verifies the comment and a corresponding `COMMENT_ADDED` entry in `board.activities`.
+6. **AI Smart Card Enrichment & Decomposition:** Calls `POST /api/v1/cards/:cardId/ai-decompose` ($\rightarrow$ `POST /internal/v1/enrich-card` & `/internal/v1/decompose-task` with `X-Internal-Token` authentication) and verifies populated `checklists`, `subtasks`, `story_points`, and `priority`.
+7. **Card Copy & Archive:** Copies the card via `POST /api/v1/cards/:cardId/copy` and archives the copy via `PATCH /api/v1/cards/:copiedCardId` (`{ is_archived: true }`).
+8. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId`.
 
 Run the E2E smoke test with a single command:
 
@@ -146,15 +149,29 @@ npm run test:e2e
 
 ---
 
-## UI Features Guide
+## Phase 2 Complete Trello Feature Parity & Workspace Guide
 
-- **Live API / Mock Mode Toggle:** Starts in **Live API Mode** (`NEXT_PUBLIC_USE_MOCK=false`) connected to `http://localhost:8000` and `ws://localhost:8000/ws/boards/:boardId`. Includes a header toggle to switch between **Live API** and standalone **Mock Mode** at any time, plus automatic graceful fallback if the backend is offline.
-- **Light / Dark / System Mode Toggle:** Instant zero-flash theme switching in the top header and Command Palette, styled with a Linear/Vercel-inspired Zinc & Indigo design system.
-- **`Cmd+K` / `Ctrl+K` Command Palette:** Keyboard-first modal to create issues, switch between Kanban and Table views, filter by priority, toggle Blocker Radar, switch themes, or jump directly to any card.
-- **Multi-View Switcher (Kanban Board & Table View):** Switch seamlessly between the multi-column drag-and-drop **Kanban Board** (with WIP limit indicators) and the high-density **Spreadsheet Table View** with inline column status & priority selectors.
-- **O(1) Fractional Drag-and-Drop:** Reordering or moving cards computes a lexicographical midpoint string (`prevPos` + `nextPos` $\rightarrow$ `"a0V"`) in $O(1)$ time, displayed live in the header telemetry pill and persisted via `PATCH /api/v1/cards/:cardId/move`.
-- **Blocker Radar:** Cards with upstream dependencies (`blocked_by_card_ids`) display a red **Blocked** radar badge and can be filtered with one click via the **Blocker Radar** header pill or managed inside the Card Detail Drawer.
-- **✨ AI Task Decomposer:** Open any card to launch the slide-over **Card Detail Drawer** and click **✨ AI Decompose Task**. Requests flow from `apps/web` $\rightarrow$ `apps/api` $\rightarrow$ `services/ai-engine` to synthesize actionable engineering subtasks (with fractional index positions), story points, and priority estimates.
+- **Rich 2-Column Trello Card Back Modal:** Click any card to open the full Trello Card Back dialog featuring a dynamic cover header, editable inline title, quick-add pills (Labels, Members, Checklist, Dates, Attachment, Cover), structured Markdown description editor with live preview, multiple named checklists with animated progress bars, Web/Link attachments, and a combined Markdown comments & activity timeline.
+- **Customizable Card Covers & Expandable Color Labels:** Choose from 10 curated Trello cover colors and toggle between **Normal Header Strip** and **Full Card Tint** modes. Click any label pill on the board (or press `L`) to smoothly expand/collapse label text across all cards simultaneously.
+- **Horizontal List (Column) Drag-and-Drop & List Actions:** Reorder entire lists horizontally with `@dnd-kit` and $O(1)$ fractional indexing (`PATCH /api/v1/columns/:columnId/move`), add new lists inline, rename list headers, set list accent colors & WIP limits, copy entire lists with their cards (`POST /api/v1/columns/:columnId/copy`), move/sort all cards in a list, or archive lists.
+- **Multiple Named Checklists & Smart Due Dates:** Create multiple named checklists per card, toggle items with instant progress percentage bars, filter completed items, and track Start/Due dates with automatic **Complete** (green), **Due Soon** (amber), and **Overdue** (red) status badges.
+- **Multi-View Switcher (Kanban Board, Calendar View & Table View):** Switch seamlessly between the **Kanban Board**, the **Monthly Calendar View** (plotting cards by due date with quick-navigation), and the **Spreadsheet Table View**.
+- **Board Customization Menu, Backgrounds & Archived Items Drawer:** Star/bookmark boards, customize the board background from 12 curated gradients and solid surfaces, inspect the live board activity log, and restore or permanently manage archived cards and lists from the **Archived Items** drawer.
+- **Member Assignment & Quick Filtering:** Assign workspace members (`Alex Rivera`, `Maya Lin`, `Samir Patel`, `Elena Rostova`) to cards and filter the board by member, label, due-date status, or **Blocker Radar** (`blocked_by_card_ids`).
+- **✨ AI Smart Card Enrichment (`apps/web` $\rightarrow$ `apps/api` $\rightarrow$ `services/ai-engine`):** Click **✨ AI Smart Enrich** inside any card modal to synthesize a structured Markdown specification (`## Objective`, `## Technical Architecture`, `## Acceptance Criteria`), multiple categorized checklists (`Implementation Checklist` & `QA & Verification`), auto-matched Trello color labels, story points, and priority estimates.
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+| :--- | :--- |
+| `Cmd + K` / `Ctrl + K` | Open the global **Command Palette** (search cards, switch views, trigger AI actions, change themes/backgrounds) |
+| `C` or `N` | Open the **New Card** modal to create a card in the active board |
+| `L` | Toggle **Expandable Label Text** across all cards on the Kanban board |
+| `Q` | Toggle **"My Cards"** member filter (filters board to cards assigned to Alex Rivera) |
+| `B` | Toggle the right-hand **Board Menu & Activity / Background Drawer** |
+| `Esc` | Close the active Card Modal, Command Palette, or Popover |
 
 ---
 

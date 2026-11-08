@@ -59,6 +59,7 @@ import {
   CARD_COVER_COLORS,
   getDueDateStatus,
   LABEL_COLOR_MAP,
+  resolveCoverColor,
 } from "@/lib/trello-theme";
 
 interface CardDetailDrawerProps {
@@ -543,7 +544,7 @@ export function CardDetailDrawer({
             className="relative flex h-28 w-full items-end justify-end p-3 transition-colors"
             style={
               card.cover.type === "color"
-                ? { backgroundColor: card.cover.value ?? "#3b82f6" }
+                ? { backgroundColor: resolveCoverColor(card.cover.value) }
                 : {
                     backgroundImage: `url(${card.cover.value})`,
                     backgroundSize: "cover",
@@ -1718,7 +1719,7 @@ export function CardDetailDrawer({
                             }
                             className={`h-7 rounded-md transition-transform ${
                               card.cover.type === "color" &&
-                              card.cover.value === c.value
+                              resolveCoverColor(card.cover.value) === c.value
                                 ? "scale-105 ring-2 ring-indigo-500"
                                 : ""
                             }`}

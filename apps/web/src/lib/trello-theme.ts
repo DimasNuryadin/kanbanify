@@ -227,17 +227,42 @@ export const LABEL_COLOR_MAP: Record<
 };
 
 export const CARD_COVER_COLORS = [
-  { name: "Emerald", value: "#10b981" },
-  { name: "Amber", value: "#f59e0b" },
-  { name: "Orange", value: "#f97316" },
-  { name: "Rose", value: "#ef4444" },
-  { name: "Purple", value: "#8b5cf6" },
-  { name: "Blue", value: "#3b82f6" },
-  { name: "Sky", value: "#0ea5e9" },
-  { name: "Teal", value: "#14b8a6" },
-  { name: "Pink", value: "#ec4899" },
-  { name: "Slate", value: "#475569" },
+  { name: "Emerald", value: "#10b981", alias: "green" },
+  { name: "Amber", value: "#f59e0b", alias: "yellow" },
+  { name: "Orange", value: "#f97316", alias: "orange" },
+  { name: "Rose", value: "#ef4444", alias: "red" },
+  { name: "Purple", value: "#8b5cf6", alias: "purple" },
+  { name: "Blue", value: "#3b82f6", alias: "blue" },
+  { name: "Sky", value: "#0ea5e9", alias: "sky" },
+  { name: "Teal", value: "#14b8a6", alias: "lime" },
+  { name: "Pink", value: "#ec4899", alias: "pink" },
+  { name: "Slate", value: "#475569", alias: "black" },
 ];
+
+const NAMED_COVER_COLOR_MAP: Record<string, string> = {
+  green: "#10b981",
+  emerald: "#10b981",
+  yellow: "#f59e0b",
+  amber: "#f59e0b",
+  orange: "#f97316",
+  red: "#ef4444",
+  rose: "#ef4444",
+  purple: "#8b5cf6",
+  violet: "#8b5cf6",
+  blue: "#3b82f6",
+  sky: "#0ea5e9",
+  lime: "#84cc16",
+  teal: "#14b8a6",
+  pink: "#ec4899",
+  black: "#475569",
+  slate: "#475569",
+};
+
+export function resolveCoverColor(value: string | null | undefined): string {
+  if (!value) return "#3b82f6";
+  const normalized = value.trim().toLowerCase();
+  return NAMED_COVER_COLOR_MAP[normalized] ?? value;
+}
 
 export const LIST_COLOR_ACCENTS = [
   { name: "None", value: null },

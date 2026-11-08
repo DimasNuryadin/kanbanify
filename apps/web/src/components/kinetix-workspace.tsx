@@ -13,7 +13,7 @@ import {
   UpdateColumnRequest,
 } from "@kinetix/contracts";
 import { apiClient } from "@/lib/api-client";
-import { mockApi, SEED_BOARD_ID } from "@/lib/mock-data";
+import { createDeterministicUuid, mockApi, SEED_BOARD_ID } from "@/lib/mock-data";
 import { boardWsClient } from "@/lib/ws-client";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import {
@@ -56,6 +56,7 @@ export function KinetixWorkspace() {
   const upsertCard = useWorkspaceStore((s) => s.upsertCard);
   const removeCard = useWorkspaceStore((s) => s.removeCard);
   const upsertColumn = useWorkspaceStore((s) => s.upsertColumn);
+  const removeColumn = useWorkspaceStore((s) => s.removeColumn);
   const appendCardComment = useWorkspaceStore((s) => s.appendCardComment);
 
   const handleFallbackToMock = useCallback(
@@ -237,13 +238,26 @@ export function KinetixWorkspace() {
   // Column (List) Handlers
   const handleCreateColumn = useCallback(
     async (payload: CreateColumnRequest) => {
+      const tempId = createDeterministicUuid();
+      upsertColumn({
+        id: tempId,
+        board_id: board.id,
+        title: payload.title,
+        position: payload.position,
+        wip_limit: payload.wip_limit ?? null,
+        color: payload.color ?? null,
+        is_archived: false,
+      });
       const created = await apiClient.createColumn(board.id, payload, {
         useMock: useMockMode,
         onFallbackToMock: handleFallbackToMock,
       });
+      if (created.id !== tempId) {
+        removeColumn(tempId);
+      }
       upsertColumn(created);
     },
-    [board.id, useMockMode, handleFallbackToMock, upsertColumn]
+    [board.id, useMockMode, handleFallbackToMock, upsertColumn, removeColumn]
   );
 
   const handleUpdateColumn = useCallback(
@@ -284,16 +298,37 @@ export function KinetixWorkspace() {
 
   const handleCopyColumn = useCallback(
     async (columnId: string, payload?: CopyColumnRequest) => {
+      const sourceCol = board.columns.find((c) => c.id === columnId);
+      const tempColId = createDeterministicUuid();
+      if (sourceCol) {
+        upsertColumn({
+          ...sourceCol,
+          id: tempColId,
+          title: payload?.title ?? `${sourceCol.title} (Copy)`,
+          position: payload?.position ?? `${sourceCol.position}V`,
+          is_archived: false,
+        });
+      }
       const res = await apiClient.copyColumn(columnId, payload, {
         useMock: useMockMode,
         onFallbackToMock: handleFallbackToMock,
       });
+      if (res.column.id !== tempColId) {
+        removeColumn(tempColId);
+      }
       upsertColumn(res.column);
       for (const c of res.cards) {
         upsertCard(c);
       }
     },
-    [useMockMode, handleFallbackToMock, upsertColumn, upsertCard]
+    [
+      board.columns,
+      useMockMode,
+      handleFallbackToMock,
+      upsertColumn,
+      removeColumn,
+      upsertCard,
+    ]
   );
 
   // Card Handlers
@@ -381,8 +416,9 @@ export function KinetixWorkspace() {
         onFallbackToMock: handleFallbackToMock,
       });
       appendCardComment(comment);
+      queryClient.invalidateQueries({ queryKey: ["board"] });
     },
-    [useMockMode, handleFallbackToMock, appendCardComment]
+    [useMockMode, handleFallbackToMock, appendCardComment, queryClient]
   );
 
   const handleDeleteComment = useCallback(
