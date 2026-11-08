@@ -4,15 +4,34 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { asc, eq } from "drizzle-orm";
 import {
   DEFAULT_BOARD_COLUMNS,
+  DEFAULT_BOARD_LABELS,
+  DEFAULT_BOARD_MEMBERS,
+  type Activity,
+  type ActivityActionType,
+  type Attachment,
   type Board,
+  type BoardBackground,
   type Card,
+  type CardCover,
+  type Checklist,
+  type ChecklistItem,
   type Column,
+  type Comment,
+  type CopyCardRequest,
+  type CopyColumnRequest,
+  type CopyColumnResponse,
   type CreateBoardRequest,
   type CreateCardRequest,
   type CreateColumnRequest,
+  type CreateCommentRequest,
+  type Label,
+  type Member,
   type MoveCardRequest,
+  type MoveColumnRequest,
   type Subtask,
+  type UpdateBoardRequest,
   type UpdateCardRequest,
+  type UpdateColumnRequest,
 } from "@kinetix/contracts";
 import * as schema from "./schema.js";
 import { AppError } from "../errors.js";
@@ -21,6 +40,17 @@ const { Pool } = pg;
 
 export const DEFAULT_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 export const SEED_BOARD_ID = "11111111-1111-4111-8111-111111111111";
+
+export const DEFAULT_BOARD_BACKGROUND: BoardBackground = {
+  type: "gradient",
+  value: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)",
+};
+
+export const DEFAULT_CARD_COVER: CardCover = {
+  type: "none",
+  value: null,
+  size: "normal",
+};
 
 export function compareFractionalIndex(a: string, b: string): number {
   if (a < b) return -1;
@@ -48,6 +78,200 @@ function sortSubtasks(subtasks: Subtask[]): Subtask[] {
   );
 }
 
+function sortChecklistItems(items: ChecklistItem[]): ChecklistItem[] {
+  return [...items]
+    .map((item) => ({
+      ...item,
+      due_date: normalizeNullableIsoTimestamp(item.due_date),
+      assignee_id: item.assignee_id ?? null,
+    }))
+    .sort((a, b) => compareFractionalIndex(a.position, b.position));
+}
+
+function sortChecklists(checklists: Checklist[]): Checklist[] {
+  return [...checklists]
+    .map((cl) => ({
+      ...cl,
+      title: cl.title || "Checklist",
+      items: sortChecklistItems(cl.items ?? []),
+    }))
+    .sort((a, b) => compareFractionalIndex(a.position, b.position));
+}
+
+/**
+ * Bidirectional sync between Phase 2 `checklists` and Phase 1 `subtasks`
+ * (keeping `subtasks` synced with the first checklist for backward compatibility).
+ */
+export function syncChecklistsAndSubtasks(params: {
+  inputChecklists?: Checklist[];
+  inputSubtasks?: Subtask[];
+  existingChecklists?: Checklist[];
+  existingSubtasks?: Subtask[];
+}): { checklists: Checklist[]; subtasks: Subtask[] } {
+  const {
+    inputChecklists,
+    inputSubtasks,
+    existingChecklists = [],
+    existingSubtasks = [],
+  } = params;
+
+  // Case 1: Caller explicitly provided checklists
+  if (inputChecklists !== undefined) {
+    const sortedChecklists = sortChecklists(inputChecklists);
+    if (
+      inputSubtasks !== undefined &&
+      inputSubtasks.length > 0 &&
+      sortedChecklists.length === 0
+    ) {
+      // Caller passed non-empty subtasks alongside empty default checklists
+      const sortedSt = sortSubtasks(inputSubtasks);
+      const derivedChecklist: Checklist = {
+        id: randomUUID(),
+        title: "Checklist",
+        position: "a0",
+        items: sortedSt.map((st) => ({
+          id: st.id,
+          title: st.title,
+          is_completed: st.is_completed,
+          position: st.position,
+          due_date: null,
+          assignee_id: null,
+        })),
+      };
+      return {
+        checklists: [derivedChecklist],
+        subtasks: sortedSt,
+      };
+    }
+
+    const firstChecklist = sortedChecklists[0];
+    const derivedSubtasks: Subtask[] = firstChecklist
+      ? firstChecklist.items.map((item) => ({
+          id: item.id,
+          title: item.title,
+          is_completed: item.is_completed,
+          position: item.position,
+        }))
+      : inputSubtasks !== undefined
+      ? sortSubtasks(inputSubtasks)
+      : [];
+
+    return {
+      checklists: sortedChecklists,
+      subtasks: sortSubtasks(derivedSubtasks),
+    };
+  }
+
+  // Case 2: Caller only provided subtasks
+  if (inputSubtasks !== undefined) {
+    const sortedSt = sortSubtasks(inputSubtasks);
+    const currentChecklists = sortChecklists(existingChecklists);
+
+    if (sortedSt.length === 0) {
+      if (currentChecklists.length <= 1) {
+        return { checklists: [], subtasks: [] };
+      }
+      const [first, ...rest] = currentChecklists;
+      return {
+        checklists: [{ ...first!, items: [] }, ...rest],
+        subtasks: [],
+      };
+    }
+
+    const existingFirst = currentChecklists[0];
+    const existingItemMap = new Map<string, ChecklistItem>(
+      (existingFirst?.items ?? []).map((it) => [it.id, it])
+    );
+
+    const syncedItems: ChecklistItem[] = sortedSt.map((st) => {
+      const prev = existingItemMap.get(st.id);
+      return {
+        id: st.id,
+        title: st.title,
+        is_completed: st.is_completed,
+        position: st.position,
+        due_date: prev?.due_date ?? null,
+        assignee_id: prev?.assignee_id ?? null,
+      };
+    });
+
+    const updatedFirst: Checklist = existingFirst
+      ? { ...existingFirst, items: syncedItems }
+      : {
+          id: randomUUID(),
+          title: "Checklist",
+          position: "a0",
+          items: syncedItems,
+        };
+
+    return {
+      checklists: [updatedFirst, ...currentChecklists.slice(1)],
+      subtasks: sortedSt,
+    };
+  }
+
+  // Case 3: Neither updated; ensure existing values are consistent
+  const sortedExistingCl = sortChecklists(existingChecklists);
+  const sortedExistingSt = sortSubtasks(existingSubtasks);
+  if (sortedExistingCl.length === 0 && sortedExistingSt.length > 0) {
+    return {
+      checklists: [
+        {
+          id: randomUUID(),
+          title: "Checklist",
+          position: "a0",
+          items: sortedExistingSt.map((st) => ({
+            id: st.id,
+            title: st.title,
+            is_completed: st.is_completed,
+            position: st.position,
+            due_date: null,
+            assignee_id: null,
+          })),
+        },
+      ],
+      subtasks: sortedExistingSt,
+    };
+  }
+  if (sortedExistingCl.length > 0 && sortedExistingSt.length === 0) {
+    const first = sortedExistingCl[0]!;
+    return {
+      checklists: sortedExistingCl,
+      subtasks: first.items.map((it) => ({
+        id: it.id,
+        title: it.title,
+        is_completed: it.is_completed,
+        position: it.position,
+      })),
+    };
+  }
+
+  return {
+    checklists: sortedExistingCl,
+    subtasks: sortedExistingSt,
+  };
+}
+
+export function buildDefaultBoardLabels(boardId: string): Label[] {
+  return DEFAULT_BOARD_LABELS.map((lbl) => ({
+    id: lbl.id,
+    board_id: boardId,
+    name: lbl.name,
+    color: lbl.color,
+  }));
+}
+
+export function buildDefaultBoardMembers(): Member[] {
+  return DEFAULT_BOARD_MEMBERS.map((m) => ({
+    id: m.id,
+    name: m.name,
+    email: m.email,
+    avatar_url: m.avatar_url,
+    initials: m.initials,
+    color: m.color,
+  }));
+}
+
 interface InMemoryStore {
   boards: Map<string, Omit<Board, "columns" | "cards">>;
   columns: Map<string, Column>;
@@ -60,10 +284,38 @@ function createPreseededMemoryStore(): InMemoryStore {
   const cards = new Map<string, Card>();
 
   const createdAt = "2026-11-08T10:00:00.000Z";
+  const seedActivities: Activity[] = [
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      board_id: SEED_BOARD_ID,
+      card_id: "44444444-4444-4444-8444-444444444444",
+      actor_name: "Alex Rivera",
+      action_type: "CARD_CREATED",
+      description: "added Implement OAuth2 PKCE flow to Backlog",
+      created_at: "2026-11-08T10:05:00.000Z",
+    },
+    {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+      board_id: SEED_BOARD_ID,
+      card_id: "44444444-4444-4444-8444-444444444403",
+      actor_name: "Maya Lin",
+      action_type: "CARD_MOVED",
+      description:
+        "moved Real-Time WebSocket Broadcast & Redis Pub/Sub Bridge to In Progress",
+      created_at: "2026-11-08T10:10:00.000Z",
+    },
+  ];
+
   boards.set(SEED_BOARD_ID, {
     id: SEED_BOARD_ID,
     workspace_id: DEFAULT_WORKSPACE_ID,
     title: "Kinetix Platform Launch",
+    description: "High-performance real-time Trello & AI workspace",
+    is_starred: true,
+    background: { ...DEFAULT_BOARD_BACKGROUND },
+    labels: buildDefaultBoardLabels(SEED_BOARD_ID),
+    members: buildDefaultBoardMembers(),
+    activities: seedActivities,
     created_at: createdAt,
   });
 
@@ -74,6 +326,8 @@ function createPreseededMemoryStore(): InMemoryStore {
       title: "Backlog",
       position: "a0",
       wip_limit: null,
+      color: "#3b82f6",
+      is_archived: false,
     },
     {
       id: "33333333-3333-4333-8333-333333333332",
@@ -81,6 +335,8 @@ function createPreseededMemoryStore(): InMemoryStore {
       title: "In Progress",
       position: "a1",
       wip_limit: 5,
+      color: "#8b5cf6",
+      is_archived: false,
     },
     {
       id: "33333333-3333-4333-8333-333333333333",
@@ -88,6 +344,8 @@ function createPreseededMemoryStore(): InMemoryStore {
       title: "Review",
       position: "a2",
       wip_limit: null,
+      color: "#f59e0b",
+      is_archived: false,
     },
     {
       id: "33333333-3333-4333-8333-333333333334",
@@ -95,6 +353,8 @@ function createPreseededMemoryStore(): InMemoryStore {
       title: "Done",
       position: "a3",
       wip_limit: null,
+      color: "#10b981",
+      is_archived: false,
     },
   ];
   for (const col of seedCols) {
@@ -123,6 +383,36 @@ function createPreseededMemoryStore(): InMemoryStore {
       blocked_by_card_ids: [],
       due_date: "2026-11-15T00:00:00.000Z",
       updated_at: "2026-11-08T10:05:00.000Z",
+      cover: {
+        type: "color",
+        value: "#3b82f6",
+        size: "normal",
+      },
+      label_ids: ["77777777-7777-4777-8777-777777777771"],
+      member_ids: ["88888888-8888-4888-8888-888888888881"],
+      checklists: [
+        {
+          id: "99999999-9999-4999-8999-999999999991",
+          title: "Implementation Steps",
+          position: "a0",
+          items: [
+            {
+              id: "55555555-5555-4555-8555-555555555555",
+              title: "Configure callback routes",
+              is_completed: false,
+              position: "a0",
+              due_date: null,
+              assignee_id: "88888888-8888-4888-8888-888888888881",
+            },
+          ],
+        },
+      ],
+      comments: [],
+      attachments: [],
+      start_date: "2026-11-08T00:00:00.000Z",
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
     },
     {
       id: "44444444-4444-4444-8444-444444444403",
@@ -152,6 +442,48 @@ function createPreseededMemoryStore(): InMemoryStore {
       blocked_by_card_ids: [],
       due_date: "2026-11-12T00:00:00.000Z",
       updated_at: "2026-11-08T10:10:00.000Z",
+      cover: {
+        type: "color",
+        value: "#8b5cf6",
+        size: "normal",
+      },
+      label_ids: ["77777777-7777-4777-8777-777777777776"],
+      member_ids: [
+        "88888888-8888-4888-8888-888888888881",
+        "88888888-8888-4888-8888-888888888882",
+      ],
+      checklists: [
+        {
+          id: "99999999-9999-4999-8999-999999999992",
+          title: "Realtime Protocol Checklist",
+          position: "a0",
+          items: [
+            {
+              id: "55555555-5555-4555-8555-555555555506",
+              title:
+                "Subscribe client to /ws/boards/:boardId with auto-reconnect",
+              is_completed: true,
+              position: "a0",
+              due_date: null,
+              assignee_id: "88888888-8888-4888-8888-888888888882",
+            },
+            {
+              id: "55555555-5555-4555-8555-555555555508",
+              title: "Handle multi-tab state convergence under bursty moves",
+              is_completed: false,
+              position: "a1",
+              due_date: null,
+              assignee_id: null,
+            },
+          ],
+        },
+      ],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: true,
     },
     {
       id: "44444444-4444-4444-8444-444444444404",
@@ -168,6 +500,16 @@ function createPreseededMemoryStore(): InMemoryStore {
       blocked_by_card_ids: [],
       due_date: "2026-11-14T00:00:00.000Z",
       updated_at: "2026-11-08T10:15:00.000Z",
+      cover: { ...DEFAULT_CARD_COVER },
+      label_ids: ["77777777-7777-4777-8777-777777777775"],
+      member_ids: ["88888888-8888-4888-8888-888888888883"],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
     },
     {
       id: "44444444-4444-4444-8444-444444444406",
@@ -191,6 +533,32 @@ function createPreseededMemoryStore(): InMemoryStore {
       blocked_by_card_ids: [],
       due_date: "2026-11-13T00:00:00.000Z",
       updated_at: "2026-11-08T10:18:00.000Z",
+      cover: { ...DEFAULT_CARD_COVER },
+      label_ids: ["77777777-7777-4777-8777-777777777772"],
+      member_ids: ["88888888-8888-4888-8888-888888888884"],
+      checklists: [
+        {
+          id: "99999999-9999-4999-8999-999999999993",
+          title: "UX Checklist",
+          position: "a0",
+          items: [
+            {
+              id: "55555555-5555-4555-8555-555555555514",
+              title: "Bind global Cmd+K / Ctrl+K shortcut listener",
+              is_completed: true,
+              position: "a0",
+              due_date: null,
+              assignee_id: null,
+            },
+          ],
+        },
+      ],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
     },
     {
       id: "44444444-4444-4444-8444-444444444408",
@@ -207,6 +575,16 @@ function createPreseededMemoryStore(): InMemoryStore {
       blocked_by_card_ids: ["44444444-4444-4444-8444-444444444403"],
       due_date: "2026-11-20T00:00:00.000Z",
       updated_at: "2026-11-08T10:20:00.000Z",
+      cover: { ...DEFAULT_CARD_COVER },
+      label_ids: ["77777777-7777-4777-8777-777777777774"],
+      member_ids: [],
+      checklists: [],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: false,
+      is_archived: false,
+      is_watching: false,
     },
     {
       id: "44444444-4444-4444-8444-444444444401",
@@ -230,6 +608,32 @@ function createPreseededMemoryStore(): InMemoryStore {
       blocked_by_card_ids: [],
       due_date: "2026-11-10T00:00:00.000Z",
       updated_at: "2026-11-08T09:10:00.000Z",
+      cover: { ...DEFAULT_CARD_COVER },
+      label_ids: ["77777777-7777-4777-8777-777777777771"],
+      member_ids: ["88888888-8888-4888-8888-888888888881"],
+      checklists: [
+        {
+          id: "99999999-9999-4999-8999-999999999994",
+          title: "Algorithm Verification",
+          position: "a0",
+          items: [
+            {
+              id: "55555555-5555-4555-8555-555555555501",
+              title: "Verify adjacent key midpoint (a0 and a1 -> a0V)",
+              is_completed: true,
+              position: "a0",
+              due_date: null,
+              assignee_id: null,
+            },
+          ],
+        },
+      ],
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: true,
+      is_archived: false,
+      is_watching: false,
     },
   ];
   for (const card of seedCards) {
@@ -320,16 +724,34 @@ export class StorageRepository {
         id UUID PRIMARY KEY,
         workspace_id UUID NOT NULL,
         title VARCHAR(150) NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        is_starred BOOLEAN NOT NULL DEFAULT FALSE,
+        background JSONB NOT NULL DEFAULT '{"type":"gradient","value":"linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"}'::jsonb,
+        labels JSONB NOT NULL DEFAULT '[]'::jsonb,
+        members JSONB NOT NULL DEFAULT '[]'::jsonb,
+        activities JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS is_starred BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS background JSONB NOT NULL DEFAULT '{"type":"gradient","value":"linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"}'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS labels JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS activities JSONB NOT NULL DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS columns (
         id UUID PRIMARY KEY,
         board_id UUID NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
         title VARCHAR(100) NOT NULL,
         position VARCHAR(64) NOT NULL,
-        wip_limit INTEGER
+        wip_limit INTEGER,
+        color VARCHAR(64),
+        is_archived BOOLEAN NOT NULL DEFAULT FALSE
       );
+
+      ALTER TABLE columns ADD COLUMN IF NOT EXISTS color VARCHAR(64);
+      ALTER TABLE columns ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
 
       CREATE TABLE IF NOT EXISTS cards (
         id UUID PRIMARY KEY,
@@ -344,8 +766,29 @@ export class StorageRepository {
         subtasks JSONB NOT NULL DEFAULT '[]'::jsonb,
         blocked_by_card_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         due_date TIMESTAMPTZ,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        cover JSONB NOT NULL DEFAULT '{"type":"none","value":null,"size":"normal"}'::jsonb,
+        label_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        member_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        checklists JSONB NOT NULL DEFAULT '[]'::jsonb,
+        comments JSONB NOT NULL DEFAULT '[]'::jsonb,
+        attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+        start_date TIMESTAMPTZ,
+        is_due_complete BOOLEAN NOT NULL DEFAULT FALSE,
+        is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+        is_watching BOOLEAN NOT NULL DEFAULT FALSE
       );
+
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS cover JSONB NOT NULL DEFAULT '{"type":"none","value":null,"size":"normal"}'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS label_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS member_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS checklists JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS comments JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_due_complete BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_watching BOOLEAN NOT NULL DEFAULT FALSE;
 
       CREATE TABLE IF NOT EXISTS subtasks (
         id UUID PRIMARY KEY,
@@ -379,6 +822,12 @@ export class StorageRepository {
           id: b.id,
           workspace_id: b.workspace_id,
           title: b.title,
+          description: b.description,
+          is_starred: b.is_starred,
+          background: b.background,
+          labels: b.labels,
+          members: b.members,
+          activities: b.activities,
           created_at: b.created_at,
         })
         .onConflictDoNothing();
@@ -393,6 +842,8 @@ export class StorageRepository {
           title: col.title,
           position: col.position,
           wip_limit: col.wip_limit,
+          color: col.color,
+          is_archived: col.is_archived,
         })
         .onConflictDoNothing();
     }
@@ -414,6 +865,16 @@ export class StorageRepository {
           blocked_by_card_ids: card.blocked_by_card_ids,
           due_date: card.due_date,
           updated_at: card.updated_at,
+          cover: card.cover,
+          label_ids: card.label_ids,
+          member_ids: card.member_ids,
+          checklists: card.checklists,
+          comments: card.comments,
+          attachments: card.attachments,
+          start_date: card.start_date,
+          is_due_complete: card.is_due_complete,
+          is_archived: card.is_archived,
+          is_watching: card.is_watching,
         })
         .onConflictDoNothing();
 
@@ -441,6 +902,28 @@ export class StorageRepository {
   }
 
   private mapRowToCard(row: typeof schema.cards.$inferSelect): Card {
+    const rawSubtasks = Array.isArray(row.subtasks) ? row.subtasks : [];
+    const rawChecklists = Array.isArray(row.checklists) ? row.checklists : [];
+    const { checklists, subtasks } = syncChecklistsAndSubtasks({
+      existingChecklists: rawChecklists,
+      existingSubtasks: rawSubtasks,
+    });
+
+    const rawComments: Comment[] = Array.isArray(row.comments)
+      ? row.comments.map((c) => ({
+          ...c,
+          created_at: normalizeIsoTimestamp(c.created_at),
+          updated_at: normalizeIsoTimestamp(c.updated_at),
+        }))
+      : [];
+
+    const rawAttachments: Attachment[] = Array.isArray(row.attachments)
+      ? row.attachments.map((a) => ({
+          ...a,
+          created_at: normalizeIsoTimestamp(a.created_at),
+        }))
+      : [];
+
     return {
       id: row.id,
       board_id: row.board_id,
@@ -451,12 +934,22 @@ export class StorageRepository {
       priority: row.priority,
       story_points: row.story_points ?? null,
       tags: Array.isArray(row.tags) ? row.tags : [],
-      subtasks: sortSubtasks(Array.isArray(row.subtasks) ? row.subtasks : []),
+      subtasks,
       blocked_by_card_ids: Array.isArray(row.blocked_by_card_ids)
         ? row.blocked_by_card_ids
         : [],
       due_date: normalizeNullableIsoTimestamp(row.due_date),
       updated_at: normalizeIsoTimestamp(row.updated_at),
+      cover: row.cover ?? { ...DEFAULT_CARD_COVER },
+      label_ids: Array.isArray(row.label_ids) ? row.label_ids : [],
+      member_ids: Array.isArray(row.member_ids) ? row.member_ids : [],
+      checklists,
+      comments: rawComments,
+      attachments: rawAttachments,
+      start_date: normalizeNullableIsoTimestamp(row.start_date),
+      is_due_complete: Boolean(row.is_due_complete),
+      is_archived: Boolean(row.is_archived),
+      is_watching: Boolean(row.is_watching),
     };
   }
 
@@ -467,7 +960,104 @@ export class StorageRepository {
       title: row.title,
       position: row.position,
       wip_limit: row.wip_limit ?? null,
+      color: row.color ?? null,
+      is_archived: Boolean(row.is_archived),
     };
+  }
+
+  private mapRowToBoard(
+    row: typeof schema.boards.$inferSelect,
+    cols: Column[],
+    boardCards: Card[]
+  ): Board {
+    const labels =
+      Array.isArray(row.labels) && row.labels.length > 0
+        ? row.labels
+        : buildDefaultBoardLabels(row.id);
+    const members =
+      Array.isArray(row.members) && row.members.length > 0
+        ? row.members
+        : buildDefaultBoardMembers();
+    const activities: Activity[] = Array.isArray(row.activities)
+      ? row.activities.map((a) => ({
+          ...a,
+          card_id: a.card_id ?? null,
+          created_at: normalizeIsoTimestamp(a.created_at),
+        }))
+      : [];
+
+    return {
+      id: row.id,
+      workspace_id: row.workspace_id,
+      title: row.title,
+      description: row.description ?? "",
+      is_starred: Boolean(row.is_starred),
+      background: row.background ?? { ...DEFAULT_BOARD_BACKGROUND },
+      labels,
+      members,
+      activities,
+      columns: cols,
+      cards: boardCards,
+      created_at: normalizeIsoTimestamp(row.created_at),
+    };
+  }
+
+  // ==========================================================================
+  // ACTIVITY LOGGING HELPER
+  // ==========================================================================
+
+  public async appendBoardActivity(
+    boardId: string,
+    params: {
+      card_id?: string | null;
+      actor_name?: string;
+      action_type: ActivityActionType;
+      description: string;
+    }
+  ): Promise<Activity> {
+    const activity: Activity = {
+      id: randomUUID(),
+      board_id: boardId,
+      card_id: params.card_id ?? null,
+      actor_name: params.actor_name || "Alex Rivera",
+      action_type: params.action_type,
+      description: params.description,
+      created_at: new Date().toISOString(),
+    };
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.activities = [activity, ...(memBoard.activities ?? [])];
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        const [boardRow] = await this.db
+          .select()
+          .from(schema.boards)
+          .where(eq(schema.boards.id, boardId))
+          .limit(1);
+
+        if (boardRow) {
+          const currentActivities = Array.isArray(boardRow.activities)
+            ? boardRow.activities
+            : [];
+          const updatedActivities = [activity, ...currentActivities];
+          await this.db
+            .update(schema.boards)
+            .set({ activities: updatedActivities })
+            .where(eq(schema.boards.id, boardId));
+        }
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL update failed in appendBoardActivity, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return activity;
   }
 
   // ==========================================================================
@@ -500,14 +1090,7 @@ export class StorageRepository {
             .map((c) => this.mapRowToCard(c))
             .sort((a, z) => compareFractionalIndex(a.position, z.position));
 
-          return {
-            id: b.id,
-            workspace_id: b.workspace_id,
-            title: b.title,
-            columns: cols,
-            cards: boardCards,
-            created_at: normalizeIsoTimestamp(b.created_at),
-          };
+          return this.mapRowToBoard(b, cols, boardCards);
         });
       } catch (err) {
         console.warn(
@@ -539,6 +1122,14 @@ export class StorageRepository {
     const boardId = randomUUID();
     const workspaceId = input.workspace_id ?? DEFAULT_WORKSPACE_ID;
     const createdAt = new Date().toISOString();
+    const description = input.description ?? "";
+    const isStarred = input.is_starred ?? false;
+    const background: BoardBackground = input.background ?? {
+      ...DEFAULT_BOARD_BACKGROUND,
+    };
+    const labels = buildDefaultBoardLabels(boardId);
+    const members = buildDefaultBoardMembers();
+    const activities: Activity[] = [];
 
     const defaultColumns: Column[] = DEFAULT_BOARD_COLUMNS.map((col) => ({
       id: randomUUID(),
@@ -546,6 +1137,8 @@ export class StorageRepository {
       title: col.title,
       position: col.position,
       wip_limit: null,
+      color: null,
+      is_archived: false,
     })).sort((a, b) => compareFractionalIndex(a.position, b.position));
 
     // Keep memory synced as well
@@ -553,6 +1146,12 @@ export class StorageRepository {
       id: boardId,
       workspace_id: workspaceId,
       title: input.title,
+      description,
+      is_starred: isStarred,
+      background,
+      labels,
+      members,
+      activities,
       created_at: createdAt,
     });
     for (const col of defaultColumns) {
@@ -565,6 +1164,12 @@ export class StorageRepository {
           id: boardId,
           workspace_id: workspaceId,
           title: input.title,
+          description,
+          is_starred: isStarred,
+          background,
+          labels,
+          members,
+          activities,
           created_at: createdAt,
         });
         await this.db.insert(schema.columns).values(
@@ -574,6 +1179,8 @@ export class StorageRepository {
             title: col.title,
             position: col.position,
             wip_limit: col.wip_limit,
+            color: col.color,
+            is_archived: col.is_archived,
           }))
         );
       } catch (err) {
@@ -589,6 +1196,12 @@ export class StorageRepository {
       id: boardId,
       workspace_id: workspaceId,
       title: input.title,
+      description,
+      is_starred: isStarred,
+      background,
+      labels,
+      members,
+      activities,
       columns: defaultColumns,
       cards: [],
       created_at: createdAt,
@@ -628,14 +1241,7 @@ export class StorageRepository {
           .map((c) => this.mapRowToCard(c))
           .sort((a, b) => compareFractionalIndex(a.position, b.position));
 
-        return {
-          id: boardRow.id,
-          workspace_id: boardRow.workspace_id,
-          title: boardRow.title,
-          columns: cols,
-          cards: boardCards,
-          created_at: normalizeIsoTimestamp(boardRow.created_at),
-        };
+        return this.mapRowToBoard(boardRow, cols, boardCards);
       } catch (err) {
         console.warn(
           "[StorageRepository] PostgreSQL query failed in getBoardById, falling back to memory:",
@@ -663,9 +1269,98 @@ export class StorageRepository {
     };
   }
 
+  public async updateBoard(
+    boardId: string,
+    input: UpdateBoardRequest
+  ): Promise<Board> {
+    const existing = await this.getBoardById(boardId);
+    if (!existing) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const updatedTitle = input.title ?? existing.title;
+    const updatedDescription = input.description ?? existing.description;
+    const updatedStarred = input.is_starred ?? existing.is_starred;
+    const updatedBackground = input.background ?? existing.background;
+    const updatedLabels = input.labels ?? existing.labels;
+    const updatedMembers = input.members ?? existing.members;
+
+    this.memory.boards.set(boardId, {
+      id: existing.id,
+      workspace_id: existing.workspace_id,
+      title: updatedTitle,
+      description: updatedDescription,
+      is_starred: updatedStarred,
+      background: updatedBackground,
+      labels: updatedLabels,
+      members: updatedMembers,
+      activities: existing.activities,
+      created_at: existing.created_at,
+    });
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({
+            title: updatedTitle,
+            description: updatedDescription,
+            is_starred: updatedStarred,
+            background: updatedBackground,
+            labels: updatedLabels,
+            members: updatedMembers,
+          })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL update failed in updateBoard, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return {
+      ...existing,
+      title: updatedTitle,
+      description: updatedDescription,
+      is_starred: updatedStarred,
+      background: updatedBackground,
+      labels: updatedLabels,
+      members: updatedMembers,
+    };
+  }
+
   // ==========================================================================
   // COLUMN OPERATIONS
   // ==========================================================================
+
+  public async getColumnById(columnId: string): Promise<Column | null> {
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        const [row] = await this.db
+          .select()
+          .from(schema.columns)
+          .where(eq(schema.columns.id, columnId))
+          .limit(1);
+        if (!row) return null;
+        return this.mapRowToColumn(row);
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL query failed in getColumnById, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return this.memory.columns.get(columnId) ?? null;
+  }
 
   public async createColumn(
     boardId: string,
@@ -687,6 +1382,8 @@ export class StorageRepository {
       title: input.title,
       position: input.position,
       wip_limit: input.wip_limit ?? null,
+      color: input.color ?? null,
+      is_archived: false,
     };
 
     this.memory.columns.set(newCol.id, newCol);
@@ -699,6 +1396,8 @@ export class StorageRepository {
           title: newCol.title,
           position: newCol.position,
           wip_limit: newCol.wip_limit,
+          color: newCol.color,
+          is_archived: newCol.is_archived,
         });
       } catch (err) {
         console.warn(
@@ -712,13 +1411,210 @@ export class StorageRepository {
     return newCol;
   }
 
+  public async updateColumn(
+    columnId: string,
+    input: UpdateColumnRequest
+  ): Promise<Column> {
+    const existing = await this.getColumnById(columnId);
+    if (!existing) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Column '${columnId}' not found`,
+        { column_id: columnId }
+      );
+    }
+
+    const updatedCol: Column = {
+      ...existing,
+      title: input.title ?? existing.title,
+      position: input.position ?? existing.position,
+      wip_limit:
+        input.wip_limit !== undefined ? input.wip_limit : existing.wip_limit,
+      color: input.color !== undefined ? input.color : existing.color,
+      is_archived:
+        input.is_archived !== undefined
+          ? input.is_archived
+          : existing.is_archived,
+    };
+
+    this.memory.columns.set(columnId, updatedCol);
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.columns)
+          .set({
+            title: updatedCol.title,
+            position: updatedCol.position,
+            wip_limit: updatedCol.wip_limit,
+            color: updatedCol.color,
+            is_archived: updatedCol.is_archived,
+          })
+          .where(eq(schema.columns.id, columnId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL update failed in updateColumn, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return updatedCol;
+  }
+
+  public async moveColumn(
+    columnId: string,
+    input: MoveColumnRequest
+  ): Promise<Column> {
+    return this.updateColumn(columnId, { position: input.new_position });
+  }
+
+  public async copyColumn(
+    columnId: string,
+    input: CopyColumnRequest = {}
+  ): Promise<CopyColumnResponse> {
+    const sourceCol = await this.getColumnById(columnId);
+    if (!sourceCol) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Column '${columnId}' not found`,
+        { column_id: columnId }
+      );
+    }
+
+    const board = await this.getBoardById(sourceCol.board_id);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${sourceCol.board_id}' not found`,
+        { board_id: sourceCol.board_id }
+      );
+    }
+
+    const newCol: Column = {
+      id: randomUUID(),
+      board_id: sourceCol.board_id,
+      title: input.title ?? `${sourceCol.title} (Copy)`,
+      position: input.position ?? `${sourceCol.position}V`,
+      wip_limit: sourceCol.wip_limit,
+      color: sourceCol.color,
+      is_archived: false,
+    };
+
+    this.memory.columns.set(newCol.id, newCol);
+
+    const sourceCards = board.cards
+      .filter((c) => c.column_id === columnId && !c.is_archived)
+      .sort((a, b) => compareFractionalIndex(a.position, b.position));
+
+    const now = new Date().toISOString();
+    const copiedCards: Card[] = sourceCards.map((card) => {
+      const clonedChecklists: Checklist[] = card.checklists.map((cl) => ({
+        id: randomUUID(),
+        title: cl.title,
+        position: cl.position,
+        items: cl.items.map((it) => ({
+          ...it,
+          id: randomUUID(),
+        })),
+      }));
+      const { checklists, subtasks } = syncChecklistsAndSubtasks({
+        inputChecklists:
+          clonedChecklists.length > 0 ? clonedChecklists : undefined,
+        inputSubtasks:
+          clonedChecklists.length === 0
+            ? card.subtasks.map((st) => ({ ...st, id: randomUUID() }))
+            : undefined,
+      });
+
+      const clonedCard: Card = {
+        ...card,
+        id: randomUUID(),
+        column_id: newCol.id,
+        checklists,
+        subtasks,
+        comments: [],
+        attachments: card.attachments.map((att) => ({
+          ...att,
+          id: randomUUID(),
+        })),
+        label_ids: [...card.label_ids],
+        member_ids: [...card.member_ids],
+        tags: [...card.tags],
+        blocked_by_card_ids: [...card.blocked_by_card_ids],
+        cover: { ...card.cover },
+        updated_at: now,
+      };
+      this.memory.cards.set(clonedCard.id, clonedCard);
+      return clonedCard;
+    });
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db.insert(schema.columns).values({
+          id: newCol.id,
+          board_id: newCol.board_id,
+          title: newCol.title,
+          position: newCol.position,
+          wip_limit: newCol.wip_limit,
+          color: newCol.color,
+          is_archived: newCol.is_archived,
+        });
+
+        for (const c of copiedCards) {
+          await this.db.insert(schema.cards).values({
+            id: c.id,
+            board_id: c.board_id,
+            column_id: c.column_id,
+            title: c.title,
+            description: c.description,
+            position: c.position,
+            priority: c.priority,
+            story_points: c.story_points,
+            tags: c.tags,
+            subtasks: c.subtasks,
+            blocked_by_card_ids: c.blocked_by_card_ids,
+            due_date: c.due_date,
+            updated_at: c.updated_at,
+            cover: c.cover,
+            label_ids: c.label_ids,
+            member_ids: c.member_ids,
+            checklists: c.checklists,
+            comments: c.comments,
+            attachments: c.attachments,
+            start_date: c.start_date,
+            is_due_complete: c.is_due_complete,
+            is_archived: c.is_archived,
+            is_watching: c.is_watching,
+          });
+        }
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL insert failed in copyColumn, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return {
+      column: newCol,
+      cards: copiedCards,
+    };
+  }
+
   // ==========================================================================
   // CARD OPERATIONS
   // ==========================================================================
 
   public async createCard(
     boardId: string,
-    input: CreateCardRequest
+    input: CreateCardRequest,
+    actorName = "Alex Rivera"
   ): Promise<Card> {
     const board = await this.getBoardById(boardId);
     if (!board) {
@@ -730,8 +1626,8 @@ export class StorageRepository {
       );
     }
 
-    const columnExists = board.columns.some((c) => c.id === input.column_id);
-    if (!columnExists) {
+    const targetColumn = board.columns.find((c) => c.id === input.column_id);
+    if (!targetColumn) {
       throw new AppError(
         404,
         "RESOURCE_NOT_FOUND",
@@ -741,7 +1637,11 @@ export class StorageRepository {
     }
 
     const now = new Date().toISOString();
-    const sortedSubtasks = sortSubtasks(input.subtasks ?? []);
+    const { checklists, subtasks } = syncChecklistsAndSubtasks({
+      inputChecklists: input.checklists,
+      inputSubtasks: input.subtasks,
+    });
+
     const newCard: Card = {
       id: randomUUID(),
       board_id: boardId,
@@ -752,10 +1652,20 @@ export class StorageRepository {
       priority: input.priority ?? "MEDIUM",
       story_points: input.story_points ?? null,
       tags: input.tags ?? [],
-      subtasks: sortedSubtasks,
+      subtasks,
       blocked_by_card_ids: input.blocked_by_card_ids ?? [],
       due_date: input.due_date ?? null,
       updated_at: now,
+      cover: input.cover ?? { ...DEFAULT_CARD_COVER },
+      label_ids: input.label_ids ?? [],
+      member_ids: input.member_ids ?? [],
+      checklists,
+      comments: input.comments ?? [],
+      attachments: input.attachments ?? [],
+      start_date: input.start_date ?? null,
+      is_due_complete: input.is_due_complete ?? false,
+      is_archived: input.is_archived ?? false,
+      is_watching: input.is_watching ?? false,
     };
 
     this.memory.cards.set(newCard.id, newCard);
@@ -776,6 +1686,16 @@ export class StorageRepository {
           blocked_by_card_ids: newCard.blocked_by_card_ids,
           due_date: newCard.due_date,
           updated_at: newCard.updated_at,
+          cover: newCard.cover,
+          label_ids: newCard.label_ids,
+          member_ids: newCard.member_ids,
+          checklists: newCard.checklists,
+          comments: newCard.comments,
+          attachments: newCard.attachments,
+          start_date: newCard.start_date,
+          is_due_complete: newCard.is_due_complete,
+          is_archived: newCard.is_archived,
+          is_watching: newCard.is_watching,
         });
 
         if (newCard.subtasks.length > 0) {
@@ -797,6 +1717,13 @@ export class StorageRepository {
         this.useMemoryFallback = true;
       }
     }
+
+    await this.appendBoardActivity(boardId, {
+      card_id: newCard.id,
+      actor_name: actorName,
+      action_type: "CARD_CREATED",
+      description: `added ${newCard.title} to ${targetColumn.title}`,
+    });
 
     return newCard;
   }
@@ -825,7 +1752,12 @@ export class StorageRepository {
 
   public async updateCard(
     cardId: string,
-    input: UpdateCardRequest
+    input: UpdateCardRequest,
+    options?: {
+      actorName?: string;
+      activityActionType?: ActivityActionType;
+      activityDescription?: string;
+    }
   ): Promise<Card> {
     const existing = await this.getCardById(cardId);
     if (!existing) {
@@ -838,6 +1770,13 @@ export class StorageRepository {
     }
 
     const now = new Date().toISOString();
+    const { checklists, subtasks } = syncChecklistsAndSubtasks({
+      inputChecklists: input.checklists,
+      inputSubtasks: input.subtasks,
+      existingChecklists: existing.checklists,
+      existingSubtasks: existing.subtasks,
+    });
+
     const updatedCard: Card = {
       ...existing,
       column_id: input.column_id ?? existing.column_id,
@@ -850,15 +1789,32 @@ export class StorageRepository {
           ? input.story_points
           : existing.story_points,
       tags: input.tags ?? existing.tags,
-      subtasks:
-        input.subtasks !== undefined
-          ? sortSubtasks(input.subtasks)
-          : existing.subtasks,
+      subtasks,
       blocked_by_card_ids:
         input.blocked_by_card_ids ?? existing.blocked_by_card_ids,
       due_date:
         input.due_date !== undefined ? input.due_date : existing.due_date,
       updated_at: now,
+      cover: input.cover ?? existing.cover,
+      label_ids: input.label_ids ?? existing.label_ids,
+      member_ids: input.member_ids ?? existing.member_ids,
+      checklists,
+      comments: input.comments ?? existing.comments,
+      attachments: input.attachments ?? existing.attachments,
+      start_date:
+        input.start_date !== undefined ? input.start_date : existing.start_date,
+      is_due_complete:
+        input.is_due_complete !== undefined
+          ? input.is_due_complete
+          : existing.is_due_complete,
+      is_archived:
+        input.is_archived !== undefined
+          ? input.is_archived
+          : existing.is_archived,
+      is_watching:
+        input.is_watching !== undefined
+          ? input.is_watching
+          : existing.is_watching,
     };
 
     this.memory.cards.set(cardId, updatedCard);
@@ -879,10 +1835,20 @@ export class StorageRepository {
             blocked_by_card_ids: updatedCard.blocked_by_card_ids,
             due_date: updatedCard.due_date,
             updated_at: updatedCard.updated_at,
+            cover: updatedCard.cover,
+            label_ids: updatedCard.label_ids,
+            member_ids: updatedCard.member_ids,
+            checklists: updatedCard.checklists,
+            comments: updatedCard.comments,
+            attachments: updatedCard.attachments,
+            start_date: updatedCard.start_date,
+            is_due_complete: updatedCard.is_due_complete,
+            is_archived: updatedCard.is_archived,
+            is_watching: updatedCard.is_watching,
           })
           .where(eq(schema.cards.id, cardId));
 
-        if (input.subtasks !== undefined) {
+        if (input.subtasks !== undefined || input.checklists !== undefined) {
           await this.db
             .delete(schema.subtasks)
             .where(eq(schema.subtasks.card_id, cardId));
@@ -907,6 +1873,39 @@ export class StorageRepository {
       }
     }
 
+    let actionType: ActivityActionType =
+      options?.activityActionType ?? "CHECKLIST_COMPLETED";
+    let description =
+      options?.activityDescription ?? `updated card ${updatedCard.title}`;
+
+    if (!options?.activityActionType) {
+      if (
+        input.is_archived !== undefined &&
+        input.is_archived !== existing.is_archived
+      ) {
+        actionType = "CARD_ARCHIVED";
+        description = input.is_archived
+          ? `archived ${updatedCard.title}`
+          : `restored ${updatedCard.title} to board`;
+      } else if (input.member_ids !== undefined) {
+        actionType = "MEMBER_ASSIGNED";
+        description = `updated members on ${updatedCard.title}`;
+      } else if (
+        input.checklists !== undefined ||
+        input.subtasks !== undefined
+      ) {
+        actionType = "CHECKLIST_COMPLETED";
+        description = `updated checklist items on ${updatedCard.title}`;
+      }
+    }
+
+    await this.appendBoardActivity(existing.board_id, {
+      card_id: cardId,
+      actor_name: options?.actorName ?? "Alex Rivera",
+      action_type: actionType,
+      description,
+    });
+
     return updatedCard;
   }
 
@@ -915,7 +1914,8 @@ export class StorageRepository {
    */
   public async moveCard(
     cardId: string,
-    input: MoveCardRequest
+    input: MoveCardRequest,
+    actorName = "Alex Rivera"
   ): Promise<{ card: Card; sourceColumnId: string }> {
     const existing = await this.getCardById(cardId);
     if (!existing) {
@@ -939,6 +1939,8 @@ export class StorageRepository {
 
     this.memory.cards.set(cardId, movedCard);
 
+    let finalCard = movedCard;
+
     if (this.isUsingPostgres() && this.db) {
       try {
         const [updatedRow] = await this.db
@@ -952,10 +1954,7 @@ export class StorageRepository {
           .returning();
 
         if (updatedRow) {
-          return {
-            card: this.mapRowToCard(updatedRow),
-            sourceColumnId,
-          };
+          finalCard = this.mapRowToCard(updatedRow);
         }
       } catch (err) {
         console.warn(
@@ -966,9 +1965,273 @@ export class StorageRepository {
       }
     }
 
+    const targetCol = await this.getColumnById(input.target_column_id);
+    await this.appendBoardActivity(existing.board_id, {
+      card_id: cardId,
+      actor_name: actorName,
+      action_type: "CARD_MOVED",
+      description: `moved ${existing.title} to ${
+        targetCol?.title ?? input.target_column_id
+      }`,
+    });
+
     return {
-      card: movedCard,
+      card: finalCard,
       sourceColumnId,
+    };
+  }
+
+  public async copyCard(
+    cardId: string,
+    input: Partial<CopyCardRequest> = {},
+    actorName = "Alex Rivera"
+  ): Promise<Card> {
+    const sourceCard = await this.getCardById(cardId);
+    if (!sourceCard) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Card '${cardId}' not found`,
+        { card_id: cardId }
+      );
+    }
+
+    const keepChecklists = input.keep_checklists ?? true;
+    const keepLabels = input.keep_labels ?? true;
+    const keepMembers = input.keep_members ?? true;
+    const keepAttachments = input.keep_attachments ?? true;
+
+    const clonedChecklists: Checklist[] = keepChecklists
+      ? sourceCard.checklists.map((cl) => ({
+          id: randomUUID(),
+          title: cl.title,
+          position: cl.position,
+          items: cl.items.map((it) => ({
+            ...it,
+            id: randomUUID(),
+          })),
+        }))
+      : [];
+
+    const clonedSubtasks: Subtask[] = keepChecklists
+      ? sourceCard.subtasks.map((st) => ({
+          ...st,
+          id: randomUUID(),
+        }))
+      : [];
+
+    return this.createCard(
+      sourceCard.board_id,
+      {
+        column_id: input.target_column_id ?? sourceCard.column_id,
+        title: input.title ?? `${sourceCard.title} (Copy)`,
+        description: sourceCard.description,
+        position: input.position ?? `${sourceCard.position}V`,
+        priority: sourceCard.priority,
+        story_points: sourceCard.story_points,
+        tags: [...sourceCard.tags],
+        subtasks: clonedSubtasks,
+        blocked_by_card_ids: [...sourceCard.blocked_by_card_ids],
+        due_date: sourceCard.due_date,
+        cover: { ...sourceCard.cover },
+        label_ids: keepLabels ? [...sourceCard.label_ids] : [],
+        member_ids: keepMembers ? [...sourceCard.member_ids] : [],
+        checklists: clonedChecklists,
+        comments: [],
+        attachments: keepAttachments
+          ? sourceCard.attachments.map((att) => ({
+              ...att,
+              id: randomUUID(),
+            }))
+          : [],
+        start_date: sourceCard.start_date,
+        is_due_complete: sourceCard.is_due_complete,
+        is_archived: false,
+        is_watching: sourceCard.is_watching,
+      },
+      actorName
+    );
+  }
+
+  public async deleteCard(
+    cardId: string,
+    actorName = "Alex Rivera"
+  ): Promise<{ id: string; board_id: string; deleted: true }> {
+    const existing = await this.getCardById(cardId);
+    if (!existing) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Card '${cardId}' not found`,
+        { card_id: cardId }
+      );
+    }
+
+    this.memory.cards.delete(cardId);
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db.delete(schema.cards).where(eq(schema.cards.id, cardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL deleteCard failed, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    await this.appendBoardActivity(existing.board_id, {
+      card_id: cardId,
+      actor_name: actorName,
+      action_type: "CARD_ARCHIVED",
+      description: `deleted card ${existing.title}`,
+    });
+
+    return {
+      id: cardId,
+      board_id: existing.board_id,
+      deleted: true,
+    };
+  }
+
+  // ==========================================================================
+  // COMMENT OPERATIONS
+  // ==========================================================================
+
+  public async addComment(
+    cardId: string,
+    input: CreateCommentRequest
+  ): Promise<{ comment: Comment; card: Card }> {
+    const existing = await this.getCardById(cardId);
+    if (!existing) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Card '${cardId}' not found`,
+        { card_id: cardId }
+      );
+    }
+
+    const now = new Date().toISOString();
+    const authorName = input.author_name || "Alex Rivera";
+    const derivedInitials =
+      input.author_initials ||
+      authorName
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((part) => part[0]?.toUpperCase() ?? "")
+        .join("")
+        .slice(0, 4) ||
+      "AR";
+
+    const comment: Comment = {
+      id: randomUUID(),
+      card_id: cardId,
+      author_id: input.author_id || "88888888-8888-4888-8888-888888888881",
+      author_name: authorName,
+      author_initials: derivedInitials,
+      content: input.content,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const updatedComments = [...existing.comments, comment];
+    const updatedCard: Card = {
+      ...existing,
+      comments: updatedComments,
+      updated_at: now,
+    };
+
+    this.memory.cards.set(cardId, updatedCard);
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.cards)
+          .set({
+            comments: updatedComments,
+            updated_at: now,
+          })
+          .where(eq(schema.cards.id, cardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL addComment failed, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    await this.appendBoardActivity(existing.board_id, {
+      card_id: cardId,
+      actor_name: authorName,
+      action_type: "COMMENT_ADDED",
+      description: `commented on ${existing.title}: "${input.content.slice(
+        0,
+        80
+      )}"`,
+    });
+
+    return { comment, card: updatedCard };
+  }
+
+  public async deleteComment(
+    cardId: string,
+    commentId: string
+  ): Promise<{ id: string; card: Card; deleted: true }> {
+    const existing = await this.getCardById(cardId);
+    if (!existing) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Card '${cardId}' not found`,
+        { card_id: cardId }
+      );
+    }
+
+    const commentExists = existing.comments.some((c) => c.id === commentId);
+    if (!commentExists) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Comment '${commentId}' not found on card '${cardId}'`,
+        { card_id: cardId, comment_id: commentId }
+      );
+    }
+
+    const now = new Date().toISOString();
+    const updatedComments = existing.comments.filter((c) => c.id !== commentId);
+    const updatedCard: Card = {
+      ...existing,
+      comments: updatedComments,
+      updated_at: now,
+    };
+
+    this.memory.cards.set(cardId, updatedCard);
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.cards)
+          .set({
+            comments: updatedComments,
+            updated_at: now,
+          })
+          .where(eq(schema.cards.id, cardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL deleteComment failed, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return {
+      id: commentId,
+      card: updatedCard,
+      deleted: true,
     };
   }
 }
