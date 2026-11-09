@@ -12,8 +12,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth import ServiceAPIError, verify_internal_token
+from app.board_analyzer import analyze_board
 from app.config import get_settings
 from app.contracts import (
+    AIAnalyticsReportSchema,
+    AIAnalyticsRequestSchema,
     AIDecomposeRequestSchema,
     AIDecomposeResponseSchema,
     AIParseAutomationRequestSchema,
@@ -168,6 +171,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AIParseAutomationResponseSchema:
         return await parse_automation(payload)
+
+    @application.post(
+        "/internal/v1/analyze-board",
+        response_model=AIAnalyticsReportSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="AI Executive Sprint Health & Bottleneck Analyzer",
+    )
+    async def post_analyze_board(
+        payload: AIAnalyticsRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AIAnalyticsReportSchema:
+        return await analyze_board(payload)
 
     return application
 

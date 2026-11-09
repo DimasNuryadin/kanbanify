@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.contracts import (
+    AIAnalyticsReportSchema,
     AIDecomposeResponseSchema,
     AIParseAutomationResponseSchema,
     AISuggestCardEnrichmentResponseSchema,
@@ -27,6 +28,7 @@ from app.contracts import (
     HealthCheckResponseSchema,
     LabelColorEnum,
     PriorityEnum,
+    SprintHealthStatusEnum,
     StandardErrorSchema,
 )
 from app.decomposer import FIBONACCI_POINTS
@@ -977,4 +979,356 @@ def test_parse_automation_live_llm_orchestration_and_fallback(
         )
         assert fallback_parsed.trigger.column_id == "col-done"
         assert len(fallback_parsed.actions) == 2
+
+
+# ============================================================================
+# 4. PHASE 4 AI EXECUTIVE SPRINT HEALTH & BOTTLENECK ANALYZER TESTS
+#    (`POST /internal/v1/analyze-board`)
+# ============================================================================
+
+
+def _sample_board_analytics_payload() -> dict[str, object]:
+    """Return canonical sample AIAnalyticsRequestSchema payload from docs/api-contract.md."""
+    return {
+        "board_title": "Kinetix Platform Launch",
+        "analytics": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "total_cards": 12,
+            "completed_cards": 5,
+            "archived_cards": 1,
+            "completion_rate": 41.7,
+            "total_story_points": 42,
+            "completed_story_points": 18,
+            "overdue_cards_count": 2,
+            "blocked_cards_count": 1,
+            "checklist_completion_rate": 68.5,
+            "automation_executions_total": 9,
+            "cards_by_column": [
+                {
+                    "column_id": "33333333-3333-4333-8333-333333333331",
+                    "column_title": "Backlog",
+                    "card_count": 3,
+                    "total_story_points": 11,
+                    "wip_limit": None,
+                    "is_bottleneck": False,
+                },
+                {
+                    "column_id": "33333333-3333-4333-8333-333333333332",
+                    "column_title": "In Progress",
+                    "card_count": 4,
+                    "total_story_points": 13,
+                    "wip_limit": 3,
+                    "is_bottleneck": True,
+                },
+                {
+                    "column_id": "33333333-3333-4333-8333-333333333334",
+                    "column_title": "Done",
+                    "card_count": 5,
+                    "total_story_points": 18,
+                    "wip_limit": None,
+                    "is_bottleneck": False,
+                },
+            ],
+            "workload_by_member": [
+                {
+                    "member_id": "88888888-8888-4888-8888-888888888881",
+                    "member_name": "Alex Rivera",
+                    "member_initials": "AR",
+                    "member_color": "#3b82f6",
+                    "assigned_cards_count": 5,
+                    "completed_cards_count": 2,
+                    "active_story_points": 13,
+                    "overdue_cards_count": 1,
+                },
+                {
+                    "member_id": "88888888-8888-4888-8888-888888888882",
+                    "member_name": "Samir Patel",
+                    "member_initials": "SP",
+                    "member_color": "#10b981",
+                    "assigned_cards_count": 3,
+                    "completed_cards_count": 2,
+                    "active_story_points": 3,
+                    "overdue_cards_count": 0,
+                },
+            ],
+            "cards_by_priority": [
+                {"priority": "URGENT", "count": 2, "story_points": 13},
+                {"priority": "HIGH", "count": 4, "story_points": 16},
+                {"priority": "MEDIUM", "count": 4, "story_points": 10},
+                {"priority": "LOW", "count": 2, "story_points": 3},
+            ],
+            "cards_by_label": [
+                {
+                    "label_id": "77777777-7777-4777-8777-777777777771",
+                    "label_name": "Ship Ready",
+                    "label_color": "green",
+                    "count": 5,
+                },
+                {
+                    "label_id": "77777777-7777-4777-8777-777777777774",
+                    "label_name": "Blocker",
+                    "label_color": "red",
+                    "count": 1,
+                },
+            ],
+            "burndown_series": [
+                {
+                    "date": "Day 1",
+                    "ideal_remaining_points": 42,
+                    "actual_remaining_points": 42,
+                    "completed_cards_count": 0,
+                },
+                {
+                    "date": "Day 7",
+                    "ideal_remaining_points": 0,
+                    "actual_remaining_points": 24,
+                    "completed_cards_count": 5,
+                },
+            ],
+        },
+    }
+
+
+def test_analyze_board_missing_and_invalid_token_returns_401() -> None:
+    """
+    MANDATORY GATE 2 TEST:
+    Verify POST /internal/v1/analyze-board without X-Internal-Token (or with invalid token)
+    returns 401 UNAUTHORIZED matching StandardErrorSchema.
+    """
+    payload = _sample_board_analytics_payload()
+
+    missing_res = client.post("/internal/v1/analyze-board", json=payload)
+    assert missing_res.status_code == 401
+    missing_err = StandardErrorSchema.model_validate(missing_res.json())
+    assert missing_err.error.code.value == "UNAUTHORIZED"
+    assert "X-Internal-Token" in missing_err.error.message
+
+    invalid_res = client.post(
+        "/internal/v1/analyze-board",
+        headers={"X-Internal-Token": "wrong_internal_token"},
+        json=payload,
+    )
+    assert invalid_res.status_code == 401
+    invalid_err = StandardErrorSchema.model_validate(invalid_res.json())
+    assert invalid_err.error.code.value == "UNAUTHORIZED"
+
+
+def test_analyze_board_validation_error_returns_400_standard_error() -> None:
+    """Verify POST /internal/v1/analyze-board with invalid payload returns 400 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/analyze-board",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json={"board_title": ""},
+    )
+    assert res.status_code == 400
+    validated_err = StandardErrorSchema.model_validate(res.json())
+    assert validated_err.error.code.value == "VALIDATION_ERROR"
+
+
+def test_analyze_board_deterministic_quantitative_analyzer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    MANDATORY GATE 2 TEST:
+    Verify POST /internal/v1/analyze-board with sample BoardAnalytics returns 200 OK
+    matching AIAnalyticsReportSchema with accurate health_score, health_status,
+    specific bottlenecks naming the bottlenecked column and overloaded member,
+    and actionable_recommendations.
+    """
+    monkeypatch.setenv("LLM_API_KEY", "your_llm_api_key_here")
+    payload = _sample_board_analytics_payload()
+
+    res = client.post(
+        "/internal/v1/analyze-board",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    data = res.json()
+
+    # Validate 1:1 against canonical packages/contracts/schemas.py AIAnalyticsReportSchema
+    canonical_report = _canonical_contracts.AIAnalyticsReportSchema.model_validate(data)
+    report = AIAnalyticsReportSchema.model_validate(data)
+
+    assert canonical_report.health_score == report.health_score
+    assert canonical_report.health_status.value == report.health_status.value
+
+    # Verify ON_TRACK score band (60-79) for the sample sprint
+    assert 60 <= report.health_score <= 79
+    assert report.health_status == SprintHealthStatusEnum.ON_TRACK
+
+    # Verify executive summary references completion rate and bottleneck
+    assert "41.7%" in report.executive_summary
+    assert "In Progress" in report.executive_summary
+
+    # Verify data-backed bottlenecks name the exact bottlenecked column ('In Progress')
+    # and overloaded team member ('Alex Rivera')
+    assert len(report.bottlenecks) >= 3
+    joined_bottlenecks = " ".join(report.bottlenecks)
+    assert "In Progress" in joined_bottlenecks
+    assert "Alex Rivera" in joined_bottlenecks
+    assert "overdue" in joined_bottlenecks.lower() or "past due" in joined_bottlenecks.lower()
+
+    # Verify actionable recommendations reference specific column and member rebalancing
+    assert len(report.actionable_recommendations) >= 3
+    joined_recs = " ".join(report.actionable_recommendations)
+    assert "In Progress" in joined_recs
+    assert "Alex Rivera" in joined_recs
+    assert "Samir Patel" in joined_recs
+    assert report.generated_at
+
+
+@pytest.mark.parametrize(
+    (
+        "completion_rate",
+        "completed_sp",
+        "total_sp",
+        "checklist_rate",
+        "overdue_count",
+        "blocked_count",
+        "is_bottleneck",
+        "expected_status",
+        "min_score",
+        "max_score",
+    ),
+    [
+        # EXCELLENT (>= 80): high completion, zero overdue/blocked/bottlenecks
+        (90.0, 38.0, 40.0, 92.0, 0, 0, False, SprintHealthStatusEnum.EXCELLENT, 80.0, 100.0),
+        # ON_TRACK (60-79): moderate completion, minor risk
+        (45.0, 20.0, 40.0, 70.0, 1, 0, True, SprintHealthStatusEnum.ON_TRACK, 60.0, 79.9),
+        # AT_RISK (40-59): low-moderate completion with multiple overdue/blocked items & bottleneck
+        (25.0, 10.0, 40.0, 30.0, 4, 2, True, SprintHealthStatusEnum.AT_RISK, 40.0, 59.9),
+        # CRITICAL (< 40): stalled sprint with heavy overdue, blocked cards, and bottlenecks
+        (5.0, 2.0, 50.0, 10.0, 7, 4, True, SprintHealthStatusEnum.CRITICAL, 0.0, 39.9),
+    ],
+)
+def test_analyze_board_health_score_and_status_bands(
+    completion_rate: float,
+    completed_sp: float,
+    total_sp: float,
+    checklist_rate: float,
+    overdue_count: int,
+    blocked_count: int,
+    is_bottleneck: bool,
+    expected_status: SprintHealthStatusEnum,
+    min_score: float,
+    max_score: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify deterministic health_score math and exact status threshold mappings across all 4 bands."""
+    monkeypatch.setenv("LLM_API_KEY", "your_llm_api_key_here")
+
+    payload = _sample_board_analytics_payload()
+    analytics_dict = dict(payload["analytics"])  # type: ignore[arg-type]
+    analytics_dict["completion_rate"] = completion_rate
+    analytics_dict["completed_story_points"] = completed_sp
+    analytics_dict["total_story_points"] = total_sp
+    analytics_dict["checklist_completion_rate"] = checklist_rate
+    analytics_dict["overdue_cards_count"] = overdue_count
+    analytics_dict["blocked_cards_count"] = blocked_count
+    analytics_dict["automation_executions_total"] = 0
+    analytics_dict["cards_by_column"] = [
+        {
+            "column_id": "col-inprog",
+            "column_title": "In Progress",
+            "card_count": 5 if is_bottleneck else 2,
+            "total_story_points": 15.0,
+            "wip_limit": 3,
+            "is_bottleneck": is_bottleneck,
+        }
+    ]
+    payload["analytics"] = analytics_dict
+
+    res = client.post(
+        "/internal/v1/analyze-board",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert res.status_code == 200
+    report = AIAnalyticsReportSchema.model_validate(res.json())
+    assert min_score <= report.health_score <= max_score
+    assert report.health_status == expected_status
+
+
+def test_analyze_board_live_llm_orchestration_and_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify live LLM mode for POST /internal/v1/analyze-board and graceful fallback on LLM error."""
+    monkeypatch.setenv("LLM_API_KEY", "sk-live-valid-test-key-sprint-999")
+    monkeypatch.setenv("LLM_MODEL", "gpt-4o-mini")
+
+    mock_llm_report = {
+        "health_score": 74,
+        "health_status": "ON_TRACK",
+        "executive_summary": (
+            "Sprint velocity is steady at **41.7% completion** (18/42 story points delivered), "
+            "though a WIP limit breach in **In Progress** (4/3 cards) and 2 overdue cards require attention."
+        ),
+        "bottlenecks": [
+            "Column 'In Progress' exceeds its WIP limit (4 active cards vs limit of 3).",
+            "2 cards are currently past their due date and 1 card is flagged as blocked.",
+            "Alex Rivera is carrying 13 active story points across 3 open cards.",
+        ],
+        "actionable_recommendations": [
+            "Swarm on the 1 blocked card in 'In Progress' to bring the column back within its WIP limit of 3.",
+            "Rebalance 1 High-priority card from Alex Rivera to Samir Patel.",
+            "Review and update due dates for the 2 overdue cards during tomorrow's standup.",
+        ],
+        "generated_at": "2026-11-09T09:00:00.000Z",
+    }
+
+    mock_response = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(mock_llm_report),
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    payload = _sample_board_analytics_payload()
+
+    with patch.object(
+        httpx.AsyncClient,
+        "post",
+        new=AsyncMock(return_value=mock_response),
+    ):
+        res = client.post(
+            "/internal/v1/analyze-board",
+            headers={"X-Internal-Token": DEFAULT_TOKEN},
+            json=payload,
+        )
+        assert res.status_code == 200
+        body = res.json()
+        _canonical_contracts.AIAnalyticsReportSchema.model_validate(body)
+        parsed = AIAnalyticsReportSchema.model_validate(body)
+        assert parsed.health_score == 74
+        assert parsed.health_status == SprintHealthStatusEnum.ON_TRACK
+        assert "41.7% completion" in parsed.executive_summary
+        assert len(parsed.bottlenecks) == 3
+        assert len(parsed.actionable_recommendations) == 3
+
+    # Simulate upstream LLM failure and verify automatic fallback to deterministic analyzer
+    with patch.object(
+        httpx.AsyncClient,
+        "post",
+        new=AsyncMock(side_effect=httpx.ConnectError("LLM service unreachable")),
+    ):
+        fallback_res = client.post(
+            "/internal/v1/analyze-board",
+            headers={"X-Internal-Token": DEFAULT_TOKEN},
+            json=payload,
+        )
+        assert fallback_res.status_code == 200
+        fallback_parsed = AIAnalyticsReportSchema.model_validate(fallback_res.json())
+        assert 60 <= fallback_parsed.health_score <= 79
+        assert fallback_parsed.health_status == SprintHealthStatusEnum.ON_TRACK
+        assert "In Progress" in " ".join(fallback_parsed.bottlenecks)
+        assert "Alex Rivera" in " ".join(fallback_parsed.bottlenecks)
+
 

@@ -247,6 +247,103 @@ class AIParseAutomationResponseSchema(BaseModel):
     actions: list[AutomationActionSchema] = Field(..., min_length=1)
 
 
+# Phase 4 Sprint Analytics & AI Executive Insights Fallback Schemas
+class SprintHealthStatusEnum(str, Enum):
+    EXCELLENT = "EXCELLENT"
+    ON_TRACK = "ON_TRACK"
+    AT_RISK = "AT_RISK"
+    CRITICAL = "CRITICAL"
+
+
+class BurndownDataPointSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    date: str = Field(..., min_length=1)
+    ideal_remaining_points: float = Field(..., ge=0)
+    actual_remaining_points: float = Field(..., ge=0)
+    completed_cards_count: int = Field(..., ge=0)
+
+
+class ColumnMetricSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    column_id: str = Field(..., min_length=1)
+    column_title: str = Field(..., min_length=1)
+    card_count: int = Field(..., ge=0)
+    total_story_points: float = Field(..., ge=0)
+    wip_limit: int | None = None
+    is_bottleneck: bool = False
+
+
+class MemberWorkloadSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    member_id: str = Field(..., min_length=1)
+    member_name: str = Field(..., min_length=1)
+    member_initials: str = Field(..., min_length=1, max_length=4)
+    member_color: str = Field(..., min_length=1)
+    assigned_cards_count: int = Field(..., ge=0)
+    completed_cards_count: int = Field(..., ge=0)
+    active_story_points: float = Field(..., ge=0)
+    overdue_cards_count: int = Field(..., ge=0)
+
+
+class PriorityMetricSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    priority: PriorityEnum
+    count: int = Field(..., ge=0)
+    story_points: float = Field(..., ge=0)
+
+
+class LabelMetricSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label_id: str = Field(..., min_length=1)
+    label_name: str = ""
+    label_color: str = Field(..., min_length=1)
+    count: int = Field(..., ge=0)
+
+
+class BoardAnalyticsSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_id: str = Field(..., min_length=1)
+    total_cards: int = Field(..., ge=0)
+    completed_cards: int = Field(..., ge=0)
+    archived_cards: int = Field(..., ge=0)
+    completion_rate: float = Field(..., ge=0, le=100)
+    total_story_points: float = Field(..., ge=0)
+    completed_story_points: float = Field(..., ge=0)
+    overdue_cards_count: int = Field(..., ge=0)
+    blocked_cards_count: int = Field(..., ge=0)
+    checklist_completion_rate: float = Field(..., ge=0, le=100)
+    automation_executions_total: int = Field(..., ge=0)
+    cards_by_column: list[ColumnMetricSchema] = Field(default_factory=list)
+    workload_by_member: list[MemberWorkloadSchema] = Field(default_factory=list)
+    cards_by_priority: list[PriorityMetricSchema] = Field(default_factory=list)
+    cards_by_label: list[LabelMetricSchema] = Field(default_factory=list)
+    burndown_series: list[BurndownDataPointSchema] = Field(default_factory=list)
+
+
+class AIAnalyticsRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    analytics: BoardAnalyticsSchema
+
+
+class AIAnalyticsReportSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    health_score: float = Field(..., ge=0, le=100)
+    health_status: SprintHealthStatusEnum
+    executive_summary: str = Field(..., min_length=1)
+    bottlenecks: list[str] = Field(default_factory=list)
+    actionable_recommendations: list[str] = Field(default_factory=list)
+    generated_at: datetime | str
+
+
 class ErrorBodySchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -305,6 +402,15 @@ if _SHARED_SCHEMAS_PATH.is_file():
         AIParseAutomationLabelContextSchema = _module.AIParseAutomationLabelContextSchema  # type: ignore[misc]
         AIParseAutomationRequestSchema = _module.AIParseAutomationRequestSchema  # type: ignore[misc]
         AIParseAutomationResponseSchema = _module.AIParseAutomationResponseSchema  # type: ignore[misc]
+        SprintHealthStatusEnum = _module.SprintHealthStatusEnum  # type: ignore[misc]
+        BurndownDataPointSchema = _module.BurndownDataPointSchema  # type: ignore[misc]
+        ColumnMetricSchema = _module.ColumnMetricSchema  # type: ignore[misc]
+        MemberWorkloadSchema = _module.MemberWorkloadSchema  # type: ignore[misc]
+        PriorityMetricSchema = _module.PriorityMetricSchema  # type: ignore[misc]
+        LabelMetricSchema = _module.LabelMetricSchema  # type: ignore[misc]
+        BoardAnalyticsSchema = _module.BoardAnalyticsSchema  # type: ignore[misc]
+        AIAnalyticsRequestSchema = _module.AIAnalyticsRequestSchema  # type: ignore[misc]
+        AIAnalyticsReportSchema = _module.AIAnalyticsReportSchema  # type: ignore[misc]
 
 
 _DEFAULT_COLOR_NAMES: dict[str, str] = {
@@ -468,6 +574,9 @@ AISuggestCardEnrichmentRequestSchema.model_rebuild()
 AISuggestCardEnrichmentResponseSchema.model_rebuild()
 AIParseAutomationRequestSchema.model_rebuild()
 AIParseAutomationResponseSchema.model_rebuild()
+BoardAnalyticsSchema.model_rebuild()
+AIAnalyticsRequestSchema.model_rebuild()
+AIAnalyticsReportSchema.model_rebuild()
 
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
@@ -483,7 +592,21 @@ AIParseAutomationLabelContext = AIParseAutomationLabelContextSchema
 AIParseAutomationRequest = AIParseAutomationRequestSchema
 AIParseAutomationResponse = AIParseAutomationResponseSchema
 
+SprintHealthStatus = SprintHealthStatusEnum
+BurndownDataPoint = BurndownDataPointSchema
+ColumnMetric = ColumnMetricSchema
+MemberWorkload = MemberWorkloadSchema
+PriorityMetric = PriorityMetricSchema
+LabelMetric = LabelMetricSchema
+BoardAnalytics = BoardAnalyticsSchema
+AIAnalyticsRequest = AIAnalyticsRequestSchema
+AIAnalyticsReport = AIAnalyticsReportSchema
+
 __all__ = [
+    "AIAnalyticsReport",
+    "AIAnalyticsReportSchema",
+    "AIAnalyticsRequest",
+    "AIAnalyticsRequestSchema",
     "AIDecomposeRequest",
     "AIDecomposeRequestSchema",
     "AIDecomposeResponse",
@@ -510,14 +633,28 @@ __all__ = [
     "AutomationTrigger",
     "AutomationTriggerSchema",
     "AutomationTriggerTypeEnum",
+    "BoardAnalytics",
+    "BoardAnalyticsSchema",
+    "BurndownDataPoint",
+    "BurndownDataPointSchema",
     "ChecklistItemSchema",
     "ChecklistSchema",
+    "ColumnMetric",
+    "ColumnMetricSchema",
     "ErrorBodySchema",
     "ErrorCodeEnum",
     "HealthCheckResponseSchema",
     "LabelColorEnum",
+    "LabelMetric",
+    "LabelMetricSchema",
     "LabelSchema",
+    "MemberWorkload",
+    "MemberWorkloadSchema",
     "PriorityEnum",
+    "PriorityMetric",
+    "PriorityMetricSchema",
+    "SprintHealthStatus",
+    "SprintHealthStatusEnum",
     "StandardErrorSchema",
     "SubtaskSchema",
     "SuggestedChecklistSchema",
