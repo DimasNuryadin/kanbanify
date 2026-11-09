@@ -111,6 +111,19 @@ class WSEventTypeEnum(str, Enum):
     AUTOMATION_RULE_UPDATED = "AUTOMATION_RULE_UPDATED"
     AUTOMATION_RULE_DELETED = "AUTOMATION_RULE_DELETED"
     BOARD_DELETED = "BOARD_DELETED"
+    BOARD_IMPORTED = "BOARD_IMPORTED"
+
+
+class SprintHealthStatusEnum(str, Enum):
+    EXCELLENT = "EXCELLENT"
+    ON_TRACK = "ON_TRACK"
+    AT_RISK = "AT_RISK"
+    CRITICAL = "CRITICAL"
+
+
+class BoardImportFormatEnum(str, Enum):
+    TRELLO_JSON = "trello_json"
+    KINETIX_JSON = "kinetix_json"
 
 
 class ErrorCodeEnum(str, Enum):
@@ -682,6 +695,126 @@ class AIParseAutomationResponseSchema(BaseModel):
     actions: list[AutomationActionSchema] = Field(..., min_length=1)
 
 
+# ============================================================================
+# 5.4 PHASE 4 TEAM ANALYTICS, AI SPRINT INSIGHTS & TRELLO IMPORT/EXPORT SCHEMAS
+# ============================================================================
+
+
+class BurndownDataPointSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    date: str = Field(..., min_length=1)
+    ideal_remaining_points: float = Field(..., ge=0)
+    actual_remaining_points: float = Field(..., ge=0)
+    completed_cards_count: int = Field(..., ge=0)
+
+
+class ColumnMetricSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    column_id: str = Field(..., min_length=1)
+    column_title: str = Field(..., min_length=1)
+    card_count: int = Field(..., ge=0)
+    total_story_points: float = Field(..., ge=0)
+    wip_limit: int | None = None
+    is_bottleneck: bool = False
+
+
+class MemberWorkloadSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    member_id: str = Field(..., min_length=1)
+    member_name: str = Field(..., min_length=1)
+    member_initials: str = Field(..., min_length=1, max_length=4)
+    member_color: str = Field(..., min_length=1)
+    assigned_cards_count: int = Field(..., ge=0)
+    completed_cards_count: int = Field(..., ge=0)
+    active_story_points: float = Field(..., ge=0)
+    overdue_cards_count: int = Field(..., ge=0)
+
+
+class PriorityMetricSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    priority: PriorityEnum
+    count: int = Field(..., ge=0)
+    story_points: float = Field(..., ge=0)
+
+
+class LabelMetricSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label_id: str = Field(..., min_length=1)
+    label_name: str = ""
+    label_color: str = Field(..., min_length=1)
+    count: int = Field(..., ge=0)
+
+
+class BoardAnalyticsSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_id: str = Field(..., min_length=1)
+    total_cards: int = Field(..., ge=0)
+    completed_cards: int = Field(..., ge=0)
+    archived_cards: int = Field(..., ge=0)
+    completion_rate: float = Field(..., ge=0, le=100)
+    total_story_points: float = Field(..., ge=0)
+    completed_story_points: float = Field(..., ge=0)
+    overdue_cards_count: int = Field(..., ge=0)
+    blocked_cards_count: int = Field(..., ge=0)
+    checklist_completion_rate: float = Field(..., ge=0, le=100)
+    automation_executions_total: int = Field(..., ge=0)
+    cards_by_column: list[ColumnMetricSchema] = Field(default_factory=list)
+    workload_by_member: list[MemberWorkloadSchema] = Field(default_factory=list)
+    cards_by_priority: list[PriorityMetricSchema] = Field(default_factory=list)
+    cards_by_label: list[LabelMetricSchema] = Field(default_factory=list)
+    burndown_series: list[BurndownDataPointSchema] = Field(default_factory=list)
+
+
+class AIAnalyticsRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    analytics: BoardAnalyticsSchema
+
+
+class AIAnalyticsReportSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    health_score: float = Field(..., ge=0, le=100)
+    health_status: SprintHealthStatusEnum
+    executive_summary: str = Field(..., min_length=1)
+    bottlenecks: list[str] = Field(default_factory=list)
+    actionable_recommendations: list[str] = Field(default_factory=list)
+    generated_at: datetime | str
+
+
+class TrelloImportRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    workspace_id: str | None = None
+    board_title_override: str | None = Field(default=None, min_length=1, max_length=150)
+    format: BoardImportFormatEnum = BoardImportFormatEnum.TRELLO_JSON
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrelloImportResultSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board: BoardSchema
+    imported_lists_count: int = Field(..., ge=0)
+    imported_cards_count: int = Field(..., ge=0)
+    imported_checklists_count: int = Field(..., ge=0)
+
+
+class BoardExportCsvResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    filename: str = Field(..., min_length=1)
+    content_type: Literal["text/csv"] = "text/csv"
+    csv_data: str
+
+
 # Aliases for direct import without Schema suffix
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
@@ -706,6 +839,20 @@ CreateWorkspaceRequest = CreateWorkspaceRequestSchema
 BoardSummary = BoardSummarySchema
 BoardTemplate = BoardTemplateSchema
 AutomationTriggeredEventData = AutomationTriggeredEventDataSchema
+
+BurndownDataPoint = BurndownDataPointSchema
+ColumnMetric = ColumnMetricSchema
+MemberWorkload = MemberWorkloadSchema
+PriorityMetric = PriorityMetricSchema
+LabelMetric = LabelMetricSchema
+BoardAnalytics = BoardAnalyticsSchema
+SprintHealthStatus = SprintHealthStatusEnum
+AIAnalyticsRequest = AIAnalyticsRequestSchema
+AIAnalyticsReport = AIAnalyticsReportSchema
+BoardImportFormat = BoardImportFormatEnum
+TrelloImportRequest = TrelloImportRequestSchema
+TrelloImportResult = TrelloImportResultSchema
+BoardExportCsvResponse = BoardExportCsvResponseSchema
 
 
 # ============================================================================

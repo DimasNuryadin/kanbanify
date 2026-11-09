@@ -716,6 +716,7 @@ export const WSEventTypeEnum = z.enum([
   "AUTOMATION_RULE_UPDATED",
   "AUTOMATION_RULE_DELETED",
   "BOARD_DELETED",
+  "BOARD_IMPORTED",
 ]);
 export type WSEventType = z.infer<typeof WSEventTypeEnum>;
 
@@ -864,6 +865,127 @@ export const AIParseAutomationResponseSchema = z.object({
 });
 export type AIParseAutomationResponse = z.infer<
   typeof AIParseAutomationResponseSchema
+>;
+
+// ============================================================================
+// 5.4 PHASE 4 TEAM ANALYTICS, AI SPRINT INSIGHTS & TRELLO IMPORT/EXPORT SCHEMAS
+// ============================================================================
+
+export const BurndownDataPointSchema = z.object({
+  date: z.string().min(1),
+  ideal_remaining_points: z.number().min(0),
+  actual_remaining_points: z.number().min(0),
+  completed_cards_count: z.number().int().min(0),
+});
+export type BurndownDataPoint = z.infer<typeof BurndownDataPointSchema>;
+
+export const ColumnMetricSchema = z.object({
+  column_id: z.string().min(1),
+  column_title: z.string().min(1),
+  card_count: z.number().int().min(0),
+  total_story_points: z.number().min(0),
+  wip_limit: z.number().int().positive().nullable().default(null),
+  is_bottleneck: z.boolean().default(false),
+});
+export type ColumnMetric = z.infer<typeof ColumnMetricSchema>;
+
+export const MemberWorkloadSchema = z.object({
+  member_id: z.string().min(1),
+  member_name: z.string().min(1),
+  member_initials: z.string().min(1).max(4),
+  member_color: z.string().min(1),
+  assigned_cards_count: z.number().int().min(0),
+  completed_cards_count: z.number().int().min(0),
+  active_story_points: z.number().min(0),
+  overdue_cards_count: z.number().int().min(0),
+});
+export type MemberWorkload = z.infer<typeof MemberWorkloadSchema>;
+
+export const PriorityMetricSchema = z.object({
+  priority: PriorityEnum,
+  count: z.number().int().min(0),
+  story_points: z.number().min(0),
+});
+export type PriorityMetric = z.infer<typeof PriorityMetricSchema>;
+
+export const LabelMetricSchema = z.object({
+  label_id: z.string().min(1),
+  label_name: z.string(),
+  label_color: z.string().min(1),
+  count: z.number().int().min(0),
+});
+export type LabelMetric = z.infer<typeof LabelMetricSchema>;
+
+export const BoardAnalyticsSchema = z.object({
+  board_id: z.string().min(1),
+  total_cards: z.number().int().min(0),
+  completed_cards: z.number().int().min(0),
+  archived_cards: z.number().int().min(0),
+  completion_rate: z.number().min(0).max(100),
+  total_story_points: z.number().min(0),
+  completed_story_points: z.number().min(0),
+  overdue_cards_count: z.number().int().min(0),
+  blocked_cards_count: z.number().int().min(0),
+  checklist_completion_rate: z.number().min(0).max(100),
+  automation_executions_total: z.number().int().min(0),
+  cards_by_column: z.array(ColumnMetricSchema).default([]),
+  workload_by_member: z.array(MemberWorkloadSchema).default([]),
+  cards_by_priority: z.array(PriorityMetricSchema).default([]),
+  cards_by_label: z.array(LabelMetricSchema).default([]),
+  burndown_series: z.array(BurndownDataPointSchema).default([]),
+});
+export type BoardAnalytics = z.infer<typeof BoardAnalyticsSchema>;
+
+export const SprintHealthStatusEnum = z.enum([
+  "EXCELLENT",
+  "ON_TRACK",
+  "AT_RISK",
+  "CRITICAL",
+]);
+export type SprintHealthStatus = z.infer<typeof SprintHealthStatusEnum>;
+
+export const AIAnalyticsRequestSchema = z.object({
+  board_title: z.string().min(1).max(150),
+  analytics: BoardAnalyticsSchema,
+});
+export type AIAnalyticsRequest = z.infer<typeof AIAnalyticsRequestSchema>;
+
+export const AIAnalyticsReportSchema = z.object({
+  health_score: z.number().min(0).max(100),
+  health_status: SprintHealthStatusEnum,
+  executive_summary: z.string().min(1),
+  bottlenecks: z.array(z.string()).default([]),
+  actionable_recommendations: z.array(z.string()).default([]),
+  generated_at: z.string().datetime(),
+});
+export type AIAnalyticsReport = z.infer<typeof AIAnalyticsReportSchema>;
+
+export const BoardImportFormatEnum = z.enum(["trello_json", "kinetix_json"]);
+export type BoardImportFormat = z.infer<typeof BoardImportFormatEnum>;
+
+export const TrelloImportRequestSchema = z.object({
+  workspace_id: z.string().optional(),
+  board_title_override: z.string().min(1).max(150).optional(),
+  format: BoardImportFormatEnum.optional().default("trello_json"),
+  payload: z.record(z.unknown()),
+});
+export type TrelloImportRequest = z.infer<typeof TrelloImportRequestSchema>;
+
+export const TrelloImportResultSchema = z.object({
+  board: BoardSchema,
+  imported_lists_count: z.number().int().min(0),
+  imported_cards_count: z.number().int().min(0),
+  imported_checklists_count: z.number().int().min(0),
+});
+export type TrelloImportResult = z.infer<typeof TrelloImportResultSchema>;
+
+export const BoardExportCsvResponseSchema = z.object({
+  filename: z.string().min(1),
+  content_type: z.literal("text/csv"),
+  csv_data: z.string(),
+});
+export type BoardExportCsvResponse = z.infer<
+  typeof BoardExportCsvResponseSchema
 >;
 
 // ============================================================================
