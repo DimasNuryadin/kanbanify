@@ -57,6 +57,7 @@ export function KinetixWorkspace() {
   const queryClient = useQueryClient();
 
   const board = useWorkspaceStore((s) => s.board);
+  const activeBoardId = useWorkspaceStore((s) => s.activeBoardId);
   const viewMode = useWorkspaceStore((s) => s.viewMode);
   const useMockMode = useWorkspaceStore((s) => s.useMockMode);
 
@@ -110,11 +111,11 @@ export function KinetixWorkspace() {
     [setUseMockMode]
   );
 
-  // Fetch initial board via TanStack Query
+  // Fetch active board via TanStack Query
   const { data: fetchedBoard } = useQuery({
-    queryKey: ["board", SEED_BOARD_ID, useMockMode],
+    queryKey: ["board", activeBoardId || SEED_BOARD_ID, useMockMode],
     queryFn: () =>
-      apiClient.getBoard(SEED_BOARD_ID, {
+      apiClient.getBoard(activeBoardId || SEED_BOARD_ID, {
         useMock: useMockMode,
         onFallbackToMock: handleFallbackToMock,
       }),
@@ -235,8 +236,10 @@ export function KinetixWorkspace() {
         queryClient.invalidateQueries({ queryKey: ["board"] });
       },
       onAutomationTriggered: (data) => {
+        const liveState = useWorkspaceStore.getState();
         const cardTitle = data.card_id
-          ? board.cards.find((c) => c.id === data.card_id)?.title || "Card"
+          ? liveState.board.cards.find((c) => c.id === data.card_id)?.title ||
+            "Card"
           : "Card";
         addToast({
           id: createDeterministicUuid(),
@@ -251,6 +254,34 @@ export function KinetixWorkspace() {
             second: "2-digit",
           }),
         });
+
+        const updatedRules = liveState.automationRules.map((r) =>
+          r.id === data.rule_id
+            ? {
+                ...r,
+                execution_count: data.execution_count,
+                last_triggered_at: data.triggered_at,
+              }
+            : r
+        );
+        setAutomationRules(updatedRules);
+
+        const activityEntry = {
+          id: createDeterministicUuid(),
+          board_id: liveState.board.id,
+          card_id: data.card_id ?? null,
+          actor_name: "🤖 Butler Bot",
+          action_type: "AUTOMATION_TRIGGERED" as const,
+          description: `🤖 Butler executed rule: [${data.rule_name}]`,
+          created_at: data.triggered_at,
+          is_automated: true,
+        };
+        setBoard({
+          ...liveState.board,
+          automation_rules: updatedRules,
+          activities: [activityEntry, ...liveState.board.activities],
+        });
+
         queryClient.invalidateQueries({ queryKey: ["board"] });
       },
       onAutomationRuleCreated: (rule) => {
@@ -269,7 +300,6 @@ export function KinetixWorkspace() {
     };
   }, [
     board.id,
-    board.cards,
     useMockMode,
     setWsStatus,
     applyRemoteCardMove,
@@ -279,6 +309,7 @@ export function KinetixWorkspace() {
     upsertColumn,
     appendCardComment,
     setBoard,
+    setAutomationRules,
     upsertAutomationRule,
     removeAutomationRule,
     addToast,
@@ -437,6 +468,7 @@ export function KinetixWorkspace() {
       });
       setBoard(created);
       queryClient.invalidateQueries({ queryKey: ["board-summaries"] });
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
     },
     [useMockMode, handleFallbackToMock, setBoard, queryClient]
   );
@@ -506,9 +538,12 @@ export function KinetixWorkspace() {
         useMock: useMockMode,
         onFallbackToMock: handleFallbackToMock,
       });
+      if ("id" in parsed && parsed.id && parsed.board_id) {
+        upsertAutomationRule(parsed as any);
+      }
       return parsed;
     },
-    [board.id, useMockMode, handleFallbackToMock]
+    [board.id, useMockMode, handleFallbackToMock, upsertAutomationRule]
   );
 
   // Column (List) Handlers
@@ -649,23 +684,29 @@ export function KinetixWorkspace() {
           },
         });
         if (autoResult.toasts.length > 0) {
-          for (const t of autoResult.toasts) {
-            addToast(t);
-          }
-          upsertCard(autoResult.updatedCard);
-          setAutomationRules(autoResult.updatedRules);
-          if (autoResult.newActivities.length > 0) {
-            setBoard({
-              ...board,
-              cards: board.cards.map((c) =>
-                c.id === autoResult.updatedCard.id ? autoResult.updatedCard : c
-              ),
-              activities: [...autoResult.newActivities, ...board.activities],
-              automation_rules: autoResult.updatedRules,
-            });
+          const isLiveConnected =
+            !useMockMode && useWorkspaceStore.getState().wsStatus === "connected";
+          if (!isLiveConnected) {
+            for (const t of autoResult.toasts) {
+              addToast(t);
+            }
           }
           if (useMockMode) {
+            upsertCard(autoResult.updatedCard);
+            setAutomationRules(autoResult.updatedRules);
+            if (autoResult.newActivities.length > 0) {
+              setBoard({
+                ...board,
+                cards: board.cards.map((c) =>
+                  c.id === autoResult.updatedCard.id ? autoResult.updatedCard : c
+                ),
+                activities: [...autoResult.newActivities, ...board.activities],
+                automation_rules: autoResult.updatedRules,
+              });
+            }
             mockApi.updateCard(cardId, autoResult.updatedCard);
+          } else {
+            queryClient.invalidateQueries({ queryKey: ["board"] });
           }
         }
       }
@@ -697,24 +738,30 @@ export function KinetixWorkspace() {
         event: { type: "WHEN_CARD_CREATED" },
       });
       if (autoResult.toasts.length > 0) {
-        for (const t of autoResult.toasts) {
-          addToast(t);
-        }
-        upsertCard(autoResult.updatedCard);
-        setAutomationRules(autoResult.updatedRules);
-        if (autoResult.newActivities.length > 0) {
-          setBoard({
-            ...board,
-            cards: [
-              ...board.cards.filter((c) => c.id !== autoResult.updatedCard.id),
-              autoResult.updatedCard,
-            ],
-            activities: [...autoResult.newActivities, ...board.activities],
-            automation_rules: autoResult.updatedRules,
-          });
+        const isLiveConnected =
+          !useMockMode && useWorkspaceStore.getState().wsStatus === "connected";
+        if (!isLiveConnected) {
+          for (const t of autoResult.toasts) {
+            addToast(t);
+          }
         }
         if (useMockMode) {
+          upsertCard(autoResult.updatedCard);
+          setAutomationRules(autoResult.updatedRules);
+          if (autoResult.newActivities.length > 0) {
+            setBoard({
+              ...board,
+              cards: [
+                ...board.cards.filter((c) => c.id !== autoResult.updatedCard.id),
+                autoResult.updatedCard,
+              ],
+              activities: [...autoResult.newActivities, ...board.activities],
+              automation_rules: autoResult.updatedRules,
+            });
+          }
           mockApi.updateCard(autoResult.updatedCard.id, autoResult.updatedCard);
+        } else {
+          queryClient.invalidateQueries({ queryKey: ["board"] });
         }
       }
     },
@@ -816,23 +863,29 @@ export function KinetixWorkspace() {
         }
 
         if (allToasts.length > 0) {
-          for (const t of allToasts) {
-            addToast(t);
-          }
-          upsertCard(currentCard);
-          setAutomationRules(finalRules);
-          if (newActivities.length > 0) {
-            setBoard({
-              ...board,
-              cards: board.cards.map((c) =>
-                c.id === currentCard.id ? currentCard : c
-              ),
-              activities: [...newActivities, ...board.activities],
-              automation_rules: finalRules,
-            });
+          const isLiveConnected =
+            !useMockMode && useWorkspaceStore.getState().wsStatus === "connected";
+          if (!isLiveConnected) {
+            for (const t of allToasts) {
+              addToast(t);
+            }
           }
           if (useMockMode) {
+            upsertCard(currentCard);
+            setAutomationRules(finalRules);
+            if (newActivities.length > 0) {
+              setBoard({
+                ...board,
+                cards: board.cards.map((c) =>
+                  c.id === currentCard.id ? currentCard : c
+                ),
+                activities: [...newActivities, ...board.activities],
+                automation_rules: finalRules,
+              });
+            }
             mockApi.updateCard(cardId, currentCard);
+          } else {
+            queryClient.invalidateQueries({ queryKey: ["board"] });
           }
         }
       }

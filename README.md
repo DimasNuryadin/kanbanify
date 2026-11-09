@@ -2,7 +2,7 @@
 
 **High-Performance Real-Time Kanban & AI Workspace**
 
-Kinetix is a polyglot monorepo combining an optimistic real-time Kanban & Table workspace (`apps/web`), a low-latency Fastify REST + WebSocket coordination server with lexicographical O(1) fractional indexing (`apps/api`), and a stateless FastAPI AI task-decomposition microservice (`services/ai-engine`), unified by strict 1:1 physical data contracts (`packages/contracts`).
+Kinetix is a polyglot monorepo combining an optimistic real-time Multi-Board Kanban, Calendar & Table workspace (`apps/web`), a low-latency Fastify REST + WebSocket coordination server with lexicographical O(1) fractional indexing and a Trello Butler Runtime Automation Engine (`apps/api`), and a stateless FastAPI AI task-decomposition & Natural Language Butler Rule Compiler microservice (`services/ai-engine`), unified by strict 1:1 physical data contracts (`packages/contracts`).
 
 ---
 
@@ -11,18 +11,20 @@ Kinetix is a polyglot monorepo combining an optimistic real-time Kanban & Table 
 ```mermaid
 flowchart LR
     subgraph Client ["apps/web (Next.js 16 — Port 3000)"]
-        UI["React 19 + Tailwind v4\n@dnd-kit + Command Palette (Cmd+K)"]
-        Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer"]
+        UI["React 19 + Tailwind v4\nMulti-Board Sidebar + Butler Modal + Cmd+K"]
+        Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer & Butler Engine"]
     end
 
     subgraph CoreAPI ["apps/api (Fastify v5 — Port 8000)"]
         REST["REST API (/api/v1/*)\nZod Contract Validation"]
+        Butler["Butler Automation Engine\nRuntime Trigger & Action Executor"]
         WS["WebSocket Hub (/ws/boards/:boardId)\nReal-Time Broadcast"]
         Repo["Drizzle ORM + In-Memory Fallback"]
     end
 
     subgraph AIEngine ["services/ai-engine (FastAPI — Port 8001)"]
-        Decomposer["POST /internal/v1/decompose-task\nLLM + Domain-Aware Heuristic Engine"]
+        Decomposer["POST /internal/v1/decompose-task\nPOST /internal/v1/enrich-card"]
+        RuleParser["POST /internal/v1/parse-automation\nBilingual ID/EN Butler Rule Compiler"]
     end
 
     subgraph Infra ["Infrastructure (Docker Compose)"]
@@ -33,20 +35,23 @@ flowchart LR
     UI <--> Store
     Store -- "REST JSON (HTTP :8000)" --> REST
     Store <-- "Live Events (WS :8000)" --> WS
+    REST --> Butler
+    Butler --> Repo
     REST --> Repo
     Repo <--> PG
     WS <--> RD
     REST -- "X-Internal-Token (:8001)" --> Decomposer
+    REST -- "X-Internal-Token (:8001)" --> RuleParser
 ```
 
 ### Tech Stack Summary
 
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
-| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Optimistic Kanban & Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette, Live WebSocket Sync |
-| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | REST endpoints, WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
-| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition (`suggested_subtasks`, `estimated_story_points`, `suggested_priority`, `potential_risks`) with deterministic zero-config fallback |
-| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, and Internal AI schemas |
+| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
+| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
+| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition, Trello Smart Card Enrichment, and Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler with deterministic zero-config fallback |
+| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, Workspace, Template, Butler Automation, and Internal AI schemas |
 | **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 
 ---
@@ -129,15 +134,21 @@ Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Automated E2E Smoke Test
 
-Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 + Phase 2 Trello lifecycle:
+Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 + Phase 2 + Phase 3 lifecycle:
 1. **Health Checks:** Verifies `GET /health` on both `http://localhost:8001/health` and `http://localhost:8000/health` return `200 OK`.
-2. **Board & Trello Defaults:** Creates a board (`POST /api/v1/boards`) and asserts default Trello `labels` (length $\ge 6$), `members` (length $\ge 1$), and 4 default `columns` (`Backlog`, `In Progress`, `Review`, `Done`) with fractional positions `"a0"`, `"a1"`, `"a2"`, `"a3"`.
-3. **List (Column) Operations:** Reorders a column via `PATCH /api/v1/columns/:columnId/move` and copies a column via `POST /api/v1/columns/:columnId/copy`, verifying the duplicated column exists.
-4. **Rich Trello Card Lifecycle:** Creates a card (`POST /api/v1/boards/:boardId/cards`), moves it via **O(1) Fractional Index Move** (`PATCH /api/v1/cards/:cardId/move`), and updates it via `PATCH /api/v1/cards/:cardId` with `cover`, `label_ids`, `member_ids`, multiple named `checklists` (`"Frontend Checklist"` & `"QA Checklist"`), and `is_due_complete: true`.
-5. **Comments & Activity Feed:** Adds a Markdown comment via `POST /api/v1/cards/:cardId/comments` and verifies the comment and a corresponding `COMMENT_ADDED` entry in `board.activities`.
-6. **AI Smart Card Enrichment & Decomposition:** Calls `POST /api/v1/cards/:cardId/ai-decompose` ($\rightarrow$ `POST /internal/v1/enrich-card` & `/internal/v1/decompose-task` with `X-Internal-Token` authentication) and verifies populated `checklists`, `subtasks`, `story_points`, and `priority`.
-7. **Card Copy & Archive:** Copies the card via `POST /api/v1/cards/:cardId/copy` and archives the copy via `PATCH /api/v1/cards/:copiedCardId` (`{ is_archived: true }`).
-8. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId`.
+2. **Workspaces & Board Templates Verification (Phase 3):**
+   - Calls `GET /api/v1/workspaces` and asserts at least 1 workspace and multiple seeded boards exist.
+   - Calls `GET /api/v1/board-templates` and asserts board templates exist (`Engineering Sprint`, `Marketing Launch`, `Product Roadmap`, `Personal Kanban`).
+   - Calls `POST /api/v1/boards` with `template_id` to provision a new board from a template with its default columns, sample cards, labels, and members.
+3. **Board & Trello Defaults:** Creates a board (`POST /api/v1/boards`) and asserts default Trello `labels` (length $\ge 6$), `members` (length $\ge 1$), and 4 default `columns` (`Backlog`, `In Progress`, `Review`, `Done`) with fractional positions `"a0"`, `"a1"`, `"a2"`, `"a3"`.
+4. **List (Column) Operations:** Reorders a column via `PATCH /api/v1/columns/:columnId/move` and copies a column via `POST /api/v1/columns/:columnId/copy`, verifying the duplicated column exists.
+5. **Rich Trello Card Lifecycle:** Creates a card (`POST /api/v1/boards/:boardId/cards`), moves it via **O(1) Fractional Index Move** (`PATCH /api/v1/cards/:cardId/move`), and updates it via `PATCH /api/v1/cards/:cardId` with `cover`, `label_ids`, `member_ids`, multiple named `checklists` (`"Frontend Checklist"` & `"QA Checklist"`), and `is_due_complete: true`.
+6. **Comments & Activity Feed:** Adds a Markdown comment via `POST /api/v1/cards/:cardId/comments` and verifies the comment and a corresponding `COMMENT_ADDED` entry in `board.activities`.
+7. **AI Smart Card Enrichment & Decomposition:** Calls `POST /api/v1/cards/:cardId/ai-decompose` ($\rightarrow$ `POST /internal/v1/enrich-card` & `/internal/v1/decompose-task` with `X-Internal-Token` authentication) and verifies populated `checklists`, `subtasks`, `story_points`, and `priority`.
+8. **Card Copy & Archive:** Copies the card via `POST /api/v1/cards/:cardId/copy` and archives the copy via `PATCH /api/v1/cards/:copiedCardId` (`{ is_archived: true }`).
+9. **AI Natural Language to Butler Rule Generation (`API -> AI Engine`):** Calls `POST /api/v1/boards/:boardId/automations/ai-generate` ($\rightarrow$ `POST /internal/v1/parse-automation`) with `"When a card is moved to Done, mark due date complete and assign a member"` and asserts a `WHEN_CARD_MOVED_TO_COLUMN` trigger targeting `"Done"` with `MARK_DUE_DATE_COMPLETE` and `ASSIGN_MEMBER` actions.
+10. **Runtime Butler Automation Execution:** Creates a card in `"Backlog"` (`is_due_complete: false`, `member_ids: []`), moves it to `"Done"` via `PATCH /api/v1/cards/:cardId/move`, and verifies that Butler automatically sets `card.is_due_complete === true`, assigns a member (`card.member_ids.length > 0`), increments the rule's `execution_count >= 1`, and appends an `"AUTOMATION_TRIGGERED"` entry to `board.activities`.
+11. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId`.
 
 Run the E2E smoke test with a single command:
 
@@ -146,6 +157,18 @@ node scripts/e2e_test.mjs
 # or via root package.json:
 npm run test:e2e
 ```
+
+---
+
+## Phase 3 Multi-Board Workspace, Templates & Trello Butler Automation
+
+- **Collapsible Multi-Board Workspace Sidebar (`[` shortcut):** Switch between workspaces (`GET /api/v1/workspaces`), create new workspaces (`POST /api/v1/workspaces`), browse **Starred Boards** and **Workspace Boards** with live card counts and mini background swatches, and switch active boards with automatic WebSocket room reconnection (`/ws/boards/:boardId`).
+- **1-Click Board Templates Gallery (`GET /api/v1/board-templates`):** Launch pre-configured boards (`POST /api/v1/boards` with `template_id`) across **Engineering Sprint**, **Marketing Launch**, **Product Roadmap**, and **Personal Kanban** categories complete with custom column pipelines, sample cards, backgrounds, and pre-wired Butler rules.
+- **Trello Butler Automation Center (`⚡ Automation`):**
+  - **Active Rules Manager:** Inspect active rules on the board with human-readable `WHEN ... -> THEN ...` badge chains, live `⚡ Triggered N times` counters, enable/disable toggle switches, and 1-click preset rules (*Auto-Complete on Done*, *Checklist 100% Pipeline*, *Urgent Card Triage*).
+  - **✨ AI Natural Language Rule Builder (`POST /api/v1/boards/:boardId/automations/ai-generate` $\rightarrow$ `POST /internal/v1/parse-automation`):** Write rules in plain **Indonesian or English** (e.g., *"Saat kartu pindah ke Done, otomatis centang due date dan assign member"* or *"When a card is moved to Done, mark due date complete and assign a member"*). The AI Engine maps the prompt to the board's live `columns`, `members`, and `labels` and compiles a structured `AutomationRule`.
+  - **Visual Trigger + Action Builder:** Build custom multi-action rules combining triggers (`WHEN_CARD_MOVED_TO_COLUMN`, `WHEN_CARD_CREATED`, `WHEN_CHECKLIST_COMPLETED`, `WHEN_PRIORITY_CHANGED`, `WHEN_LABEL_ADDED`) with chained actions (`MARK_DUE_DATE_COMPLETE`, `ASSIGN_MEMBER`, `ADD_LABEL`, `SET_PRIORITY`, `MOVE_CARD_TO_COLUMN`, `ADD_CHECKLIST`, `POST_COMMENT`).
+  - **Runtime Butler Execution & Real-Time Toast Feedback:** Moving, creating, or updating a card automatically evaluates active board rules on `apps/api` (with single-hop recursion guard), mutates card fields (`is_due_complete`, `member_ids`, `label_ids`, `column_id`, `checklists`, `comments`), increments `execution_count`, logs `"AUTOMATION_TRIGGERED"` to `board.activities`, and broadcasts `"AUTOMATION_TRIGGERED"` over WebSocket to display the live `"⚡ Butler Automation"` toast notification.
 
 ---
 
@@ -166,7 +189,8 @@ npm run test:e2e
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Cmd + K` / `Ctrl + K` | Open the global **Command Palette** (search cards, switch views, trigger AI actions, change themes/backgrounds) |
+| `Cmd + K` / `Ctrl + K` | Open the global **Command Palette** (search cards, switch boards/views, open Templates or Butler Automation, trigger AI actions, change themes/backgrounds) |
+| `[` | Toggle the left **Multi-Board Workspace Sidebar** |
 | `C` or `N` | Open the **New Card** modal to create a card in the active board |
 | `L` | Toggle **Expandable Label Text** across all cards on the Kanban board |
 | `Q` | Toggle **"My Cards"** member filter (filters board to cards assigned to Alex Rivera) |

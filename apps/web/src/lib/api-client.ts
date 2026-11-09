@@ -694,7 +694,7 @@ export const apiClient = {
     boardId: string,
     prompt: string,
     opts: ApiClientOptions
-  ): Promise<AIParseAutomationResponse> {
+  ): Promise<AIParseAutomationResponse & Partial<AutomationRule>> {
     if (opts.useMock) {
       return mockApi.parseAutomationWithAi(boardId, prompt);
     }
@@ -705,7 +705,13 @@ export const apiClient = {
           method: "POST",
           body: JSON.stringify({ prompt }),
         },
-        (raw) => AIParseAutomationResponseSchema.parse(raw)
+        (raw) => {
+          const fullRule = AutomationRuleSchema.safeParse(raw);
+          if (fullRule.success) {
+            return fullRule.data;
+          }
+          return AIParseAutomationResponseSchema.parse(raw);
+        }
       );
     } catch (err) {
       opts.onFallbackToMock?.(
