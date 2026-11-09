@@ -4,6 +4,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { z, ZodError } from "zod";
 import {
+  AIAnalyticsReportSchema,
   AIDecomposeRequestSchema,
   AIDecomposeResponseSchema,
   AIParseAutomationRequestSchema,
@@ -11,6 +12,8 @@ import {
   AISuggestCardEnrichmentRequestSchema,
   AISuggestCardEnrichmentResponseSchema,
   AutomationRuleSchema,
+  BoardAnalyticsSchema,
+  BoardExportCsvResponseSchema,
   BoardSchema,
   BoardSummarySchema,
   BoardTemplateSchema,
@@ -32,6 +35,8 @@ import {
   MoveCardRequestSchema,
   MoveColumnRequestSchema,
   StandardErrorSchema,
+  TrelloImportRequestSchema,
+  TrelloImportResultSchema,
   UpdateAutomationRuleRequestSchema,
   UpdateBoardRequestSchema,
   UpdateCardRequestSchema,
@@ -45,6 +50,8 @@ import {
 import { StorageRepository } from "./db/repository.js";
 import { BoardRealtimeHub } from "./ws/hub.js";
 import { AutomationEngine } from "./services/automation-engine.js";
+import { AnalyticsService } from "./services/analytics-service.js";
+import { ImportExportService } from "./services/import-export-service.js";
 import { AppError, buildErrorPayload } from "./errors.js";
 
 const UuidParamSchema = z.string().uuid();
@@ -65,6 +72,8 @@ export interface BuildAppOptions {
   repository?: StorageRepository;
   hub?: BoardRealtimeHub;
   automationEngine?: AutomationEngine;
+  analyticsService?: AnalyticsService;
+  importExportService?: ImportExportService;
 }
 
 export async function buildApp(
@@ -74,6 +83,8 @@ export async function buildApp(
   repository: StorageRepository;
   hub: BoardRealtimeHub;
   automationEngine: AutomationEngine;
+  analyticsService: AnalyticsService;
+  importExportService: ImportExportService;
 }> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -83,6 +94,10 @@ export async function buildApp(
   const hub = options.hub ?? new BoardRealtimeHub();
   const automationEngine =
     options.automationEngine ?? new AutomationEngine(repository, hub);
+  const analyticsService =
+    options.analyticsService ?? new AnalyticsService();
+  const importExportService =
+    options.importExportService ?? new ImportExportService(repository, hub);
 
   await repository.init();
   await hub.init();
@@ -321,6 +336,128 @@ export async function buildApp(
       return reply.status(200).send(result);
     }
   );
+
+  // ==========================================================================
+  // 3B. PHASE 4 ANALYTICS & TRELLO IMPORT/EXPORT ENDPOINTS
+  // ==========================================================================
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/analytics",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+      const analytics = analyticsService.computeBoardAnalytics(board);
+      const validated = BoardAnalyticsSchema.parse(analytics);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/analytics/ai-report",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+      const report = await analyticsService.generateAIExecutiveReport(board);
+      const validated = AIAnalyticsReportSchema.parse(report);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post("/api/v1/boards/import", async (req, reply) => {
+    const rawBody =
+      typeof req.body === "object" && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+
+    // Support both wrapped TrelloImportRequestSchema ({ payload, workspace_id, ... })
+    // and direct raw Trello JSON ({ name, lists, cards, checklists, ... })
+    const normalizedBody =
+      rawBody.payload !== undefined &&
+      typeof rawBody.payload === "object" &&
+      rawBody.payload !== null
+        ? rawBody
+        : {
+            workspace_id:
+              typeof rawBody.workspace_id === "string"
+                ? rawBody.workspace_id
+                : undefined,
+            board_title_override:
+              typeof rawBody.board_title_override === "string"
+                ? rawBody.board_title_override
+                : undefined,
+            format:
+              rawBody.format === "kinetix_json"
+                ? ("kinetix_json" as const)
+                : ("trello_json" as const),
+            payload: rawBody,
+          };
+
+    const parsedReq = TrelloImportRequestSchema.parse(normalizedBody);
+    const importResult = await importExportService.importBoard(
+      parsedReq,
+      getActorId(req.headers)
+    );
+    const validated = TrelloImportResultSchema.parse(importResult);
+    return reply.status(201).send(validated);
+  });
+
+  app.get<{
+    Params: { boardId: string };
+    Querystring: { format?: string };
+  }>("/api/v1/boards/:boardId/export", async (req, reply) => {
+    const boardId = UuidParamSchema.parse(req.params.boardId);
+    const board = await repository.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const format = (req.query.format ?? "json").toLowerCase();
+    if (format === "csv") {
+      const csvExport = importExportService.exportBoardToCsv(board);
+      const validatedCsv = BoardExportCsvResponseSchema.parse(csvExport);
+      const acceptHeader =
+        typeof req.headers.accept === "string"
+          ? req.headers.accept.toLowerCase()
+          : "";
+      if (
+        acceptHeader.includes("text/csv") &&
+        !acceptHeader.includes("application/json")
+      ) {
+        return reply
+          .status(200)
+          .header("Content-Type", "text/csv; charset=utf-8")
+          .header(
+            "Content-Disposition",
+            `attachment; filename="${validatedCsv.filename}"`
+          )
+          .send(validatedCsv.csv_data);
+      }
+      return reply.status(200).send(validatedCsv);
+    }
+
+    const validatedBoard = BoardSchema.parse(board);
+    return reply.status(200).send(validatedBoard);
+  });
 
   // ==========================================================================
   // 4. BUTLER AUTOMATION RULES ENDPOINTS
@@ -1281,5 +1418,12 @@ export async function buildApp(
     await repository.close();
   });
 
-  return { app, repository, hub, automationEngine };
+  return {
+    app,
+    repository,
+    hub,
+    automationEngine,
+    analyticsService,
+    importExportService,
+  };
 }

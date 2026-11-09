@@ -2120,6 +2120,100 @@ export class StorageRepository {
     };
   }
 
+  public async saveBoardDirect(board: Board): Promise<Board> {
+    this.memory.boards.set(board.id, {
+      id: board.id,
+      workspace_id: board.workspace_id,
+      title: board.title,
+      description: board.description,
+      is_starred: board.is_starred,
+      background: board.background,
+      labels: board.labels,
+      members: board.members,
+      activities: board.activities,
+      automation_rules: board.automation_rules,
+      created_at: board.created_at,
+    });
+
+    for (const col of board.columns) {
+      this.memory.columns.set(col.id, col);
+    }
+
+    for (const card of board.cards) {
+      this.memory.cards.set(card.id, card);
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db.insert(schema.boards).values({
+          id: board.id,
+          workspace_id: board.workspace_id,
+          title: board.title,
+          description: board.description,
+          is_starred: board.is_starred,
+          background: board.background,
+          labels: board.labels,
+          members: board.members,
+          activities: board.activities,
+          automation_rules: board.automation_rules,
+          created_at: board.created_at,
+        });
+
+        if (board.columns.length > 0) {
+          await this.db.insert(schema.columns).values(
+            board.columns.map((col) => ({
+              id: col.id,
+              board_id: col.board_id,
+              title: col.title,
+              position: col.position,
+              wip_limit: col.wip_limit,
+              color: col.color,
+              is_archived: col.is_archived,
+            }))
+          );
+        }
+
+        if (board.cards.length > 0) {
+          await this.db.insert(schema.cards).values(
+            board.cards.map((c) => ({
+              id: c.id,
+              board_id: c.board_id,
+              column_id: c.column_id,
+              title: c.title,
+              description: c.description,
+              position: c.position,
+              priority: c.priority,
+              story_points: c.story_points,
+              tags: c.tags,
+              subtasks: c.subtasks,
+              blocked_by_card_ids: c.blocked_by_card_ids,
+              due_date: c.due_date,
+              updated_at: c.updated_at,
+              cover: c.cover,
+              label_ids: c.label_ids,
+              member_ids: c.member_ids,
+              checklists: c.checklists,
+              comments: c.comments,
+              attachments: c.attachments,
+              start_date: c.start_date,
+              is_due_complete: c.is_due_complete,
+              is_archived: c.is_archived,
+              is_watching: c.is_watching,
+            }))
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL insert failed in saveBoardDirect, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return board;
+  }
+
   public async getBoardById(boardId: string): Promise<Board | null> {
     if (this.isUsingPostgres() && this.db) {
       try {

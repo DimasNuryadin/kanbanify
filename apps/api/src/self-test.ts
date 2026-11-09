@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import {
+  AIAnalyticsReportSchema,
   AutomationRuleSchema,
+  BoardAnalyticsSchema,
+  BoardExportCsvResponseSchema,
   BoardSchema,
   BoardTemplateSchema,
   CardSchema,
@@ -10,6 +13,7 @@ import {
   CopyColumnResponseSchema,
   HealthCheckResponseSchema,
   StandardErrorSchema,
+  TrelloImportResultSchema,
   WorkspaceSchema,
   WorkspaceWithBoardsSchema,
   WSMessageSchema,
@@ -97,7 +101,11 @@ async function runSelfTest(): Promise<void> {
       readyState: 1,
       OPEN: 1,
       send(raw: string) {
-        receivedWsMessages.push(WSMessageSchema.parse(JSON.parse(raw)));
+        const parsedMsg = WSMessageSchema.parse(JSON.parse(raw));
+        receivedWsMessages.push({
+          ...parsedMsg,
+          data: parsedMsg.data,
+        });
       },
       on() {
         // no-op for test
@@ -787,7 +795,196 @@ async function runSelfTest(): Promise<void> {
       Array.from(new Set(wsEvents))
     );
 
-    // 18. Verify StandardErrorSchema on 404 and 400
+    // 18. PHASE 4 GATE 2: Real-Time Board Analytics (GET /api/v1/boards/:boardId/analytics)
+    const analyticsRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${primaryBoardId}/analytics`,
+    });
+    assert.equal(analyticsRes.statusCode, 200);
+    const analyticsData = BoardAnalyticsSchema.parse(analyticsRes.json());
+    assert.equal(analyticsData.board_id, primaryBoardId);
+    assert.ok(analyticsData.total_cards >= 1, "Analytics must report active cards");
+    assert.equal(
+      analyticsData.burndown_series.length,
+      7,
+      "Analytics must generate deterministic 7-day burndown_series"
+    );
+    assert.equal(analyticsData.burndown_series[0]!.date, "Day 1");
+    assert.equal(analyticsData.burndown_series[6]!.date, "Day 7");
+    assert.equal(
+      analyticsData.burndown_series[6]!.actual_remaining_points,
+      Math.max(
+        0,
+        analyticsData.total_story_points - analyticsData.completed_story_points
+      ),
+      "Day 7 actual remaining points must equal total - completed story points"
+    );
+    assert.ok(
+      analyticsData.cards_by_column.length >= 4,
+      "cards_by_column must include active board columns"
+    );
+    assert.ok(
+      analyticsData.workload_by_member.length >= 4,
+      "workload_by_member must include board members"
+    );
+    assert.equal(analyticsData.cards_by_priority.length, 4);
+    console.info(
+      `[PASS] 18. GET /api/v1/boards/:boardId/analytics -> 200 OK (completion_rate=${analyticsData.completion_rate}%, burndown_series=7 days)`
+    );
+
+    // 19. PHASE 4 GATE 2: AI Executive Sprint Report Proxy (POST /api/v1/boards/:boardId/analytics/ai-report)
+    const aiReportRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${primaryBoardId}/analytics/ai-report`,
+      payload: {},
+    });
+    assert.equal(aiReportRes.statusCode, 200);
+    const aiReport = AIAnalyticsReportSchema.parse(aiReportRes.json());
+    assert.ok(
+      aiReport.health_score >= 0 && aiReport.health_score <= 100,
+      "AI report health_score must be between 0 and 100"
+    );
+    assert.ok(
+      ["EXCELLENT", "ON_TRACK", "AT_RISK", "CRITICAL"].includes(
+        aiReport.health_status
+      )
+    );
+    assert.ok(aiReport.executive_summary.length > 0);
+    assert.ok(aiReport.actionable_recommendations.length >= 1);
+    console.info(
+      `[PASS] 19. POST /api/v1/boards/:boardId/analytics/ai-report -> 200 OK (score=${aiReport.health_score}, status=${aiReport.health_status})`
+    );
+
+    // 20. PHASE 4 GATE 2: Native Trello JSON Importer (POST /api/v1/boards/import)
+    const trelloImportRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/boards/import",
+      payload: {
+        workspace_id: defaultWs.id,
+        board_title_override: "Imported Trello Product Launch",
+        format: "trello_json",
+        payload: {
+          name: "Legacy Trello Board",
+          desc: "Imported from Trello JSON export",
+          lists: [
+            { id: "trello-list-1", name: "To Do", closed: false, pos: 100 },
+            { id: "trello-list-2", name: "Doing", closed: false, pos: 200 },
+            { id: "trello-list-3", name: "Done", closed: false, pos: 300 },
+            {
+              id: "trello-list-archived",
+              name: "Old Archived List",
+              closed: true,
+              pos: 400,
+            },
+          ],
+          cards: [
+            {
+              id: "trello-card-1",
+              name: "Migrate legacy Trello boards to Kinetix",
+              desc: "Support full JSON lists, cards, labels, and checklists",
+              idList: "trello-list-1",
+              pos: 16384,
+              due: "2026-11-20T00:00:00.000Z",
+              dueComplete: false,
+              closed: false,
+              labels: [{ id: "tl-1", name: "Ship Ready", color: "green" }],
+            },
+            {
+              id: "trello-card-2",
+              name: "Verify fractional indexing on imported cards",
+              desc: "Ensure a0, a1 positions are assigned in order",
+              idList: "trello-list-3",
+              pos: 32768,
+              due: "2026-11-10T00:00:00.000Z",
+              dueComplete: true,
+              closed: false,
+              labels: [{ id: "tl-2", name: "Architecture", color: "blue" }],
+            },
+          ],
+          checklists: [
+            {
+              id: "trello-chk-1",
+              idCard: "trello-card-1",
+              name: "Migration Steps",
+              checkItems: [
+                {
+                  name: "Parse Trello lists and generate fractional positions",
+                  state: "complete",
+                  pos: 10,
+                },
+                {
+                  name: "Map cards and checklists to Kinetix schema",
+                  state: "incomplete",
+                  pos: 20,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    assert.equal(trelloImportRes.statusCode, 201);
+    const importResult = TrelloImportResultSchema.parse(trelloImportRes.json());
+    assert.equal(importResult.board.title, "Imported Trello Product Launch");
+    assert.equal(
+      importResult.imported_lists_count,
+      3,
+      "Closed Trello lists must be filtered out"
+    );
+    assert.equal(importResult.imported_cards_count, 2);
+    assert.equal(importResult.imported_checklists_count, 1);
+    assert.deepEqual(
+      importResult.board.columns.map((c) => c.position),
+      ["a0", "a1", "a2"],
+      "Imported columns must have fractional positions a0, a1, a2"
+    );
+    const importedCard1 = importResult.board.cards.find((c) =>
+      c.title.includes("Migrate legacy Trello boards")
+    )!;
+    assert.ok(importedCard1, "Imported card 1 must exist");
+    assert.equal(importedCard1.checklists.length, 1);
+    assert.equal(importedCard1.checklists[0]!.items.length, 2);
+    assert.equal(importedCard1.subtasks.length, 2);
+    console.info(
+      `[PASS] 20. POST /api/v1/boards/import -> 201 Created (${importResult.imported_lists_count} lists, ${importResult.imported_cards_count} cards, ${importResult.imported_checklists_count} checklists)`
+    );
+
+    // 21. PHASE 4 GATE 2: Board Exporter CSV & JSON (GET /api/v1/boards/:boardId/export)
+    const exportCsvRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${importResult.board.id}/export?format=csv`,
+    });
+    assert.equal(exportCsvRes.statusCode, 200);
+    const exportedCsv = BoardExportCsvResponseSchema.parse(exportCsvRes.json());
+    assert.equal(exportedCsv.content_type, "text/csv");
+    assert.ok(exportedCsv.filename.endsWith(".csv"));
+    assert.ok(
+      exportedCsv.csv_data.includes(
+        "Card ID,Title,Column,Priority,Story Points,Labels,Members,Due Date,Due Complete,Checklist Progress,Blocked By Count,Archived,Updated At"
+      ),
+      "CSV header row must match specification"
+    );
+    assert.ok(
+      exportedCsv.csv_data.includes("Migrate legacy Trello boards to Kinetix"),
+      "CSV data must include imported card title"
+    );
+    assert.ok(
+      exportedCsv.csv_data.includes('"1/2"'),
+      "CSV data must include checklist progress 1/2"
+    );
+
+    const exportJsonRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${importResult.board.id}/export?format=json`,
+    });
+    assert.equal(exportJsonRes.statusCode, 200);
+    const exportedBoardJson = BoardSchema.parse(exportJsonRes.json());
+    assert.equal(exportedBoardJson.id, importResult.board.id);
+    console.info(
+      "[PASS] 21. GET /api/v1/boards/:boardId/export?format=csv|json -> 200 OK"
+    );
+
+    // 22. Verify StandardErrorSchema on 404 and 400
     const notFoundRes = await app.inject({
       method: "GET",
       url: "/api/v1/boards/99999999-9999-4999-8999-999999999999",
@@ -805,10 +1002,10 @@ async function runSelfTest(): Promise<void> {
     const badReqErr = StandardErrorSchema.parse(badReqRes.json());
     assert.equal(badReqErr.error.code, "VALIDATION_ERROR");
     console.info(
-      "[PASS] 11. StandardErrorSchema envelope verified for 400 & 404"
+      "[PASS] 22. StandardErrorSchema envelope verified for 400 & 404"
     );
 
-    console.info("=== ALL KINETIX API PHASE 3 GATE 2 SELF-TESTS PASSED ===");
+    console.info("=== ALL KINETIX API PHASE 4 GATE 2 SELF-TESTS PASSED ===");
   } finally {
     await app.close();
   }
