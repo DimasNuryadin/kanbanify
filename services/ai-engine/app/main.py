@@ -23,12 +23,15 @@ from app.contracts import (
     AIParseAutomationResponseSchema,
     AISuggestCardEnrichmentRequestSchema,
     AISuggestCardEnrichmentResponseSchema,
+    AISummaryNotificationRequestSchema,
+    AISummaryNotificationResponseSchema,
     ErrorBodySchema,
     ErrorCodeEnum,
     HealthCheckResponseSchema,
     StandardErrorSchema,
 )
 from app.decomposer import decompose_task, enrich_card
+from app.notification_formatter import format_notification
 from app.rule_parser import parse_automation
 
 
@@ -186,6 +189,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AIAnalyticsReportSchema:
         return await analyze_board(payload)
+
+    @application.post(
+        "/internal/v1/format-notification",
+        response_model=AISummaryNotificationResponseSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="AI Smart Slack/Discord Notification Formatter & ChatOps Digest Builder",
+    )
+    async def post_format_notification(
+        payload: AISummaryNotificationRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AISummaryNotificationResponseSchema:
+        return await format_notification(payload)
 
     return application
 
