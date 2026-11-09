@@ -96,6 +96,40 @@ class AutomationActionTypeEnum(str, Enum):
     POST_COMMENT = "POST_COMMENT"
 
 
+# Phase 5 Webhooks & Presence Enums
+class WebhookPlatformEnum(str, Enum):
+    SLACK = "SLACK"
+    DISCORD = "DISCORD"
+    CUSTOM = "CUSTOM"
+
+
+class WebhookEventTypeEnum(str, Enum):
+    CARD_CREATED = "CARD_CREATED"
+    CARD_MOVED = "CARD_MOVED"
+    CARD_ARCHIVED = "CARD_ARCHIVED"
+    COMMENT_ADDED = "COMMENT_ADDED"
+    AUTOMATION_TRIGGERED = "AUTOMATION_TRIGGERED"
+
+
+class UserPresenceStatusEnum(str, Enum):
+    ACTIVE = "ACTIVE"
+    IDLE = "IDLE"
+    EDITING = "EDITING"
+
+
+class PresenceEventTypeEnum(str, Enum):
+    PRESENCE_SYNC = "PRESENCE_SYNC"
+    USER_JOINED = "USER_JOINED"
+    USER_LEFT = "USER_LEFT"
+    USER_TYPING = "USER_TYPING"
+
+
+class ClientPresenceEventEnum(str, Enum):
+    HEARTBEAT = "HEARTBEAT"
+    START_TYPING = "START_TYPING"
+    STOP_TYPING = "STOP_TYPING"
+
+
 class WSEventTypeEnum(str, Enum):
     CARD_MOVED = "CARD_MOVED"
     CARD_UPDATED = "CARD_UPDATED"
@@ -112,6 +146,10 @@ class WSEventTypeEnum(str, Enum):
     AUTOMATION_RULE_DELETED = "AUTOMATION_RULE_DELETED"
     BOARD_DELETED = "BOARD_DELETED"
     BOARD_IMPORTED = "BOARD_IMPORTED"
+    PRESENCE_SYNC = "PRESENCE_SYNC"
+    USER_JOINED = "USER_JOINED"
+    USER_LEFT = "USER_LEFT"
+    USER_TYPING = "USER_TYPING"
 
 
 class SprintHealthStatusEnum(str, Enum):
@@ -320,6 +358,20 @@ class ColumnSchema(BaseModel):
     is_archived: bool = False
 
 
+# Phase 5 Outbound Webhook Integration Schema
+class WebhookConfigSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: UUID | str = Field(...)
+    board_id: UUID | str = Field(...)
+    name: str = Field(..., min_length=1, max_length=120)
+    platform: WebhookPlatformEnum
+    url: str = Field(...)
+    is_enabled: bool = True
+    subscribed_events: list[WebhookEventTypeEnum] = Field(default_factory=list)
+    created_at: datetime | str
+
+
 class BoardSchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -338,6 +390,8 @@ class BoardSchema(BaseModel):
     activities: list[ActivitySchema] = Field(default_factory=list)
     # Phase 3 Trello Butler Automation
     automation_rules: list[AutomationRuleSchema] = Field(default_factory=list)
+    # Phase 5 Outbound Webhooks
+    webhooks: list[WebhookConfigSchema] = Field(default_factory=list)
 
 
 # Phase 3 Workspace & Board Summary Schemas
@@ -563,6 +617,36 @@ class UpdateAutomationRuleRequestSchema(BaseModel):
     actions: list[AutomationActionSchema] | None = None
 
 
+# Phase 5 Outbound Webhook Requests & Responses
+class CreateWebhookRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=120)
+    platform: WebhookPlatformEnum = WebhookPlatformEnum.CUSTOM
+    url: str = Field(...)
+    is_enabled: bool = True
+    subscribed_events: list[WebhookEventTypeEnum] = Field(..., min_length=1)
+
+
+class UpdateWebhookRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    platform: WebhookPlatformEnum | None = None
+    url: str | None = None
+    is_enabled: bool | None = None
+    subscribed_events: list[WebhookEventTypeEnum] | None = None
+
+
+class TestWebhookResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    success: bool
+    status_code: int | None = None
+    message: str
+    delivered_at: datetime | str | None = None
+
+
 # ============================================================================
 # 4. WEBSOCKET MESSAGE SCHEMAS
 # ============================================================================
@@ -578,6 +662,36 @@ class AutomationTriggeredEventDataSchema(BaseModel):
     action_types: list[AutomationActionTypeEnum]
     execution_count: int = Field(default=0, ge=0)
     triggered_at: datetime
+
+
+# Phase 5 Real-Time Presence & Live Typing Indicators
+class UserPresenceSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str = Field(..., min_length=1)
+    user_name: str = Field(..., min_length=1)
+    avatar_url: str | None = None
+    initials: str = Field(..., min_length=1)
+    color: str = Field(..., min_length=1)
+    status: UserPresenceStatusEnum = UserPresenceStatusEnum.ACTIVE
+    active_card_id: str | None = None
+    last_seen: datetime | str
+
+
+class PresenceMessageSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event: PresenceEventTypeEnum
+    board_id: str = Field(..., min_length=1)
+    presences: list[UserPresenceSchema] = Field(default_factory=list)
+    actor: UserPresenceSchema
+
+
+class ClientPresenceMessageSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event: ClientPresenceEventEnum
+    card_id: str | None = None
 
 
 class WSMessageSchema(BaseModel):
@@ -815,6 +929,36 @@ class BoardExportCsvResponseSchema(BaseModel):
     csv_data: str
 
 
+# ============================================================================
+# 5.5 PHASE 5 OUTBOUND WEBHOOKS & AI SUMMARY NOTIFICATION SCHEMAS
+# ============================================================================
+
+
+class AISummaryNotificationRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    recent_activities: list[ActivitySchema] = Field(default_factory=list)
+
+
+class AISummaryNotificationResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    slack_block_kit_payload: dict[str, Any] = Field(default_factory=dict)
+    discord_embed_payload: dict[str, Any] = Field(default_factory=dict)
+    summary_text: str = Field(..., min_length=1)
+
+
+class OutboundWebhookPayloadSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event: WebhookEventTypeEnum
+    board_id: str = Field(..., min_length=1)
+    timestamp: datetime | str
+    actor: dict[str, str] | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 # Aliases for direct import without Schema suffix
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
@@ -853,6 +997,22 @@ BoardImportFormat = BoardImportFormatEnum
 TrelloImportRequest = TrelloImportRequestSchema
 TrelloImportResult = TrelloImportResultSchema
 BoardExportCsvResponse = BoardExportCsvResponseSchema
+
+WebhookPlatform = WebhookPlatformEnum
+WebhookEventType = WebhookEventTypeEnum
+WebhookConfig = WebhookConfigSchema
+CreateWebhookRequest = CreateWebhookRequestSchema
+UpdateWebhookRequest = UpdateWebhookRequestSchema
+TestWebhookResponse = TestWebhookResponseSchema
+UserPresenceStatus = UserPresenceStatusEnum
+UserPresence = UserPresenceSchema
+PresenceEventType = PresenceEventTypeEnum
+PresenceMessage = PresenceMessageSchema
+ClientPresenceEvent = ClientPresenceEventEnum
+ClientPresenceMessage = ClientPresenceMessageSchema
+AISummaryNotificationRequest = AISummaryNotificationRequestSchema
+AISummaryNotificationResponse = AISummaryNotificationResponseSchema
+OutboundWebhookPayload = OutboundWebhookPayloadSchema
 
 
 # ============================================================================

@@ -795,6 +795,153 @@ paths:
                 $ref: "#/components/schemas/StandardError"
 
   # ============================================================================
+  # PHASE 5 OUTBOUND WEBHOOK MANAGEMENT ENDPOINTS (Port 8000)
+  # ============================================================================
+  /api/v1/boards/{boardId}/webhooks:
+    get:
+      summary: List outbound webhook configurations for a board
+      operationId: listBoardWebhooks
+      tags:
+        - Webhooks
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of outbound webhook configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookConfig"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    post:
+      summary: Create an outbound webhook (Slack/Discord/Custom)
+      operationId: createBoardWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookRequest"
+      responses:
+        "201":
+          description: Outbound webhook configured successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookConfig"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/webhooks/{webhookId}:
+    patch:
+      summary: Update webhook URL, platform, or is_enabled
+      operationId: updateWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWebhookRequest"
+      responses:
+        "200":
+          description: Updated webhook configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookConfig"
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    delete:
+      summary: Delete outbound webhook configuration
+      operationId: deleteWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Webhook deleted successfully
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/webhooks/{webhookId}/test:
+    post:
+      summary: Send a test notification ping to Slack/Discord/Custom endpoint
+      operationId: testWebhook
+      tags:
+        - Webhooks
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Test ping dispatched result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestWebhookResponse"
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
   # INTERNAL AI ENGINE ENDPOINTS (Port 8001)
   # ============================================================================
   /internal/v1/decompose-task:
@@ -898,6 +1045,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AIAnalyticsReport"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /internal/v1/format-notification:
+    post:
+      summary: Internal AI Engine Slack Block Kit & Discord Embed notification formatter (Port 8001)
+      operationId: internalFormatNotification
+      tags:
+        - AI Engine Internal
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AISummaryNotificationRequest"
+      responses:
+        "200":
+          description: Formatted Slack Block Kit and Discord Embed notification payloads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AISummaryNotificationResponse"
         "401":
           description: Unauthorized
           content:
@@ -1463,6 +1642,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AutomationRule"
+        webhooks:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookConfig"
 
     HealthCheckResponse:
       type: object
@@ -2207,6 +2390,243 @@ components:
           enum: [text/csv]
         csv_data:
           type: string
+
+    # ============================================================================
+    # PHASE 5 REAL-TIME PRESENCE & OUTBOUND WEBHOOK SCHEMAS
+    # ============================================================================
+    WebhookPlatformEnum:
+      type: string
+      enum: [SLACK, DISCORD, CUSTOM]
+
+    WebhookEventTypeEnum:
+      type: string
+      enum:
+        - CARD_CREATED
+        - CARD_MOVED
+        - CARD_ARCHIVED
+        - COMMENT_ADDED
+        - AUTOMATION_TRIGGERED
+
+    UserPresenceStatusEnum:
+      type: string
+      enum: [ACTIVE, IDLE, EDITING]
+
+    PresenceEventTypeEnum:
+      type: string
+      enum:
+        - PRESENCE_SYNC
+        - USER_JOINED
+        - USER_LEFT
+        - USER_TYPING
+
+    ClientPresenceEventEnum:
+      type: string
+      enum:
+        - HEARTBEAT
+        - START_TYPING
+        - STOP_TYPING
+
+    UserPresence:
+      type: object
+      required:
+        - user_id
+        - user_name
+        - initials
+        - color
+        - status
+        - last_seen
+      properties:
+        user_id:
+          type: string
+        user_name:
+          type: string
+        avatar_url:
+          type: [string, "null"]
+        initials:
+          type: string
+        color:
+          type: string
+        status:
+          $ref: "#/components/schemas/UserPresenceStatusEnum"
+          default: ACTIVE
+        active_card_id:
+          type: [string, "null"]
+        last_seen:
+          type: string
+          format: date-time
+
+    PresenceMessage:
+      type: object
+      required:
+        - event
+        - board_id
+        - presences
+        - actor
+      properties:
+        event:
+          $ref: "#/components/schemas/PresenceEventTypeEnum"
+        board_id:
+          type: string
+        presences:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserPresence"
+        actor:
+          $ref: "#/components/schemas/UserPresence"
+
+    ClientPresenceMessage:
+      type: object
+      required:
+        - event
+      properties:
+        event:
+          $ref: "#/components/schemas/ClientPresenceEventEnum"
+        card_id:
+          type: [string, "null"]
+
+    WebhookConfig:
+      type: object
+      required:
+        - id
+        - board_id
+        - name
+        - platform
+        - url
+        - is_enabled
+        - subscribed_events
+        - created_at
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        name:
+          type: string
+        platform:
+          $ref: "#/components/schemas/WebhookPlatformEnum"
+        url:
+          type: string
+          format: uri
+        is_enabled:
+          type: boolean
+          default: true
+        subscribed_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEventTypeEnum"
+        created_at:
+          type: string
+          format: date-time
+
+    CreateWebhookRequest:
+      type: object
+      required:
+        - name
+        - url
+        - subscribed_events
+      properties:
+        name:
+          type: string
+        platform:
+          $ref: "#/components/schemas/WebhookPlatformEnum"
+          default: CUSTOM
+        url:
+          type: string
+          format: uri
+        is_enabled:
+          type: boolean
+          default: true
+        subscribed_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEventTypeEnum"
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        platform:
+          $ref: "#/components/schemas/WebhookPlatformEnum"
+        url:
+          type: string
+          format: uri
+        is_enabled:
+          type: boolean
+        subscribed_events:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEventTypeEnum"
+
+    TestWebhookResponse:
+      type: object
+      required:
+        - success
+        - message
+      properties:
+        success:
+          type: boolean
+        status_code:
+          type: integer
+        message:
+          type: string
+        delivered_at:
+          type: string
+          format: date-time
+
+    AISummaryNotificationRequest:
+      type: object
+      required:
+        - board_title
+      properties:
+        board_title:
+          type: string
+        recent_activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
+
+    AISummaryNotificationResponse:
+      type: object
+      required:
+        - slack_block_kit_payload
+        - discord_embed_payload
+        - summary_text
+      properties:
+        slack_block_kit_payload:
+          type: object
+          additionalProperties: true
+        discord_embed_payload:
+          type: object
+          additionalProperties: true
+        summary_text:
+          type: string
+
+    OutboundWebhookPayload:
+      type: object
+      required:
+        - event
+        - board_id
+        - timestamp
+        - data
+      properties:
+        event:
+          $ref: "#/components/schemas/WebhookEventTypeEnum"
+        board_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actor:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        data:
+          type: object
+          additionalProperties: true
 
     StandardError:
       type: object

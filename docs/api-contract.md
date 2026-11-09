@@ -1,4 +1,4 @@
-# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 4: Sprint Analytics, AI Executive Insights & Trello Import/Export)
+# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 5: Live Co-presence, Typing Indicators & Outbound Webhook Integrations)
 
 All payloads MUST strictly validate against `packages/contracts/index.ts` (Zod) and `packages/contracts/schemas.py` (Pydantic v2).
 
@@ -784,6 +784,128 @@ Exports full board data either as downloadable CSV (`Card ID, Title, Column, Pri
 }
 ```
 
+### 3.10 Phase 5 Outbound Webhook Integration Endpoints
+
+Manages outbound webhook configurations for Slack, Discord, and Custom HTTP endpoints per board. Webhooks trigger automated outbound notification dispatches when key Kanban lifecycle events occur.
+
+#### `GET /api/v1/boards/:boardId/webhooks` — List Board Webhooks
+Fetches all configured outbound webhooks for a specific board.
+- **Path Parameter**: `boardId` (UUID)
+- **Response `200 OK` (`WebhookConfigSchema[]`)**:
+```json
+[
+  {
+    "id": "wh-55555555-5555-4555-8555-555555555551",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "name": "Engineering Slack Alerts",
+    "platform": "SLACK",
+    "url": "https://example.com/webhooks/slack-incoming",
+    "is_enabled": true,
+    "subscribed_events": [
+      "CARD_CREATED",
+      "CARD_MOVED",
+      "CARD_ARCHIVED",
+      "AUTOMATION_TRIGGERED"
+    ],
+    "created_at": "2026-11-09T10:00:00.000Z"
+  },
+  {
+    "id": "wh-55555555-5555-4555-8555-555555555552",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "name": "Dev Discord Feed",
+    "platform": "DISCORD",
+    "url": "https://example.com/webhooks/discord-incoming",
+    "is_enabled": true,
+    "subscribed_events": [
+      "CARD_CREATED",
+      "COMMENT_ADDED"
+    ],
+    "created_at": "2026-11-09T10:05:00.000Z"
+  }
+]
+```
+
+#### `POST /api/v1/boards/:boardId/webhooks` — Create Outbound Webhook
+Registers a new outbound webhook integration for Slack, Discord, or Custom endpoints.
+- **Path Parameter**: `boardId` (UUID)
+- **Request Body (`CreateWebhookRequestSchema`)**:
+```json
+{
+  "name": "Incident Slack Channel",
+  "platform": "SLACK",
+  "url": "https://example.com/webhooks/slack-incoming",
+  "is_enabled": true,
+  "subscribed_events": [
+    "CARD_CREATED",
+    "CARD_MOVED",
+    "AUTOMATION_TRIGGERED"
+  ]
+}
+```
+- **Response `201 Created` (`WebhookConfigSchema`)**:
+```json
+{
+  "id": "wh-55555555-5555-4555-8555-555555555553",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "name": "Incident Slack Channel",
+  "platform": "SLACK",
+  "url": "https://example.com/webhooks/slack-incoming",
+  "is_enabled": true,
+  "subscribed_events": [
+    "CARD_CREATED",
+    "CARD_MOVED",
+    "AUTOMATION_TRIGGERED"
+  ],
+  "created_at": "2026-11-09T10:10:00.000Z"
+}
+```
+
+#### `PATCH /api/v1/webhooks/:webhookId` — Update Webhook Configuration
+Updates an existing webhook's name, target URL, platform adapter, enabled status, or event subscriptions.
+- **Path Parameter**: `webhookId` (string)
+- **Request Body (`UpdateWebhookRequestSchema`)**:
+```json
+{
+  "name": "Incident Slack Channel (Renamed)",
+  "is_enabled": false
+}
+```
+- **Response `200 OK` (`WebhookConfigSchema`)**:
+```json
+{
+  "id": "wh-55555555-5555-4555-8555-555555555553",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "name": "Incident Slack Channel (Renamed)",
+  "platform": "SLACK",
+  "url": "https://example.com/webhooks/slack-incoming",
+  "is_enabled": false,
+  "subscribed_events": [
+    "CARD_CREATED",
+    "CARD_MOVED",
+    "AUTOMATION_TRIGGERED"
+  ],
+  "created_at": "2026-11-09T10:10:00.000Z"
+}
+```
+
+#### `DELETE /api/v1/webhooks/:webhookId` — Delete Webhook
+Removes a registered webhook integration permanently.
+- **Path Parameter**: `webhookId` (string)
+- **Response `204 No Content`**
+
+#### `POST /api/v1/webhooks/:webhookId/test` — Send Test Webhook Ping
+Dispatches a sample test notification payload to the configured webhook endpoint (Slack, Discord, or Custom) to verify network connectivity and payload delivery.
+- **Path Parameter**: `webhookId` (string)
+- **Response `200 OK` (`TestWebhookResponseSchema`)**:
+```json
+{
+  "success": true,
+  "status_code": 200,
+  "message": "Test ping successfully delivered to SLACK endpoint",
+  "delivered_at": "2026-11-09T10:15:00.000Z"
+}
+```
+
 ---
 
 ## 4. Runtime Automation Execution Contract
@@ -874,6 +996,74 @@ Whenever a card mutation endpoint is executed on `apps/api` (`PATCH /api/v1/card
   - `"AUTOMATION_RULE_CREATED"`
   - `"AUTOMATION_RULE_UPDATED"`
   - `"AUTOMATION_RULE_DELETED"`
+  - `"PRESENCE_SYNC"`
+  - `"USER_JOINED"`
+  - `"USER_LEFT"`
+  - `"USER_TYPING"`
+
+### 5.1 Real-Time Co-presence & Live Typing Indicators Protocol
+
+Enables live collaborator presence avatars, editing activity indicators, and real-time typing status over the persistent WebSocket connection (`ws://localhost:8000/ws/boards/:boardId`).
+
+#### Inbound Client Messages (`ClientPresenceMessageSchema`):
+Clients periodically transmit heartbeats and editing state transitions:
+```json
+{
+  "event": "HEARTBEAT | START_TYPING | STOP_TYPING",
+  "card_id": "44444444-4444-4444-8444-444444444444"
+}
+```
+- `event`:
+  - `"HEARTBEAT"`: Sent every 15-30 seconds to refresh active presence and report currently viewed or focused `card_id` (or `null`).
+  - `"START_TYPING"`: Broadcast when the user focuses a comment input or title editor on `card_id`. Sets user status to `"EDITING"`.
+  - `"STOP_TYPING"`: Broadcast when the user unfocuses, saves, or stops typing for 3 seconds. Reverts status to `"ACTIVE"`.
+- `card_id`: Target card currently being viewed or edited (or `null` if navigating board).
+
+#### Outbound Server Presence Broadcast (`PresenceMessageSchema`):
+Upon client connection, disconnection, heartbeat, or typing transition, the server broadcasts an updated presence message to all connected clients on the board:
+```json
+{
+  "event": "PRESENCE_SYNC",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "presences": [
+    {
+      "user_id": "88888888-8888-4888-8888-888888888881",
+      "user_name": "Alex Rivera",
+      "avatar_url": null,
+      "initials": "AR",
+      "color": "#3b82f6",
+      "status": "EDITING",
+      "active_card_id": "44444444-4444-4444-8444-444444444444",
+      "last_seen": "2026-11-09T10:15:30.000Z"
+    },
+    {
+      "user_id": "88888888-8888-4888-8888-888888888882",
+      "user_name": "Samir Patel",
+      "avatar_url": null,
+      "initials": "SP",
+      "color": "#10b981",
+      "status": "ACTIVE",
+      "active_card_id": null,
+      "last_seen": "2026-11-09T10:15:28.000Z"
+    }
+  ],
+  "actor": {
+    "user_id": "88888888-8888-4888-8888-888888888881",
+    "user_name": "Alex Rivera",
+    "avatar_url": null,
+    "initials": "AR",
+    "color": "#3b82f6",
+    "status": "EDITING",
+    "active_card_id": "44444444-4444-4444-8444-444444444444",
+    "last_seen": "2026-11-09T10:15:30.000Z"
+  }
+}
+```
+- Supported presence broadcast events (`PresenceEventTypeEnum`):
+  - `"PRESENCE_SYNC"`: Initial full presence sync sent upon client connection.
+  - `"USER_JOINED"`: Sent when a new collaborator connects to the board.
+  - `"USER_LEFT"`: Sent when a collaborator disconnects or their heartbeat times out (60s TTL in Redis/in-memory presence store).
+  - `"USER_TYPING"`: Sent when a user begins or stops typing on a card.
 
 ---
 
@@ -1096,5 +1286,156 @@ Analyzes real-time board metrics (`BoardAnalyticsSchema`) and generates an execu
     "Review and update due dates for the 2 overdue cards during tomorrow's standup."
   ],
   "generated_at": "2026-11-09T09:00:00.000Z"
+}
+```
+
+### 6.5 `POST /internal/v1/format-notification` (Phase 5 Outbound Webhook Formatter)
+Invoked by `apps/api` to generate rich, visually compelling notification payloads tailored for Slack Block Kit and Discord Embeds, plus plain markdown summary text based on recent board activities.
+- **Required Header**: `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>` (returns `401 UNAUTHORIZED` with `StandardErrorSchema` if missing or invalid).
+- **Request Body (`AISummaryNotificationRequestSchema`)**:
+```json
+{
+  "board_title": "Kinetix Platform Launch",
+  "recent_activities": [
+    {
+      "id": "act-01",
+      "board_id": "11111111-1111-4111-8111-111111111111",
+      "card_id": "44444444-4444-4444-8444-444444444441",
+      "actor_id": "88888888-8888-4888-8888-888888888881",
+      "actor_name": "Alex Rivera",
+      "action_type": "CARD_MOVED",
+      "details": {
+        "card_title": "Implement OAuth2 PKCE flow",
+        "target_column": "Review"
+      },
+      "created_at": "2026-11-09T10:14:00.000Z"
+    },
+    {
+      "id": "act-02",
+      "board_id": "11111111-1111-4111-8111-111111111111",
+      "card_id": "44444444-4444-4444-8444-444444444442",
+      "actor_id": "88888888-8888-4888-8888-888888888882",
+      "actor_name": "Samir Patel",
+      "action_type": "AUTOMATION_TRIGGERED",
+      "details": {
+        "rule_name": "Auto-Assign Reviewer on Done",
+        "card_title": "Implement Webhook Dispatcher"
+      },
+      "created_at": "2026-11-09T10:15:00.000Z"
+    }
+  ]
+}
+```
+- **Response `200 OK` (`AISummaryNotificationResponseSchema`)**:
+```json
+{
+  "slack_block_kit_payload": {
+    "blocks": [
+      {
+        "type": "header",
+        "text": {
+          "type": "plain_text",
+          "text": "📋 Kinetix Board Activity: Kinetix Platform Launch",
+          "emoji": true
+        }
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": "*Alex Rivera* moved *Implement OAuth2 PKCE flow* to *Review*.\n*Butler Automation* triggered *Auto-Assign Reviewer on Done*."
+        }
+      },
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "⚡ Dispatched via Kinetix Webhook Dispatcher | 2026-11-09T10:15:00.000Z"
+          }
+        ]
+      }
+    ]
+  },
+  "discord_embed_payload": {
+    "username": "Kinetix Bot",
+    "avatar_url": "https://kinetix.internal/icons/bot-avatar.png",
+    "embeds": [
+      {
+        "title": "📋 Board Update: Kinetix Platform Launch",
+        "color": 65280,
+        "description": "Recent activity summary on board **Kinetix Platform Launch**:",
+        "fields": [
+          {
+            "name": "Card Moved",
+            "value": "**Implement OAuth2 PKCE flow** moved to **Review** by Alex Rivera",
+            "inline": false
+          },
+          {
+            "name": "Automation Triggered",
+            "value": "**Auto-Assign Reviewer on Done** executed on card",
+            "inline": false
+          }
+        ],
+        "footer": {
+          "text": "Kinetix Webhook Dispatcher"
+        },
+        "timestamp": "2026-11-09T10:15:00.000Z"
+      }
+    ]
+  },
+  "summary_text": "Alex Rivera moved 'Implement OAuth2 PKCE flow' to Review. Butler automation 'Auto-Assign Reviewer on Done' executed."
+}
+```
+
+---
+
+## 7. Outbound Webhook Dispatcher Contract
+
+`apps/api` contains an asynchronous, non-blocking **Outbound Webhook Dispatcher** that monitors board lifecycle events and dispatches HTTP POST requests to configured webhook endpoints.
+
+### 7.1 Webhook Trigger Lifecycle
+1. **Event Capture**: When any of the subscribed lifecycle events occur:
+   - `CARD_CREATED`
+   - `CARD_MOVED`
+   - `CARD_ARCHIVED`
+   - `COMMENT_ADDED`
+   - `AUTOMATION_TRIGGERED`
+2. **Subscription Query**: `apps/api` loads all webhooks registered on `board_id` where `is_enabled = true` and `subscribed_events` includes the current event.
+3. **Payload Formatting**:
+   - For `platform = "SLACK"`: The payload is formatted with Slack Block Kit JSON blocks (`{ "blocks": [...] }`).
+   - For `platform = "DISCORD"`: The payload is formatted with Discord Webhook Embed JSON (`{ "embeds": [...] }`).
+   - For `platform = "CUSTOM"`: The standard `OutboundWebhookPayloadSchema` JSON payload is delivered.
+4. **HMAC Signature Generation**:
+   - `apps/api` computes an HMAC-SHA256 signature of the serialized JSON payload using the webhook's secret key (or workspace signing key).
+   - The hex digest is attached in the `X-Kinetix-Signature` HTTP header (`sha256=<hex_digest>`).
+5. **HTTP Dispatch**:
+   - Dispatched asynchronously with a 5-second connection/read timeout.
+   - Headers included:
+     - `Content-Type: application/json`
+     - `X-Kinetix-Event: <EVENT_TYPE>`
+     - `X-Kinetix-Delivery-Id: <UUID>`
+     - `X-Kinetix-Signature: sha256=<HMAC_SHA256_HEX>`
+     - `User-Agent: Kinetix-Webhook-Dispatcher/1.0`
+6. **Error Handling**: Non-blocking; failures or non-2xx status codes are logged with error metrics without rolling back the board transaction.
+
+### 7.2 Outbound Webhook Payload Envelope (`OutboundWebhookPayloadSchema`)
+```json
+{
+  "event": "CARD_MOVED",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "timestamp": "2026-11-09T10:15:00.000Z",
+  "actor": {
+    "id": "88888888-8888-4888-8888-888888888881",
+    "name": "Alex Rivera"
+  },
+  "data": {
+    "card_id": "44444444-4444-4444-8444-444444444441",
+    "card_title": "Implement OAuth2 PKCE flow",
+    "source_column_id": "33333333-3333-4333-8333-333333333331",
+    "target_column_id": "33333333-3333-4333-8333-333333333332",
+    "target_column_title": "In Progress",
+    "new_position": "a0V"
+  }
 }
 ```

@@ -72,6 +72,37 @@ export const AutomationActionTypeEnum = z.enum([
 ]);
 export type AutomationActionType = z.infer<typeof AutomationActionTypeEnum>;
 
+// Phase 5 Webhooks & Presence Enums
+export const WebhookPlatformEnum = z.enum(["SLACK", "DISCORD", "CUSTOM"]);
+export type WebhookPlatform = z.infer<typeof WebhookPlatformEnum>;
+
+export const WebhookEventTypeEnum = z.enum([
+  "CARD_CREATED",
+  "CARD_MOVED",
+  "CARD_ARCHIVED",
+  "COMMENT_ADDED",
+  "AUTOMATION_TRIGGERED",
+]);
+export type WebhookEventType = z.infer<typeof WebhookEventTypeEnum>;
+
+export const UserPresenceStatusEnum = z.enum(["ACTIVE", "IDLE", "EDITING"]);
+export type UserPresenceStatus = z.infer<typeof UserPresenceStatusEnum>;
+
+export const PresenceEventTypeEnum = z.enum([
+  "PRESENCE_SYNC",
+  "USER_JOINED",
+  "USER_LEFT",
+  "USER_TYPING",
+]);
+export type PresenceEventType = z.infer<typeof PresenceEventTypeEnum>;
+
+export const ClientPresenceEventEnum = z.enum([
+  "HEARTBEAT",
+  "START_TYPING",
+  "STOP_TYPING",
+]);
+export type ClientPresenceEvent = z.infer<typeof ClientPresenceEventEnum>;
+
 /**
  * Lexicographical fractional index string (e.g., "a0", "a1", "a0V")
  * enabling O(1) single-row updates during drag-and-drop reordering.
@@ -468,6 +499,19 @@ export const ColumnSchema = z.object({
 });
 export type Column = z.infer<typeof ColumnSchema>;
 
+// Phase 5 Outbound Webhook Integration Schema
+export const WebhookConfigSchema = z.object({
+  id: z.string().min(1),
+  board_id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  platform: WebhookPlatformEnum,
+  url: z.string().url(),
+  is_enabled: z.boolean().default(true),
+  subscribed_events: z.array(WebhookEventTypeEnum).default([]),
+  created_at: z.string().datetime(),
+});
+export type WebhookConfig = z.infer<typeof WebhookConfigSchema>;
+
 export const BoardSchema = z.object({
   id: z.string().uuid(),
   workspace_id: z.string().uuid(),
@@ -487,6 +531,8 @@ export const BoardSchema = z.object({
   activities: z.array(ActivitySchema).default([]),
   // Phase 3 Trello Butler Automation
   automation_rules: z.array(AutomationRuleSchema).default([]),
+  // Phase 5 Outbound Webhooks
+  webhooks: z.array(WebhookConfigSchema).default([]),
 });
 export type Board = z.infer<typeof BoardSchema>;
 
@@ -697,6 +743,33 @@ export const UpdateAutomationRuleRequestSchema = z.object({
 });
 export type UpdateAutomationRuleRequest = z.infer<typeof UpdateAutomationRuleRequestSchema>;
 
+// Phase 5 Outbound Webhook Requests & Responses
+export const CreateWebhookRequestSchema = z.object({
+  name: z.string().min(1).max(120),
+  platform: WebhookPlatformEnum.default("CUSTOM"),
+  url: z.string().url(),
+  is_enabled: z.boolean().optional().default(true),
+  subscribed_events: z.array(WebhookEventTypeEnum).min(1),
+});
+export type CreateWebhookRequest = z.infer<typeof CreateWebhookRequestSchema>;
+
+export const UpdateWebhookRequestSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  platform: WebhookPlatformEnum.optional(),
+  url: z.string().url().optional(),
+  is_enabled: z.boolean().optional(),
+  subscribed_events: z.array(WebhookEventTypeEnum).optional(),
+});
+export type UpdateWebhookRequest = z.infer<typeof UpdateWebhookRequestSchema>;
+
+export const TestWebhookResponseSchema = z.object({
+  success: z.boolean(),
+  status_code: z.number().int().optional(),
+  message: z.string(),
+  delivered_at: z.string().datetime().optional(),
+});
+export type TestWebhookResponse = z.infer<typeof TestWebhookResponseSchema>;
+
 // ============================================================================
 // 4. WEBSOCKET MESSAGE SCHEMAS (/ws/boards/:boardId)
 // ============================================================================
@@ -717,6 +790,11 @@ export const WSEventTypeEnum = z.enum([
   "AUTOMATION_RULE_DELETED",
   "BOARD_DELETED",
   "BOARD_IMPORTED",
+  // Phase 5 Real-Time Presence & Typing
+  "PRESENCE_SYNC",
+  "USER_JOINED",
+  "USER_LEFT",
+  "USER_TYPING",
 ]);
 export type WSEventType = z.infer<typeof WSEventTypeEnum>;
 
@@ -746,6 +824,33 @@ export const AutomationTriggeredEventDataSchema = z.object({
   triggered_at: z.string().datetime(),
 });
 export type AutomationTriggeredEventData = z.infer<typeof AutomationTriggeredEventDataSchema>;
+
+// Phase 5 Real-Time Presence & Live Typing Indicators
+export const UserPresenceSchema = z.object({
+  user_id: z.string().min(1),
+  user_name: z.string().min(1),
+  avatar_url: z.string().nullable().default(null),
+  initials: z.string().min(1),
+  color: z.string().min(1),
+  status: UserPresenceStatusEnum.default("ACTIVE"),
+  active_card_id: z.string().nullable().default(null),
+  last_seen: z.string().datetime(),
+});
+export type UserPresence = z.infer<typeof UserPresenceSchema>;
+
+export const PresenceMessageSchema = z.object({
+  event: PresenceEventTypeEnum,
+  board_id: z.string().min(1),
+  presences: z.array(UserPresenceSchema).default([]),
+  actor: UserPresenceSchema,
+});
+export type PresenceMessage = z.infer<typeof PresenceMessageSchema>;
+
+export const ClientPresenceMessageSchema = z.object({
+  event: ClientPresenceEventEnum,
+  card_id: z.string().nullable().default(null),
+});
+export type ClientPresenceMessage = z.infer<typeof ClientPresenceMessageSchema>;
 
 export const WSMessageSchema = z.object({
   event: WSEventTypeEnum,
@@ -986,6 +1091,43 @@ export const BoardExportCsvResponseSchema = z.object({
 });
 export type BoardExportCsvResponse = z.infer<
   typeof BoardExportCsvResponseSchema
+>;
+
+// ============================================================================
+// 5.5 PHASE 5 OUTBOUND WEBHOOKS & AI SUMMARY NOTIFICATION SCHEMAS
+// ============================================================================
+
+export const AISummaryNotificationRequestSchema = z.object({
+  board_title: z.string().min(1).max(150),
+  recent_activities: z.array(ActivitySchema).default([]),
+});
+export type AISummaryNotificationRequest = z.infer<
+  typeof AISummaryNotificationRequestSchema
+>;
+
+export const AISummaryNotificationResponseSchema = z.object({
+  slack_block_kit_payload: z.record(z.string(), z.unknown()),
+  discord_embed_payload: z.record(z.string(), z.unknown()),
+  summary_text: z.string().min(1),
+});
+export type AISummaryNotificationResponse = z.infer<
+  typeof AISummaryNotificationResponseSchema
+>;
+
+export const OutboundWebhookPayloadSchema = z.object({
+  event: WebhookEventTypeEnum,
+  board_id: z.string().min(1),
+  timestamp: z.string().datetime(),
+  actor: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+    })
+    .optional(),
+  data: z.record(z.string(), z.unknown()),
+});
+export type OutboundWebhookPayload = z.infer<
+  typeof OutboundWebhookPayloadSchema
 >;
 
 // ============================================================================
