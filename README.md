@@ -1,8 +1,8 @@
-# Kinetix
+# Kanbanify
 
 **High-Performance Real-Time Kanban & AI Workspace**
 
-Kinetix is a polyglot monorepo combining an optimistic real-time Multi-Board Kanban, Calendar, Table & Sprint Analytics workspace (`apps/web`), a low-latency Fastify REST + WebSocket coordination server with lexicographical O(1) fractional indexing, a Trello Butler Runtime Automation Engine, real-time Sprint Analytics Aggregator, and Native Trello JSON Importer / CSV Exporter (`apps/api`), and a stateless FastAPI AI task-decomposition, Natural Language Butler Rule Compiler & Executive Sprint Health Analyzer microservice (`services/ai-engine`), unified by strict 1:1 physical data contracts (`packages/contracts`).
+Kanbanify is a polyglot monorepo combining an optimistic real-time Multi-Board Kanban, Calendar, Table & Sprint Analytics workspace (`apps/web`), a low-latency Fastify REST + WebSocket coordination server with lexicographical O(1) fractional indexing, a Trello Butler Runtime Automation Engine, real-time Sprint Analytics Aggregator, and Native Trello JSON Importer / CSV Exporter (`apps/api`), and a stateless FastAPI AI task-decomposition, Natural Language Butler Rule Compiler & Executive Sprint Health Analyzer microservice (`services/ai-engine`), unified by strict 1:1 physical data contracts (`packages/contracts`).
 
 ---
 
@@ -97,7 +97,7 @@ Once started:
 
 ## Local Development Quickstart (Without Docker)
 
-Kinetix is designed to run seamlessly on **Windows, macOS, and Linux** even without Docker/PostgreSQL/Redis running locally (`apps/api` automatically falls back to a pre-seeded in-memory store and in-process WebSocket hub, and `services/ai-engine` includes a deterministic domain-aware heuristic engine when no `LLM_API_KEY` is provided).
+Kanbanify is designed to run seamlessly on **Windows, macOS, and Linux** even without Docker/PostgreSQL/Redis running locally (`apps/api` automatically falls back to a pre-seeded in-memory store and in-process WebSocket hub, and `services/ai-engine` includes a deterministic domain-aware heuristic engine when no `LLM_API_KEY` is provided).
 
 ### 1. Environment Setup
 
@@ -139,7 +139,7 @@ Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Automated E2E Smoke Test
 
-Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 4 lifecycle:
+Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 4 lifecycle:
 1. **Health Checks:** Verifies `GET /health` on both `http://localhost:8001/health` and `http://localhost:8000/health` return `200 OK`.
 2. **Workspaces & Board Templates Verification (Phase 3):**
    - Calls `GET /api/v1/workspaces` and asserts at least 1 workspace and multiple seeded boards exist.
@@ -179,7 +179,7 @@ npm run test:e2e
   - Click **✨ Generate AI Sprint Insights** inside the Analytics view (or via `Cmd+K`) to proxy live board analytics to `services/ai-engine` (`X-Internal-Token` authenticated).
   - Synthesizes a **Sprint Health Score (`0–100`)** with radial gauge and status badge (`EXCELLENT`, `ON_TRACK`, `AT_RISK`, `CRITICAL`), an **Executive Summary**, **Detected Bottlenecks** (WIP breaches, blocked/overdue cards, member overload), and **Actionable Recommendations**.
 - **Native Trello JSON Import & 1-Click CSV/JSON Export (`Import / Export` Modal):**
-  - **Native Trello JSON & Kinetix Backup Importer (`POST /api/v1/boards/import`):** Drag-and-drop any raw Trello JSON export (`lists`, `cards`, `checklists`, `labels`, `members`) or Kinetix JSON backup, or load the built-in **Sample Trello Export** in 1 click. Automatically converts open Trello lists into Kinetix columns with valid O(1) lexicographical fractional indices (`"a0"`, `"a1"`, `"a2"`, ...), maps cards, labels, members, due dates, and multi-item checklists, and broadcasts `BOARD_IMPORTED` over WebSocket.
+  - **Native Trello JSON & Kanbanify Backup Importer (`POST /api/v1/boards/import`):** Drag-and-drop any raw Trello JSON export (`lists`, `cards`, `checklists`, `labels`, `members`) or Kanbanify JSON backup, or load the built-in **Sample Trello Export** in 1 click. Automatically converts open Trello lists into Kanbanify columns with valid O(1) lexicographical fractional indices (`"a0"`, `"a1"`, `"a2"`, ...), maps cards, labels, members, due dates, and multi-item checklists, and broadcasts `BOARD_IMPORTED` over WebSocket.
   - **1-Click CSV & JSON Board Exporter (`GET /api/v1/boards/:boardId/export?format=csv|json`):** Export the active board as a spreadsheet-ready `.csv` file (with RFC 4180 escaping across card IDs, columns, priorities, story points, labels, assignees, checklist progress, and due dates) or a full `.json` backup snapshot.
 
 ---

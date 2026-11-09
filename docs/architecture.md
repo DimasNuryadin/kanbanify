@@ -1,8 +1,8 @@
-# Kinetix — System Architecture, Port Registry & Fractional Indexing Specification
+# Kanbanify — System Architecture, Port Registry & Fractional Indexing Specification
 
 ## 1. Tech Stack & System Topology
 
-**Kinetix** is a high-performance, real-time collaborative Kanban & AI workspace architected as a strictly isolated polyglot monorepo:
+**Kanbanify** is a high-performance, real-time collaborative Kanban & AI workspace architected as a strictly isolated polyglot monorepo:
 
 - **`apps/web`**: Next.js + TypeScript + Tailwind + Zustand + TanStack Query + `@dnd-kit`.
 - **`apps/api`**: Node.js + Fastify + TypeScript + Drizzle ORM + `@fastify/websocket` + PostgreSQL + Redis.

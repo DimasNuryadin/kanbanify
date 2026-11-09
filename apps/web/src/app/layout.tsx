@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "Kinetix — Real-Time Kanban & AI Task Workspace",
+  title: "Kanbanify — Real-Time Kanban & AI Task Workspace",
   description:
     "High-performance collaborative Kanban board with O(1) fractional indexing, real-time WebSocket sync, and AI task decomposition.",
 };
