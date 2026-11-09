@@ -55,6 +55,7 @@ import {
   generatePositionBetween,
 } from "@/lib/fractional-index";
 import { createDeterministicUuid } from "@/lib/mock-data";
+import { boardWsClient } from "@/lib/ws-client";
 import {
   CARD_COVER_COLORS,
   getDueDateStatus,
@@ -154,6 +155,26 @@ export function CardDetailDrawer({
 
   const card: Card | null =
     board.cards.find((c) => c.id === selectedCardId) ?? null;
+
+  const presences = useWorkspaceStore((s) => s.presences);
+  const editingCollaborator = useMemo(() => {
+    if (!card) return null;
+    return presences.find(
+      (p) =>
+        p.active_card_id === card.id &&
+        p.status === "EDITING" &&
+        p.user_id !== "88888888-8888-4888-8888-888888888881"
+    );
+  }, [presences, card?.id]);
+
+  useEffect(() => {
+    if (card?.id) {
+      boardWsClient.sendClientPresence("START_TYPING", card.id);
+      return () => {
+        boardWsClient.sendClientPresence("STOP_TYPING", card.id);
+      };
+    }
+  }, [card?.id]);
 
   const [activePopover, setActivePopover] = useState<ActivePopover>(null);
   const [isDecomposing, setIsDecomposing] = useState(false);
@@ -834,6 +855,28 @@ export function CardDetailDrawer({
               </div>
             </div>
 
+            {/* Live Typing & Conflict Prevention Banner */}
+            {editingCollaborator && (
+              <div className="mb-4 flex items-center justify-between rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-500/15 via-indigo-500/10 to-violet-500/15 p-3 shadow-xs backdrop-blur-xs">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-xs"
+                    style={{ backgroundColor: editingCollaborator.color }}
+                  >
+                    {editingCollaborator.initials}
+                  </div>
+                  <div className="text-xs font-semibold text-violet-900 dark:text-violet-200">
+                    ⚡ <span className="font-bold">{editingCollaborator.user_name}</span> is currently typing on this card
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-600 dark:bg-violet-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-600 dark:bg-violet-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-600 dark:bg-violet-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            )}
+
             {/* Markdown Description Editor */}
             <div>
               <div className="mb-2 flex items-center justify-between">
@@ -899,6 +942,12 @@ export function CardDetailDrawer({
                     autoFocus
                     value={descDraft}
                     onChange={(e) => setDescDraft(e.target.value)}
+                    onFocus={() =>
+                      boardWsClient.sendClientPresence("START_TYPING", card.id)
+                    }
+                    onBlur={() =>
+                      boardWsClient.sendClientPresence("STOP_TYPING", card.id)
+                    }
                     placeholder="Add a more detailed description, technical spec, or Markdown notes..."
                     className="w-full resize-y bg-transparent text-xs leading-relaxed text-zinc-900 focus:outline-none dark:text-zinc-100"
                   />
@@ -1193,6 +1242,12 @@ export function CardDetailDrawer({
                     rows={2}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
+                    onFocus={() =>
+                      boardWsClient.sendClientPresence("START_TYPING", card.id)
+                    }
+                    onBlur={() =>
+                      boardWsClient.sendClientPresence("STOP_TYPING", card.id)
+                    }
                     placeholder="Write a comment..."
                     className="w-full resize-none bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
                   />
@@ -1288,7 +1343,7 @@ export function CardDetailDrawer({
             <div className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-500/15 via-violet-500/10 to-transparent p-3.5">
               <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-900 dark:text-zinc-100">
                 <Sparkles className="h-4 w-4 text-indigo-500" />
-                <span>Kinetix AI Smart Enrich</span>
+                <span>Kanbanify AI Smart Enrich</span>
               </div>
               <p className="mb-3 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
                 Auto-generate structured spec, suggested color labels, and

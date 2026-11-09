@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Archive,
   BarChart3,
+  Bell,
   Calendar,
   Check,
   Command,
@@ -15,6 +16,7 @@ import {
   Moon,
   Palette,
   PanelLeft,
+  Pencil,
   Plus,
   Radio,
   RotateCcw,
@@ -23,6 +25,7 @@ import {
   Star,
   Sun,
   Table2,
+  Users,
   X,
   Zap,
 } from "lucide-react";
@@ -104,6 +107,20 @@ export function WorkspaceHeader({
   const automationRules = useWorkspaceStore((s) => s.automationRules);
   const activeRulesCount = automationRules.filter((r) => r.is_enabled).length;
   const lastMoveMetrics = useWorkspaceStore((s) => s.lastMoveMetrics);
+
+  const presences = useWorkspaceStore((s) => s.presences);
+  const isSimulatingCollaborator = useWorkspaceStore(
+    (s) => s.isSimulatingCollaborator
+  );
+  const setSimulatingCollaborator = useWorkspaceStore(
+    (s) => s.setSimulatingCollaborator
+  );
+  const setWebhooksModalOpen = useWorkspaceStore(
+    (s) => s.setWebhooksModalOpen
+  );
+  const enabledWebhooksCount = (board.webhooks ?? []).filter(
+    (w) => w.is_enabled
+  ).length;
 
   // Inline Board Title Editing
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -200,7 +217,7 @@ export function WorkspaceHeader({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-semibold tracking-wider text-zinc-400 uppercase dark:text-zinc-500">
-                Kinetix Trello Workspace
+                Kanbanify Workspace
               </span>
               <span className="text-zinc-300 dark:text-zinc-700">/</span>
               <span className="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
@@ -285,6 +302,104 @@ export function WorkspaceHeader({
 
         {/* Right: Mode Controls, Command Palette, Theme Switcher, Archived Drawer, Board Menu, New Card */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Live Co-Presence Avatar Bar & Simulate Live Collaborator */}
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2.5 py-1 dark:border-zinc-800/80 dark:bg-zinc-900/90">
+            <div className="flex items-center -space-x-1.5">
+              {presences.map((p) => {
+                const isEditing = p.status === "EDITING";
+                const isIdle = p.status === "IDLE";
+                const editingCard =
+                  isEditing && p.active_card_id
+                    ? board.cards.find((c) => c.id === p.active_card_id)?.title
+                    : null;
+
+                return (
+                  <div
+                    key={p.user_id}
+                    className="group/avatar relative"
+                    title={`${p.user_name} (${p.status.toLowerCase()}${
+                      editingCard ? `: editing "${editingCard}"` : ""
+                    })`}
+                  >
+                    <div
+                      className={`relative flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-xs transition-all duration-150 ${
+                        isEditing
+                          ? "scale-105 ring-2 ring-violet-500 ring-offset-1 ring-offset-white animate-pulse dark:ring-offset-zinc-950"
+                          : "border-2 border-white dark:border-zinc-950"
+                      }`}
+                      style={{ backgroundColor: p.color }}
+                    >
+                      {p.initials}
+
+                      {/* Status Indicator Dot / Typing Pencil Badge */}
+                      {isEditing ? (
+                        <span className="absolute -right-1 -bottom-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-violet-600 text-white shadow-xs ring-1 ring-white dark:ring-zinc-950">
+                          <Pencil className="h-2 w-2" />
+                        </span>
+                      ) : (
+                        <span
+                          className={`absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-zinc-950 ${
+                            isIdle ? "bg-amber-500" : "bg-emerald-500"
+                          }`}
+                        />
+                      )}
+                    </div>
+
+                    {/* Floating Tooltip */}
+                    <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[11px] text-zinc-100 shadow-xl group-hover/avatar:block dark:border-zinc-700 dark:bg-zinc-800">
+                      <div className="font-semibold">{p.user_name}</div>
+                      <div className="text-[10px]">
+                        {isEditing ? (
+                          <span className="text-violet-400">
+                            ⚡ Editing
+                            {editingCard
+                              ? ` "${editingCard.slice(0, 22)}..."`
+                              : " a card..."}
+                          </span>
+                        ) : isIdle ? (
+                          <span className="text-amber-400">💤 Idle</span>
+                        ) : (
+                          <span className="text-emerald-400">
+                            🟢 Viewing board
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Simulate Live Collaborator Button */}
+            <button
+              type="button"
+              onClick={() => setSimulatingCollaborator(!isSimulatingCollaborator)}
+              title={
+                isSimulatingCollaborator
+                  ? "Collaborator simulation running (Click to stop)"
+                  : "Simulate teammates joining the board and typing in real time"
+              }
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold transition-all duration-150 ${
+                isSimulatingCollaborator
+                  ? "border border-violet-500/50 bg-violet-500/20 text-violet-700 shadow-xs dark:bg-violet-500/25 dark:text-violet-300"
+                  : "text-zinc-600 hover:bg-zinc-200/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              }`}
+            >
+              <Users className="h-3.5 w-3.5 text-violet-500" />
+              <span className="hidden xl:inline">
+                {isSimulatingCollaborator
+                  ? "Simulating Live"
+                  : "Simulate Live Collaborator"}
+              </span>
+              <span className="xl:hidden">
+                {isSimulatingCollaborator ? "Live" : "Simulate"}
+              </span>
+              {isSimulatingCollaborator && (
+                <span className="h-2 w-2 rounded-full bg-violet-500 animate-ping" />
+              )}
+            </button>
+          </div>
+
           {/* Mock Mode / Live API Toggle Switch + Connection Pill */}
           <div className="flex items-center gap-1 rounded-lg border border-zinc-200/80 bg-zinc-50 p-1 dark:border-zinc-800/80 dark:bg-zinc-900/90">
             <button
@@ -395,7 +510,7 @@ export function WorkspaceHeader({
           <button
             type="button"
             onClick={() => setAutomationModalOpen(true)}
-            title="Open Trello Butler Automation Center"
+            title="Open Kanbanify Butler Automation Center"
             className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-500/20 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300 dark:hover:bg-amber-400/20"
           >
             <Zap className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
@@ -403,6 +518,22 @@ export function WorkspaceHeader({
             <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 font-mono text-[10px] font-bold text-amber-800 dark:bg-amber-400/20 dark:text-amber-200">
               {activeRulesCount}
             </span>
+          </button>
+
+          {/* Outbound Webhook & Chat Integrations Modal Button */}
+          <button
+            type="button"
+            onClick={() => setWebhooksModalOpen(true)}
+            title="Configure Slack, Discord, and Custom Webhook Integrations"
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-500/20 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300 dark:hover:bg-indigo-400/20"
+          >
+            <Bell className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+            <span className="hidden sm:inline">Webhooks</span>
+            {enabledWebhooksCount > 0 && (
+              <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.2 font-mono text-[10px] font-bold text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-200">
+                {enabledWebhooksCount}
+              </span>
+            )}
           </button>
 
           {/* Import / Export Button */}

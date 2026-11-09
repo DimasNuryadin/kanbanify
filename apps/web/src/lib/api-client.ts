@@ -1,8 +1,11 @@
 import {
+  Activity,
   AIAnalyticsReport,
   AIAnalyticsReportSchema,
   AIParseAutomationResponse,
   AIParseAutomationResponseSchema,
+  AISummaryNotificationResponse,
+  AISummaryNotificationResponseSchema,
   AutomationRule,
   AutomationRuleSchema,
   Board,
@@ -30,10 +33,13 @@ import {
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateWebhookRequest,
   CreateWorkspaceRequest,
   MoveCardRequest,
   MoveColumnRequest,
   StandardErrorSchema,
+  TestWebhookResponse,
+  TestWebhookResponseSchema,
   TrelloImportRequest,
   TrelloImportResult,
   TrelloImportResultSchema,
@@ -41,11 +47,15 @@ import {
   UpdateBoardRequest,
   UpdateCardRequest,
   UpdateColumnRequest,
+  UpdateWebhookRequest,
+  WebhookConfig,
+  WebhookConfigSchema,
   Workspace,
   WorkspaceSchema,
   WorkspaceWithBoards,
   WorkspaceWithBoardsSchema,
 } from "@kinetix/contracts";
+import { z } from "zod";
 import { mockApi } from "./mock-data";
 
 export const API_BASE_URL =
@@ -860,6 +870,161 @@ export const apiClient = {
         err instanceof Error ? err.message : "Board Export API unreachable"
       );
       return mockApi.exportBoardJson(boardId);
+    }
+  },
+
+  // --- Phase 5: Outbound Webhook Integration Endpoints ---
+  async getWebhooks(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<WebhookConfig[]> {
+    if (opts.useMock) {
+      return mockApi.getWebhooks(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/webhooks`,
+        { method: "GET" },
+        (raw) => z.array(WebhookConfigSchema).parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Webhooks API unreachable"
+      );
+      return mockApi.getWebhooks(boardId);
+    }
+  },
+
+  async createWebhook(
+    boardId: string,
+    payload: CreateWebhookRequest,
+    opts: ApiClientOptions
+  ): Promise<WebhookConfig> {
+    if (opts.useMock) {
+      return mockApi.createWebhook(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/webhooks`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => WebhookConfigSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Create Webhook API unreachable"
+      );
+      return mockApi.createWebhook(boardId, payload);
+    }
+  },
+
+  async updateWebhook(
+    webhookId: string,
+    payload: UpdateWebhookRequest,
+    opts: ApiClientOptions
+  ): Promise<WebhookConfig> {
+    if (opts.useMock) {
+      return mockApi.updateWebhook(webhookId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/webhooks/${webhookId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => WebhookConfigSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Update Webhook API unreachable"
+      );
+      return mockApi.updateWebhook(webhookId, payload);
+    }
+  },
+
+  async deleteWebhook(
+    webhookId: string,
+    opts: ApiClientOptions
+  ): Promise<void> {
+    if (opts.useMock) {
+      return mockApi.deleteWebhook(webhookId);
+    }
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/v1/webhooks/${webhookId}`, {
+          method: "DELETE",
+          signal: controller.signal,
+        });
+        if (!res.ok && res.status !== 204) {
+          throw new Error(`API Error (${res.status}): ${res.statusText}`);
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Delete Webhook API unreachable"
+      );
+      return mockApi.deleteWebhook(webhookId);
+    }
+  },
+
+  async testWebhook(
+    webhookId: string,
+    opts: ApiClientOptions
+  ): Promise<TestWebhookResponse> {
+    if (opts.useMock) {
+      return mockApi.testWebhook(webhookId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/webhooks/${webhookId}/test`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        (raw) => TestWebhookResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Test Webhook API unreachable"
+      );
+      return mockApi.testWebhook(webhookId);
+    }
+  },
+
+  async generateAISummaryNotification(
+    boardTitle: string,
+    activities: Activity[] = [],
+    opts: ApiClientOptions
+  ): Promise<AISummaryNotificationResponse> {
+    if (opts.useMock) {
+      return mockApi.generateAISummaryNotification(boardTitle, activities);
+    }
+    try {
+      return await fetchJson(
+        "/internal/v1/format-notification",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            board_title: boardTitle,
+            recent_activities: activities,
+          }),
+        },
+        (raw) => AISummaryNotificationResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error
+          ? err.message
+          : "AI Summary Notification API unreachable"
+      );
+      return mockApi.generateAISummaryNotification(boardTitle, activities);
     }
   },
 };

@@ -6,6 +6,7 @@ import {
   Archive,
   ArrowRight,
   BarChart3,
+  Bell,
   Calendar,
   Command,
   Download,
@@ -23,6 +24,7 @@ import {
   Sun,
   Table2,
   Tag,
+  Users,
   X,
   Zap,
 } from "lucide-react";
@@ -79,6 +81,15 @@ export function CommandPalette({
   const setImportExportModalOpen = useWorkspaceStore(
     (s) => s.setImportExportModalOpen
   );
+  const setWebhooksModalOpen = useWorkspaceStore(
+    (s) => s.setWebhooksModalOpen
+  );
+  const isSimulatingCollaborator = useWorkspaceStore(
+    (s) => s.isSimulatingCollaborator
+  );
+  const setSimulatingCollaborator = useWorkspaceStore(
+    (s) => s.setSimulatingCollaborator
+  );
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar);
 
   const [query, setQuery] = useState("");
@@ -129,6 +140,24 @@ export function CommandPalette({
         shortcut: "A",
         icon: <Archive className="h-4 w-4 text-amber-500" />,
         action: run(() => setArchivedDrawerOpen(true)),
+      },
+      {
+        id: "open-webhooks",
+        group: "Actions",
+        label: "🔔 Slack & Discord Webhooks & Integrations",
+        shortcut: "W H",
+        icon: <Bell className="h-4 w-4 text-emerald-500" />,
+        action: run(() => setWebhooksModalOpen(true)),
+      },
+      {
+        id: "toggle-simulate-collaborator",
+        group: "Actions",
+        label: isSimulatingCollaborator
+          ? "👥 Stop Simulating Live Collaborator"
+          : "👥 Simulate Live Collaborator (Typing & Presence)",
+        shortcut: "S C",
+        icon: <Users className="h-4 w-4 text-indigo-500" />,
+        action: run(() => setSimulatingCollaborator(!isSimulatingCollaborator)),
       },
       {
         id: "view-kanban",
@@ -483,7 +512,7 @@ export function CommandPalette({
             </span>
           </div>
           <span className="flex items-center gap-1 font-mono text-[10px]">
-            <Command className="h-3 w-3" /> Kinetix Command
+            <Command className="h-3 w-3" /> Kanbanify Command
           </span>
         </div>
       </div>

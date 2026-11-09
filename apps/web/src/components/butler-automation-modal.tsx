@@ -519,7 +519,7 @@ export function ButlerAutomationModal({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
-                  Kinetix Butler Automation Center
+                  Kanbanify Butler Automation Center
                 </h2>
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
                   <Bot className="h-2.5 w-2.5" />
