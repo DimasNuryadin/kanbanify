@@ -48,7 +48,7 @@ function ButlerToastItem({
         <div className="flex items-center gap-1.5">
           <span className="inline-flex items-center gap-1 rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-indigo-300 uppercase">
             <Bot className="h-2.5 w-2.5" />
-            Butler Executed
+            ⚡ Butler Automation
           </span>
           <span className="font-mono text-[10px] text-zinc-500">
             {toast.timestamp}

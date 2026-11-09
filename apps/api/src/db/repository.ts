@@ -1453,8 +1453,10 @@ export class StorageRepository {
 
   public async seedPostgresIfEmpty(): Promise<void> {
     if (!this.db) return;
-    const existingBoards = await this.db.select().from(schema.boards).limit(1);
-    if (existingBoards.length > 0) return;
+    const existingBoardRows = await this.db
+      .select({ id: schema.boards.id })
+      .from(schema.boards);
+    const existingBoardIds = new Set(existingBoardRows.map((b) => b.id));
 
     const seedMem = createPreseededMemoryStore();
     for (const ws of seedMem.workspaces.values()) {
@@ -1471,7 +1473,13 @@ export class StorageRepository {
         .onConflictDoNothing();
     }
 
-    for (const b of seedMem.boards.values()) {
+    const missingSeedBoards = Array.from(seedMem.boards.values()).filter(
+      (b) => !existingBoardIds.has(b.id)
+    );
+    if (missingSeedBoards.length === 0) return;
+    const missingBoardIds = new Set(missingSeedBoards.map((b) => b.id));
+
+    for (const b of missingSeedBoards) {
       await this.db
         .insert(schema.boards)
         .values({
@@ -1491,6 +1499,7 @@ export class StorageRepository {
     }
 
     for (const col of seedMem.columns.values()) {
+      if (!missingBoardIds.has(col.board_id)) continue;
       await this.db
         .insert(schema.columns)
         .values({
@@ -1506,6 +1515,7 @@ export class StorageRepository {
     }
 
     for (const card of seedMem.cards.values()) {
+      if (!missingBoardIds.has(card.board_id)) continue;
       await this.db
         .insert(schema.cards)
         .values({

@@ -522,6 +522,7 @@ export async function buildApp(
             due_complete_value: null,
           });
         }
+        let matchedMember = false;
         for (const m of board.members) {
           if (promptLower.includes(m.name.toLowerCase().split(" ")[0]!)) {
             actions.push({
@@ -535,8 +536,29 @@ export async function buildApp(
               comment_text: null,
               due_complete_value: null,
             });
+            matchedMember = true;
             break;
           }
+        }
+        if (
+          !matchedMember &&
+          (promptLower.includes("assign") ||
+            promptLower.includes("tugaskan") ||
+            promptLower.includes("member") ||
+            promptLower.includes("anggota"))
+        ) {
+          actions.push({
+            type: "ASSIGN_MEMBER",
+            member_id:
+              board.members[0]?.id ?? "88888888-8888-4888-8888-888888888881",
+            label_id: null,
+            priority: null,
+            target_column_id: null,
+            checklist_title: null,
+            checklist_items: null,
+            comment_text: null,
+            due_complete_value: null,
+          });
         }
         for (const l of board.labels) {
           if (

@@ -226,7 +226,90 @@ async function runSmokeTests() {
   );
 
   // ---------------------------------------------------------------------------
-  // STEP 2: Board Creation & Trello Defaults (Labels, Members, 4 Columns)
+  // STEP 2A: Workspaces & Board Templates Verification (Phase 3)
+  // ---------------------------------------------------------------------------
+  logStep("WORKSPACES", "Verifying GET /api/v1/workspaces and seeded boards...");
+  const workspacesRes = await fetch(`${API_BASE_URL}/api/v1/workspaces`);
+  assert.equal(
+    workspacesRes.status,
+    200,
+    `Expected 200 from GET /api/v1/workspaces, got ${workspacesRes.status}`
+  );
+  const workspaces = await workspacesRes.json();
+  assert.ok(
+    Array.isArray(workspaces) && workspaces.length >= 1,
+    `Expected at least 1 workspace, got ${workspaces?.length}`
+  );
+  const totalSeededBoards = workspaces.reduce(
+    (sum, ws) => sum + (Array.isArray(ws.boards) ? ws.boards.length : 0),
+    0
+  );
+  assert.ok(
+    totalSeededBoards >= 2,
+    `Expected multiple seeded boards across workspaces, got ${totalSeededBoards}`
+  );
+  logPass(
+    `GET /api/v1/workspaces -> 200 OK (${workspaces.length} workspace(s), ${totalSeededBoards} seeded boards)`
+  );
+
+  logStep("TEMPLATES", "Verifying GET /api/v1/board-templates...");
+  const templatesRes = await fetch(`${API_BASE_URL}/api/v1/board-templates`);
+  assert.equal(
+    templatesRes.status,
+    200,
+    `Expected 200 from GET /api/v1/board-templates, got ${templatesRes.status}`
+  );
+  const templates = await templatesRes.json();
+  assert.ok(
+    Array.isArray(templates) && templates.length >= 1,
+    `Expected board templates to exist, got ${templates?.length}`
+  );
+  logPass(
+    `GET /api/v1/board-templates -> 200 OK (${templates.length} templates: [${templates
+      .map((t) => t.id)
+      .join(", ")}])`
+  );
+
+  const selectedTemplate =
+    templates.find((t) => t.id === "template-engineering-sprint") ?? templates[0];
+  logStep(
+    "BOARD_FROM_TEMPLATE",
+    `Creating board from template '${selectedTemplate.id}' via POST /api/v1/boards...`
+  );
+  const templateBoardRes = await fetch(`${API_BASE_URL}/api/v1/boards`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: `E2E ${selectedTemplate.name} Board`,
+      description: "Created from template during Phase 3 E2E verification",
+      template_id: selectedTemplate.id,
+    }),
+  });
+  assert.ok(
+    templateBoardRes.status === 200 || templateBoardRes.status === 201,
+    `Expected 200/201 from POST /api/v1/boards with template_id, got ${templateBoardRes.status}`
+  );
+  const templateBoard = await templateBoardRes.json();
+  assert.ok(templateBoard.id, "Template-created board must have a valid UUID id");
+  assert.equal(
+    templateBoard.columns.length,
+    selectedTemplate.default_columns.length,
+    `Expected ${selectedTemplate.default_columns.length} columns from template, got ${templateBoard.columns.length}`
+  );
+  assert.ok(
+    Array.isArray(templateBoard.labels) && templateBoard.labels.length >= 6,
+    "Template-created board must include default labels"
+  );
+  assert.ok(
+    Array.isArray(templateBoard.members) && templateBoard.members.length >= 1,
+    "Template-created board must include default members"
+  );
+  logPass(
+    `POST /api/v1/boards (template_id="${selectedTemplate.id}") -> ${templateBoardRes.status} Created board '${templateBoard.id}' with ${templateBoard.columns.length} columns and ${templateBoard.cards.length} sample cards`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 2B: Board Creation & Trello Defaults (Labels, Members, 4 Columns)
   // ---------------------------------------------------------------------------
   logStep("BOARD", 'Creating board {"title": "E2E Phase 2 Trello Parity Board"}...');
   const createBoardRes = await fetch(`${API_BASE_URL}/api/v1/boards`, {
@@ -678,6 +761,189 @@ async function runSmokeTests() {
     `POST /api/v1/cards/${createdCard.id}/copy & PATCH /api/v1/cards/${copiedCard.id} -> Copied card '${copiedCard.id}' and archived (is_archived=true)`
   );
 
+  // ---------------------------------------------------------------------------
+  // STEP 8: AI Natural Language to Butler Rule Generation (API -> AI Engine)
+  // ---------------------------------------------------------------------------
+  const doneCol = board.columns.find((c) => c.title === "Done");
+  assert.ok(doneCol, 'Board must contain a "Done" column');
+
+  const nlPrompt =
+    "When a card is moved to Done, mark due date complete and assign a member";
+  logStep(
+    "AI_BUTLER_GENERATE",
+    `Calling POST /api/v1/boards/${board.id}/automations/ai-generate with prompt: "${nlPrompt}"...`
+  );
+  const aiGenRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/automations/ai-generate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: nlPrompt }),
+    }
+  );
+  assert.ok(
+    aiGenRes.status === 200 || aiGenRes.status === 201,
+    `Expected 200/201 from POST /api/v1/boards/:boardId/automations/ai-generate, got ${aiGenRes.status}`
+  );
+  const generatedRule = await aiGenRes.json();
+  assert.ok(generatedRule.trigger, "Generated rule must include a trigger object");
+  assert.equal(
+    generatedRule.trigger.type,
+    "WHEN_CARD_MOVED_TO_COLUMN",
+    `Expected trigger.type === "WHEN_CARD_MOVED_TO_COLUMN", got ${generatedRule.trigger.type}`
+  );
+  assert.ok(
+    generatedRule.trigger.column_id === doneCol.id ||
+      (typeof generatedRule.trigger.column_title_match === "string" &&
+        generatedRule.trigger.column_title_match.toLowerCase().includes("done")),
+    `Expected trigger to target the "Done" column, got ${JSON.stringify(generatedRule.trigger)}`
+  );
+  assert.ok(
+    Array.isArray(generatedRule.actions) &&
+      generatedRule.actions.some((a) => a.type === "MARK_DUE_DATE_COMPLETE"),
+    `Expected generated rule actions to include MARK_DUE_DATE_COMPLETE, got ${JSON.stringify(generatedRule.actions)}`
+  );
+  logPass(
+    `POST /api/v1/boards/${board.id}/automations/ai-generate -> ${aiGenRes.status} Generated rule "${generatedRule.name}" (trigger=${generatedRule.trigger.type}, actions=[${generatedRule.actions
+      .map((a) => a.type)
+      .join(", ")}])`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 9: Runtime Butler Automation Execution Verification
+  // ---------------------------------------------------------------------------
+  logStep(
+    "BUTLER_RUNTIME",
+    "Ensuring active Butler rule (WHEN_CARD_MOVED_TO_COLUMN('Done') -> MARK_DUE_DATE_COMPLETE + ASSIGN_MEMBER) and testing execution..."
+  );
+
+  let activeDoneRuleId = generatedRule.id;
+  const hasAssignMember =
+    Array.isArray(generatedRule.actions) &&
+    generatedRule.actions.some((a) => a.type === "ASSIGN_MEMBER");
+
+  if (!activeDoneRuleId || !hasAssignMember) {
+    const createRuleRes = await fetch(
+      `${API_BASE_URL}/api/v1/boards/${board.id}/automations`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "When Moved to Done: Complete Due Date & Assign Member",
+          description:
+            "Automatically mark due date complete and assign lead member when card moves to Done",
+          is_enabled: true,
+          trigger: {
+            type: "WHEN_CARD_MOVED_TO_COLUMN",
+            column_id: doneCol.id,
+            column_title_match: "Done",
+            priority: null,
+            label_id: null,
+          },
+          actions: [
+            {
+              type: "MARK_DUE_DATE_COMPLETE",
+              due_complete_value: true,
+            },
+            {
+              type: "ASSIGN_MEMBER",
+              member_id: board.members[0].id,
+            },
+          ],
+        }),
+      }
+    );
+    assert.ok(
+      createRuleRes.status === 200 || createRuleRes.status === 201,
+      `Expected 200/201 from POST /api/v1/boards/:boardId/automations, got ${createRuleRes.status}`
+    );
+    const createdRule = await createRuleRes.json();
+    activeDoneRuleId = createdRule.id;
+  }
+
+  const butlerCardRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/cards`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        column_id: backlogCol.id,
+        title: "Butler Runtime Verification Card",
+        description: "Card to verify automatic Butler execution when moved to Done.",
+        position: "a2",
+        priority: "MEDIUM",
+        due_date: "2026-11-25T00:00:00.000Z",
+        is_due_complete: false,
+        member_ids: [],
+      }),
+    }
+  );
+  assert.ok(
+    butlerCardRes.status === 200 || butlerCardRes.status === 201,
+    `Expected 200/201 creating Butler test card, got ${butlerCardRes.status}`
+  );
+  const butlerTestCard = await butlerCardRes.json();
+  assert.equal(butlerTestCard.is_due_complete, false);
+  assert.equal(butlerTestCard.member_ids.length, 0);
+
+  const moveToDoneRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${butlerTestCard.id}/move`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_column_id: doneCol.id,
+        new_position: "a0",
+      }),
+    }
+  );
+  assert.equal(
+    moveToDoneRes.status,
+    200,
+    `Expected 200 moving Butler test card to Done, got ${moveToDoneRes.status}`
+  );
+
+  const boardAfterButlerRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}`
+  );
+  assert.equal(boardAfterButlerRes.status, 200);
+  const boardAfterButler = await boardAfterButlerRes.json();
+
+  const mutatedCard = boardAfterButler.cards.find(
+    (c) => c.id === butlerTestCard.id
+  );
+  assert.ok(mutatedCard, "Butler test card must exist on board");
+  assert.equal(
+    mutatedCard.is_due_complete,
+    true,
+    "Expected card.is_due_complete === true (automatically checked by Butler)"
+  );
+  assert.ok(
+    Array.isArray(mutatedCard.member_ids) && mutatedCard.member_ids.length > 0,
+    `Expected card.member_ids.length > 0 (automatically assigned by Butler), got ${JSON.stringify(mutatedCard.member_ids)}`
+  );
+
+  const triggeredRule = (boardAfterButler.automation_rules ?? []).find(
+    (r) => r.id === activeDoneRuleId || r.execution_count >= 1
+  );
+  assert.ok(
+    triggeredRule && triggeredRule.execution_count >= 1,
+    `Expected rule execution_count >= 1, got ${JSON.stringify(boardAfterButler.automation_rules)}`
+  );
+
+  assert.ok(
+    Array.isArray(boardAfterButler.activities) &&
+      boardAfterButler.activities.some(
+        (act) => act.action_type === "AUTOMATION_TRIGGERED"
+      ),
+    "Expected board.activities to contain an AUTOMATION_TRIGGERED log entry"
+  );
+  logPass(
+    `Butler Runtime Execution verified: card.is_due_complete=${mutatedCard.is_due_complete}, card.member_ids=[${mutatedCard.member_ids.join(
+      ", "
+    )}], rule.execution_count=${triggeredRule.execution_count}, AUTOMATION_TRIGGERED logged`
+  );
+
   if (wsClient) {
     await new Promise((r) => setTimeout(r, 150));
     wsClient.close();
@@ -692,7 +958,7 @@ async function runSmokeTests() {
 
   console.log("==================================================================");
   console.log(
-    "\x1b[32m[PASS] Phase 2 Full Trello Parity E2E Smoke Tests Succeeded!\x1b[0m"
+    "\x1b[32m[PASS] Phase 3 Multi-Board & Butler Automation E2E Smoke Tests Succeeded!\x1b[0m"
   );
   console.log("==================================================================");
 }

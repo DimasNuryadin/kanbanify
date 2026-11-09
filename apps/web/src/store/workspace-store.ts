@@ -276,11 +276,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
             },
           ];
 
+      const updatedWorkspaces = state.workspaces.map((ws) =>
+        ws.id === board.workspace_id
+          ? {
+              ...ws,
+              boards: updatedSummaries.filter(
+                (s) => s.workspace_id === ws.id
+              ),
+            }
+          : ws
+      );
+
       return {
         board: sortBoard(board),
         activeBoardId: board.id,
         automationRules: board.automation_rules ?? [],
         boardSummaries: updatedSummaries,
+        workspaces: updatedWorkspaces,
       };
     }),
   setActiveBoardId: (activeBoardId) => set({ activeBoardId }),

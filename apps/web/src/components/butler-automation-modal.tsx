@@ -39,6 +39,7 @@ interface ButlerAutomationModalProps {
   onUpdateRule: (ruleId: string, payload: UpdateAutomationRuleRequest) => Promise<void>;
   onDeleteRule: (ruleId: string) => Promise<void>;
   onAiGenerateRule: (prompt: string) => Promise<{
+    id?: string;
     name: string;
     description: string;
     trigger: AutomationTrigger;
@@ -63,6 +64,7 @@ export function ButlerAutomationModal({
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [aiGeneratedPreview, setAiGeneratedPreview] = useState<{
+    id?: string;
     name: string;
     description: string;
     trigger: AutomationTrigger;
@@ -123,16 +125,25 @@ export function ButlerAutomationModal({
 
   const handleSaveAiGenerated = async () => {
     if (!aiGeneratedPreview) return;
-    await onCreateRule({
-      name: aiGeneratedPreview.name,
-      description: aiGeneratedPreview.description,
-      is_enabled: true,
-      trigger: aiGeneratedPreview.trigger,
-      actions: aiGeneratedPreview.actions,
-    });
+    if (!aiGeneratedPreview.id) {
+      await onCreateRule({
+        name: aiGeneratedPreview.name,
+        description: aiGeneratedPreview.description,
+        is_enabled: true,
+        trigger: aiGeneratedPreview.trigger,
+        actions: aiGeneratedPreview.actions,
+      });
+    }
     setAiGeneratedPreview(null);
     setAiPrompt("");
     setActiveTab("rules");
+  };
+
+  const handleDiscardAiGenerated = async () => {
+    if (aiGeneratedPreview?.id) {
+      await onDeleteRule(aiGeneratedPreview.id);
+    }
+    setAiGeneratedPreview(null);
   };
 
   const handleAddVisualAction = () => {
@@ -860,7 +871,7 @@ export function ButlerAutomationModal({
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setAiGeneratedPreview(null)}
+                      onClick={handleDiscardAiGenerated}
                       className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400"
                     >
                       Discard
