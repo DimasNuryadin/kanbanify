@@ -19,10 +19,13 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.contracts import (
+    ActivityActionTypeEnum,
     AIAnalyticsReportSchema,
     AIDecomposeResponseSchema,
     AIParseAutomationResponseSchema,
     AISuggestCardEnrichmentResponseSchema,
+    AISummaryNotificationRequestSchema,
+    AISummaryNotificationResponseSchema,
     AutomationActionTypeEnum,
     AutomationTriggerTypeEnum,
     HealthCheckResponseSchema,
@@ -1330,5 +1333,376 @@ def test_analyze_board_live_llm_orchestration_and_fallback(
         assert fallback_parsed.health_status == SprintHealthStatusEnum.ON_TRACK
         assert "In Progress" in " ".join(fallback_parsed.bottlenecks)
         assert "Alex Rivera" in " ".join(fallback_parsed.bottlenecks)
+
+
+# ============================================================================
+# 5. SMART NOTIFICATION FORMATTER TESTS (POST /internal/v1/format-notification)
+# ============================================================================
+
+
+def test_format_notification_missing_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/format-notification without X-Internal-Token returns 401 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/format-notification",
+        json={
+            "board_title": "Kinetix Platform Launch",
+            "recent_activities": [],
+        },
+    )
+    assert res.status_code == 401
+    validated = StandardErrorSchema.model_validate(res.json())
+    assert validated.error.code.value == "UNAUTHORIZED"
+
+
+def test_format_notification_invalid_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/format-notification with invalid token returns 401 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/format-notification",
+        headers={"X-Internal-Token": "invalid_token_123"},
+        json={
+            "board_title": "Kinetix Platform Launch",
+            "recent_activities": [],
+        },
+    )
+    assert res.status_code == 401
+    validated = StandardErrorSchema.model_validate(res.json())
+    assert validated.error.code.value == "UNAUTHORIZED"
+
+
+def test_format_notification_empty_activities_returns_200_ok() -> None:
+    """Verify POST /internal/v1/format-notification with empty activities returns valid 200 OK."""
+    res = client.post(
+        "/internal/v1/format-notification",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json={
+            "board_title": "Kinetix Platform Launch",
+            "recent_activities": [],
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+
+    # Validate against canonical shared contract schema
+    _canonical_contracts.AISummaryNotificationResponseSchema.model_validate(body)
+    parsed = AISummaryNotificationResponseSchema.model_validate(body)
+
+    assert "Kinetix Platform Launch" in parsed.summary_text
+    assert "No recent activities" in parsed.summary_text
+
+    # Slack Block Kit assertions
+    assert "blocks" in parsed.slack_block_kit_payload
+    blocks = parsed.slack_block_kit_payload["blocks"]
+    assert len(blocks) >= 3
+    assert blocks[0]["type"] == "header"
+    assert "Kinetix Platform Launch" in blocks[0]["text"]["text"]
+    assert blocks[1]["type"] == "section"
+    assert blocks[-1]["type"] == "context"
+    assert "Dispatched via" in blocks[-1]["elements"][0]["text"]
+
+    # Discord Embed assertions
+    assert "embeds" in parsed.discord_embed_payload
+    embeds = parsed.discord_embed_payload["embeds"]
+    assert len(embeds) == 1
+    assert "Kinetix Platform Launch" in embeds[0]["title"]
+    assert "footer" in embeds[0]
+    assert embeds[0]["footer"]["text"] == "Kanbanify Webhook Dispatcher"
+
+
+def test_format_notification_sample_activities_returns_200_ok() -> None:
+    """
+    Verify POST /internal/v1/format-notification with realistic Kanban activities:
+    - cards created, moved, completed (moved to Done)
+    - comments added
+    - automations triggered
+    Returns 200 OK matching AISummaryNotificationResponseSchema with rich Slack Block Kit
+    and Discord Embed payloads.
+    """
+    activities_payload = [
+        {
+            "id": "act-01",
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "card_id": "44444444-4444-4444-8444-444444444441",
+            "actor_name": "Alex Rivera",
+            "action_type": ActivityActionTypeEnum.CARD_MOVED.value,
+            "description": "Alex Rivera moved 'Implement OAuth2 PKCE flow' to 'In Progress'",
+            "created_at": "2026-11-09T10:10:00.000Z",
+            "details": {
+                "card_title": "Implement OAuth2 PKCE flow",
+                "target_column": "In Progress",
+            },
+        },
+        {
+            "id": "act-02",
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "card_id": "44444444-4444-4444-8444-444444444442",
+            "actor_name": "Elena Rostova",
+            "action_type": "CARD_CREATED",
+            "description": "Elena Rostova created 'Setup Redis presence cache'",
+            "created_at": "2026-11-09T10:11:00.000Z",
+            "details": {
+                "card_title": "Setup Redis presence cache",
+            },
+        },
+        {
+            "id": "act-03",
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "card_id": "44444444-4444-4444-8444-444444444443",
+            "actor_name": "Elena Rostova",
+            "action_type": "CARD_MOVED",
+            "description": "Elena Rostova moved 'Fix WebSocket broadcast race condition' to 'Done'",
+            "created_at": "2026-11-09T10:12:00.000Z",
+            "details": {
+                "card_title": "Fix WebSocket broadcast race condition",
+                "target_column": "Done",
+            },
+        },
+        {
+            "id": "act-04",
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "card_id": "44444444-4444-4444-8444-444444444441",
+            "actor_name": "Samir Patel",
+            "action_type": "COMMENT_ADDED",
+            "description": "Samir Patel commented on 'Implement OAuth2 PKCE flow'",
+            "created_at": "2026-11-09T10:13:00.000Z",
+            "details": {
+                "card_title": "Implement OAuth2 PKCE flow",
+            },
+        },
+        {
+            "id": "act-05",
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "card_id": "44444444-4444-4444-8444-444444444443",
+            "actor_name": "Kinetix Butler",
+            "action_type": "AUTOMATION_TRIGGERED",
+            "description": "🤖 Butler executed rule 'Auto-Complete & Tag Done Cards' on 'Fix WebSocket broadcast race condition'",
+            "created_at": "2026-11-09T10:14:00.000Z",
+            "is_automated": True,
+            "details": {
+                "rule_name": "Auto-Complete & Tag Done Cards",
+                "card_title": "Fix WebSocket broadcast race condition",
+            },
+        },
+    ]
+
+    request_payload = {
+        "board_title": "Platform Release Sprint",
+        "recent_activities": activities_payload,
+    }
+    AISummaryNotificationRequestSchema.model_validate(request_payload)
+
+    res = client.post(
+        "/internal/v1/format-notification",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=request_payload,
+    )
+    assert res.status_code == 200
+    body = res.json()
+
+    # Validate against canonical shared contract schemas
+    _canonical_contracts.AISummaryNotificationResponseSchema.model_validate(body)
+    parsed = AISummaryNotificationResponseSchema.model_validate(body)
+
+    # Summary Text assertions
+    assert "Platform Release Sprint" in parsed.summary_text
+    assert "2 cards moved" in parsed.summary_text
+    assert "1 card created" in parsed.summary_text
+    assert "1 card completed" in parsed.summary_text
+    assert "1 automation executed" in parsed.summary_text
+    assert "1 comment added" in parsed.summary_text
+
+    # Slack Block Kit assertions
+    assert "blocks" in parsed.slack_block_kit_payload
+    slack_blocks = parsed.slack_block_kit_payload["blocks"]
+    assert len(slack_blocks) >= 4
+
+    # Header block
+    assert slack_blocks[0]["type"] == "header"
+    assert "Platform Release Sprint" in slack_blocks[0]["text"]["text"]
+
+    # Markdown summary section
+    assert slack_blocks[1]["type"] == "section"
+    assert "Daily Digest" in slack_blocks[1]["text"]["text"]
+
+    # Activity breakdown fields section
+    fields_section = next(b for b in slack_blocks if "fields" in b)
+    field_texts = [f["text"] for f in fields_section["fields"]]
+    assert any("Cards Moved" in t for t in field_texts)
+    assert any("Cards Created" in t for t in field_texts)
+    assert any("Completed" in t for t in field_texts)
+    assert any("Automations" in t for t in field_texts)
+
+    # Context footer
+    assert slack_blocks[-1]["type"] == "context"
+    assert "Dispatched via Kanbanify Webhook Dispatcher" in slack_blocks[-1]["elements"][0]["text"]
+
+    # Discord Embed assertions
+    assert "embeds" in parsed.discord_embed_payload
+    embeds = parsed.discord_embed_payload["embeds"]
+    assert len(embeds) == 1
+    embed = embeds[0]
+    assert "Platform Release Sprint" in embed["title"]
+    assert embed["color"] == 65280  # Completed cards triggers green accent
+    assert embed["footer"]["text"] == "Kanbanify Webhook Dispatcher"
+    assert "timestamp" in embed
+
+    field_names = [f["name"] for f in embed["fields"]]
+    assert "Activity Breakdown" in field_names
+    assert "Card Moved" in field_names
+    assert "Card Created" in field_names
+    assert "Automation Triggered" in field_names
+
+
+def test_format_notification_with_api_contract_sample() -> None:
+    """Verify endpoint handles the exact sample format from docs/api-contract.md (with details and omitted description)."""
+    contract_sample_payload = {
+        "board_title": "Kinetix Platform Launch",
+        "recent_activities": [
+            {
+                "id": "act-01",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "card_id": "44444444-4444-4444-8444-444444444441",
+                "actor_id": "88888888-8888-4888-8888-888888888881",
+                "actor_name": "Alex Rivera",
+                "action_type": "CARD_MOVED",
+                "details": {
+                    "card_title": "Implement OAuth2 PKCE flow",
+                    "target_column": "Review",
+                },
+                "created_at": "2026-11-09T10:14:00.000Z",
+            },
+            {
+                "id": "act-02",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "card_id": "44444444-4444-4444-8444-444444444442",
+                "actor_id": "88888888-8888-4888-8888-888888888882",
+                "actor_name": "Samir Patel",
+                "action_type": "AUTOMATION_TRIGGERED",
+                "details": {
+                    "rule_name": "Auto-Assign Reviewer on Done",
+                    "card_title": "Implement Webhook Dispatcher",
+                },
+                "created_at": "2026-11-09T10:15:00.000Z",
+            },
+        ],
+    }
+
+    res = client.post(
+        "/internal/v1/format-notification",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=contract_sample_payload,
+    )
+    assert res.status_code == 200
+    body = res.json()
+    _canonical_contracts.AISummaryNotificationResponseSchema.model_validate(body)
+    parsed = AISummaryNotificationResponseSchema.model_validate(body)
+
+    assert "Kinetix Platform Launch" in parsed.summary_text
+    assert "1 card moved" in parsed.summary_text
+    assert "1 automation executed" in parsed.summary_text
+    assert "blocks" in parsed.slack_block_kit_payload
+    assert "embeds" in parsed.discord_embed_payload
+
+
+def test_format_notification_live_llm_orchestration_and_fallback() -> None:
+    """Verify live LLM orchestration in JSON mode and graceful fallback when upstream LLM fails."""
+    mock_llm_output = {
+        "summary_text": "🚀 Kanbanify Daily Digest for Kinetix Platform Launch: 1 card moved to Review, 1 Butler rule executed.",
+        "slack_block_kit_payload": {
+            "blocks": [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "📋 Custom LLM Header",
+                        "emoji": True,
+                    },
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "Custom LLM Summary",
+                    },
+                },
+            ]
+        },
+        "discord_embed_payload": {
+            "username": "Kinetix Bot",
+            "embeds": [
+                {
+                    "title": "Custom LLM Discord Embed",
+                    "description": "LLM Generated Activity",
+                    "color": 65280,
+                    "fields": [],
+                }
+            ],
+        },
+    }
+
+    mock_response = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(mock_llm_output),
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    request_payload = {
+        "board_title": "Kinetix Platform Launch",
+        "recent_activities": [
+            {
+                "id": "act-01",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "actor_name": "Alex Rivera",
+                "action_type": "CARD_MOVED",
+                "description": "Alex Rivera moved 'Implement OAuth2 PKCE flow' to 'Review'",
+                "created_at": "2026-11-09T10:14:00.000Z",
+            }
+        ],
+    }
+
+    # Test live LLM orchestration path
+    with patch("app.notification_formatter.get_settings") as mock_settings:
+        from app.config import Settings
+        mock_settings.return_value = Settings(
+            llm_api_key="sk-real-valid-api-key-for-testing",
+        )
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            res = client.post(
+                "/internal/v1/format-notification",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=request_payload,
+            )
+            assert res.status_code == 200
+            body = res.json()
+            assert body["summary_text"] == mock_llm_output["summary_text"]
+            assert body["slack_block_kit_payload"]["blocks"][0]["text"]["text"] == "📋 Custom LLM Header"
+
+        # Test fallback on network / upstream LLM error
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(side_effect=httpx.ConnectError("OpenAI API unreachable")),
+        ):
+            fallback_res = client.post(
+                "/internal/v1/format-notification",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=request_payload,
+            )
+            assert fallback_res.status_code == 200
+            fallback_body = fallback_res.json()
+            assert "🚀 Kanbanify Daily Digest for Kinetix Platform Launch" in fallback_body["summary_text"]
+            assert "1 card moved" in fallback_body["summary_text"]
+
 
 

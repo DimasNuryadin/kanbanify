@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
@@ -344,6 +344,47 @@ class AIAnalyticsReportSchema(BaseModel):
     generated_at: datetime | str
 
 
+# Phase 5 Smart Slack/Discord ChatOps Notification Schemas
+class ActivityActionTypeEnum(str, Enum):
+    CARD_CREATED = "CARD_CREATED"
+    CARD_MOVED = "CARD_MOVED"
+    CARD_ARCHIVED = "CARD_ARCHIVED"
+    COMMENT_ADDED = "COMMENT_ADDED"
+    CHECKLIST_COMPLETED = "CHECKLIST_COMPLETED"
+    MEMBER_ASSIGNED = "MEMBER_ASSIGNED"
+    AUTOMATION_TRIGGERED = "AUTOMATION_TRIGGERED"
+
+
+class _BaseActivitySchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: str = Field(default="act-generated", min_length=1)
+    board_id: str = Field(default="11111111-1111-4111-8111-111111111111", min_length=1)
+    card_id: str | None = None
+    actor_name: str = Field(default="User", min_length=1, max_length=120)
+    action_type: ActivityActionTypeEnum
+    description: str = Field(default="", min_length=0)
+    created_at: datetime | str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    is_automated: bool = False
+    actor_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class _BaseAISummaryNotificationRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    recent_activities: list[Any] = Field(default_factory=list)
+
+
+class AISummaryNotificationResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    slack_block_kit_payload: dict[str, Any] = Field(default_factory=dict)
+    discord_embed_payload: dict[str, Any] = Field(default_factory=dict)
+    summary_text: str = Field(..., min_length=1)
+
+
 class ErrorBodySchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -411,6 +452,10 @@ if _SHARED_SCHEMAS_PATH.is_file():
         BoardAnalyticsSchema = _module.BoardAnalyticsSchema  # type: ignore[misc]
         AIAnalyticsRequestSchema = _module.AIAnalyticsRequestSchema  # type: ignore[misc]
         AIAnalyticsReportSchema = _module.AIAnalyticsReportSchema  # type: ignore[misc]
+        ActivityActionTypeEnum = _module.ActivityActionTypeEnum  # type: ignore[misc]
+        _BaseActivitySchema = _module.ActivitySchema  # type: ignore[misc]
+        _BaseAISummaryNotificationRequestSchema = _module.AISummaryNotificationRequestSchema  # type: ignore[misc]
+        AISummaryNotificationResponseSchema = _module.AISummaryNotificationResponseSchema  # type: ignore[misc]
 
 
 _DEFAULT_COLOR_NAMES: dict[str, str] = {
@@ -569,6 +614,66 @@ class AISuggestCardEnrichmentResponseSchema(_BaseAISuggestCardEnrichmentResponse
         return self
 
 
+class ActivitySchema(_BaseActivitySchema):
+    """
+    Contract-compliant ActivitySchema compatible with packages/contracts/schemas.py.
+    Provides automatic fallback synthesis for description and accepts details/actor_id.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    actor_id: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_activity(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            patched = dict(data)
+            if not patched.get("id"):
+                patched["id"] = "act-generated"
+            if not patched.get("board_id"):
+                patched["board_id"] = "11111111-1111-4111-8111-111111111111"
+            if not patched.get("actor_name"):
+                patched["actor_name"] = "User"
+            if not patched.get("created_at"):
+                patched["created_at"] = (
+                    datetime.now(UTC)
+                    .isoformat(timespec="milliseconds")
+                    .replace("+00:00", "Z")
+                )
+            if not patched.get("description"):
+                actor = patched.get("actor_name") or "User"
+                action_raw = patched.get("action_type") or "CARD_MOVED"
+                action_str = action_raw.value if hasattr(action_raw, "value") else str(action_raw)
+                details = patched.get("details")
+                if isinstance(details, dict):
+                    card_title = details.get("card_title")
+                    target = details.get("target_column") or details.get("target_column_title")
+                    rule = details.get("rule_name")
+                    if card_title and target:
+                        patched["description"] = f"{actor} moved '{card_title}' to '{target}'"
+                    elif card_title and rule:
+                        patched["description"] = f"Butler executed rule '{rule}' on '{card_title}'"
+                    elif rule:
+                        patched["description"] = f"Butler executed rule '{rule}'"
+                    elif card_title:
+                        patched["description"] = f"{actor} performed {action_str} on '{card_title}'"
+                    else:
+                        patched["description"] = f"{actor} performed {action_str}"
+                else:
+                    patched["description"] = f"{actor} performed {action_str}"
+            return patched
+        return data
+
+
+class AISummaryNotificationRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    recent_activities: list[ActivitySchema] = Field(default_factory=list)
+
+
 # Also provide aliases without the `Schema` suffix as referenced in prompt & contracts
 AISuggestCardEnrichmentRequestSchema.model_rebuild()
 AISuggestCardEnrichmentResponseSchema.model_rebuild()
@@ -577,6 +682,9 @@ AIParseAutomationResponseSchema.model_rebuild()
 BoardAnalyticsSchema.model_rebuild()
 AIAnalyticsRequestSchema.model_rebuild()
 AIAnalyticsReportSchema.model_rebuild()
+ActivitySchema.model_rebuild()
+AISummaryNotificationRequestSchema.model_rebuild()
+AISummaryNotificationResponseSchema.model_rebuild()
 
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
@@ -602,6 +710,11 @@ BoardAnalytics = BoardAnalyticsSchema
 AIAnalyticsRequest = AIAnalyticsRequestSchema
 AIAnalyticsReport = AIAnalyticsReportSchema
 
+Activity = ActivitySchema
+ActivityActionType = ActivityActionTypeEnum
+AISummaryNotificationRequest = AISummaryNotificationRequestSchema
+AISummaryNotificationResponse = AISummaryNotificationResponseSchema
+
 __all__ = [
     "AIAnalyticsReport",
     "AIAnalyticsReportSchema",
@@ -625,6 +738,14 @@ __all__ = [
     "AISuggestCardEnrichmentRequestSchema",
     "AISuggestCardEnrichmentResponse",
     "AISuggestCardEnrichmentResponseSchema",
+    "AISummaryNotificationRequest",
+    "AISummaryNotificationRequestSchema",
+    "AISummaryNotificationResponse",
+    "AISummaryNotificationResponseSchema",
+    "Activity",
+    "ActivityActionType",
+    "ActivityActionTypeEnum",
+    "ActivitySchema",
     "AutomationAction",
     "AutomationActionSchema",
     "AutomationActionTypeEnum",
