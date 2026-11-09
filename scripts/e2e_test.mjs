@@ -944,6 +944,255 @@ async function runSmokeTests() {
     )}], rule.execution_count=${triggeredRule.execution_count}, AUTOMATION_TRIGGERED logged`
   );
 
+  // ---------------------------------------------------------------------------
+  // STEP 10: Analytics Aggregator Verification (Phase 4)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "ANALYTICS",
+    `Calling GET /api/v1/boards/${board.id}/analytics to verify real-time board analytics...`
+  );
+  const analyticsRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/analytics`
+  );
+  assert.equal(
+    analyticsRes.status,
+    200,
+    `Expected 200 from GET /api/v1/boards/:boardId/analytics, got ${analyticsRes.status}`
+  );
+  const analytics = await analyticsRes.json();
+  assert.equal(analytics.board_id, board.id);
+  assert.ok(
+    typeof analytics.total_cards === "number" && analytics.total_cards >= 2,
+    `Expected total_cards >= 2, got ${analytics.total_cards}`
+  );
+  assert.ok(
+    typeof analytics.completion_rate === "number" &&
+      analytics.completion_rate >= 0 &&
+      analytics.completion_rate <= 100,
+    `Expected completion_rate in [0, 100], got ${analytics.completion_rate}`
+  );
+  assert.ok(
+    Array.isArray(analytics.burndown_series) &&
+      analytics.burndown_series.length === 7,
+    `Expected 7-day burndown_series array, got ${analytics.burndown_series?.length}`
+  );
+  assert.ok(
+    Array.isArray(analytics.workload_by_member) &&
+      analytics.workload_by_member.length >= 1,
+    `Expected non-empty workload_by_member array, got ${analytics.workload_by_member?.length}`
+  );
+  assert.ok(
+    Array.isArray(analytics.cards_by_column) &&
+      analytics.cards_by_column.length >= 4,
+    `Expected cards_by_column array, got ${analytics.cards_by_column?.length}`
+  );
+  logPass(
+    `GET /api/v1/boards/${board.id}/analytics -> 200 OK (total_cards=${analytics.total_cards}, completion_rate=${analytics.completion_rate}%, burndown_days=${analytics.burndown_series.length}, workload_members=${analytics.workload_by_member.length})`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 11: AI Executive Sprint Insights (API -> AI Engine)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "AI_SPRINT_REPORT",
+    `Calling POST /api/v1/boards/${board.id}/analytics/ai-report (API -> AI Engine)...`
+  );
+  const aiReportRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/analytics/ai-report`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    aiReportRes.status,
+    200,
+    `Expected 200 from POST /api/v1/boards/:boardId/analytics/ai-report, got ${aiReportRes.status}`
+  );
+  const aiReport = await aiReportRes.json();
+  assert.ok(
+    typeof aiReport.health_score === "number" &&
+      aiReport.health_score >= 0 &&
+      aiReport.health_score <= 100,
+    `Expected health_score in [0, 100], got ${aiReport.health_score}`
+  );
+  assert.ok(
+    ["EXCELLENT", "ON_TRACK", "AT_RISK", "CRITICAL"].includes(
+      aiReport.health_status
+    ),
+    `Expected valid health_status enum, got ${aiReport.health_status}`
+  );
+  assert.ok(
+    typeof aiReport.executive_summary === "string" &&
+      aiReport.executive_summary.length >= 10,
+    "Expected non-empty executive_summary"
+  );
+  assert.ok(
+    Array.isArray(aiReport.bottlenecks) && aiReport.bottlenecks.length >= 1,
+    `Expected non-empty bottlenecks array, got ${aiReport.bottlenecks?.length}`
+  );
+  assert.ok(
+    Array.isArray(aiReport.actionable_recommendations) &&
+      aiReport.actionable_recommendations.length >= 1,
+    `Expected non-empty actionable_recommendations array, got ${aiReport.actionable_recommendations?.length}`
+  );
+  logPass(
+    `POST /api/v1/boards/${board.id}/analytics/ai-report -> 200 OK (health_score=${aiReport.health_score}, health_status=${aiReport.health_status}, bottlenecks=${aiReport.bottlenecks.length}, recommendations=${aiReport.actionable_recommendations.length})`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 12: Native Trello JSON Import & CSV/JSON Export (Phase 4)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "TRELLO_IMPORT",
+    "Calling POST /api/v1/boards/import with mock raw Trello JSON payload (name, lists, cards, checklists)..."
+  );
+  const mockTrelloPayload = {
+    name: "Imported Q4 Platform Roadmap (Trello Export)",
+    desc: "Native Trello JSON export imported into Kinetix Phase 4",
+    lists: [
+      { id: "trello-list-1", name: "Backlog", pos: 16384, closed: false },
+      { id: "trello-list-2", name: "In Progress", pos: 32768, closed: false },
+      { id: "trello-list-3", name: "Done", pos: 65536, closed: false },
+    ],
+    labels: [
+      { id: "trello-lbl-1", name: "Platform", color: "blue" },
+      { id: "trello-lbl-2", name: "Urgent", color: "red" },
+    ],
+    members: [
+      {
+        id: "trello-mem-1",
+        fullName: "Alex Rivera",
+        username: "arivera",
+        initials: "AR",
+      },
+    ],
+    cards: [
+      {
+        id: "trello-card-1",
+        name: "Migrate Kafka Consumer Group to Kinetix V4",
+        desc: "Ensure zero-downtime partition rebalance and telemetry hooks.",
+        idList: "trello-list-2",
+        pos: 16384,
+        closed: false,
+        due: "2026-12-01T00:00:00.000Z",
+        dueComplete: false,
+        idLabels: ["trello-lbl-1", "trello-lbl-2"],
+        idMembers: ["trello-mem-1"],
+      },
+      {
+        id: "trello-card-2",
+        name: "Publish Executive Sprint Analytics Schema",
+        desc: "Define Zod & Pydantic contracts for board analytics.",
+        idList: "trello-list-3",
+        pos: 32768,
+        closed: false,
+        due: "2026-11-10T00:00:00.000Z",
+        dueComplete: true,
+        idLabels: ["trello-lbl-1"],
+        idMembers: ["trello-mem-1"],
+      },
+    ],
+    checklists: [
+      {
+        id: "trello-chk-1",
+        name: "Cutover Verification Steps",
+        idCard: "trello-card-1",
+        pos: 16384,
+        checkItems: [
+          {
+            id: "trello-item-1",
+            name: "Verify consumer lag < 50ms",
+            state: "complete",
+            pos: 16384,
+          },
+          {
+            id: "trello-item-2",
+            name: "Enable dead-letter queue alerts",
+            state: "incomplete",
+            pos: 32768,
+          },
+        ],
+      },
+    ],
+  };
+
+  const importRes = await fetch(`${API_BASE_URL}/api/v1/boards/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(mockTrelloPayload),
+  });
+  assert.ok(
+    importRes.status === 200 || importRes.status === 201,
+    `Expected 200/201 from POST /api/v1/boards/import, got ${importRes.status}`
+  );
+  const importResult = await importRes.json();
+  assert.ok(
+    importResult.board && importResult.board.id,
+    "Import result must contain created board with UUID"
+  );
+  assert.ok(
+    importResult.imported_lists_count > 0,
+    `Expected imported_lists_count > 0, got ${importResult.imported_lists_count}`
+  );
+  assert.equal(importResult.imported_lists_count, 3);
+  assert.equal(importResult.imported_cards_count, 2);
+  assert.equal(importResult.imported_checklists_count, 1);
+  assert.deepEqual(
+    importResult.board.columns.map((c) => c.position),
+    ["a0", "a1", "a2"],
+    "Imported Trello lists must have valid O(1) fractional index positions"
+  );
+  logPass(
+    `POST /api/v1/boards/import -> ${importRes.status} Imported board '${importResult.board.id}' (lists=${importResult.imported_lists_count}, cards=${importResult.imported_cards_count}, checklists=${importResult.imported_checklists_count})`
+  );
+
+  logStep(
+    "CSV_EXPORT",
+    `Calling GET /api/v1/boards/${importResult.board.id}/export?format=csv and ?format=json...`
+  );
+  const exportCsvRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${importResult.board.id}/export?format=csv`
+  );
+  assert.equal(
+    exportCsvRes.status,
+    200,
+    `Expected 200 from GET /api/v1/boards/:boardId/export?format=csv, got ${exportCsvRes.status}`
+  );
+  const exportCsvBody = await exportCsvRes.json();
+  assert.equal(
+    exportCsvBody.content_type,
+    "text/csv",
+    `Expected content_type === "text/csv", got ${exportCsvBody.content_type}`
+  );
+  assert.ok(
+    typeof exportCsvBody.filename === "string" &&
+      exportCsvBody.filename.endsWith(".csv"),
+    `Expected .csv filename, got ${exportCsvBody.filename}`
+  );
+  assert.ok(
+    typeof exportCsvBody.csv_data === "string" &&
+      exportCsvBody.csv_data.includes("Card ID,Title,Column,Priority") &&
+      exportCsvBody.csv_data.includes("Migrate Kafka Consumer Group to Kinetix V4"),
+    "Expected csv_data to include header row and imported card title"
+  );
+
+  const exportJsonRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${importResult.board.id}/export?format=json`
+  );
+  assert.equal(
+    exportJsonRes.status,
+    200,
+    `Expected 200 from GET /api/v1/boards/:boardId/export?format=json, got ${exportJsonRes.status}`
+  );
+  const exportJsonBody = await exportJsonRes.json();
+  assert.equal(exportJsonBody.id, importResult.board.id);
+  assert.equal(exportJsonBody.cards.length, 2);
+  logPass(
+    `GET /api/v1/boards/${importResult.board.id}/export?format=csv -> 200 OK (content_type="${exportCsvBody.content_type}", filename="${exportCsvBody.filename}", ${exportCsvBody.csv_data.split("\n").length} CSV rows)`
+  );
+
   if (wsClient) {
     await new Promise((r) => setTimeout(r, 150));
     wsClient.close();
@@ -958,7 +1207,7 @@ async function runSmokeTests() {
 
   console.log("==================================================================");
   console.log(
-    "\x1b[32m[PASS] Phase 3 Multi-Board & Butler Automation E2E Smoke Tests Succeeded!\x1b[0m"
+    "\x1b[32m[PASS] Phase 4 Analytics & Trello Import/Export E2E Smoke Tests Succeeded!\x1b[0m"
   );
   console.log("==================================================================");
 }

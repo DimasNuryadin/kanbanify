@@ -967,7 +967,7 @@ export const TrelloImportRequestSchema = z.object({
   workspace_id: z.string().optional(),
   board_title_override: z.string().min(1).max(150).optional(),
   format: BoardImportFormatEnum.optional().default("trello_json"),
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.unknown()),
 });
 export type TrelloImportRequest = z.infer<typeof TrelloImportRequestSchema>;
 
