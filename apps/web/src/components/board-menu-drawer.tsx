@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import {
   Activity as ActivityIcon,
+  Bell,
   Check,
   FileText,
   Palette,
@@ -36,6 +37,7 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
   const setOpen = useWorkspaceStore((s) => s.setBoardMenuOpen);
   const board = useWorkspaceStore((s) => s.board);
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
+  const setWebhooksModalOpen = useWorkspaceStore((s) => s.setWebhooksModalOpen);
 
   const [section, setSection] = useState<
     "background" | "labels" | "about" | "activity"
@@ -399,6 +401,37 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div className="border-t border-zinc-200/80 pt-4 dark:border-zinc-800">
+                <h4 className="mb-2.5 text-xs font-semibold tracking-wider text-zinc-700 uppercase dark:text-zinc-300">
+                  Integrations
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWebhooksModalOpen(true);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3 text-left transition hover:border-indigo-400 dark:border-zinc-800 dark:bg-zinc-900/60"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+                      <Bell className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                        Slack & Discord Webhooks
+                      </p>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        Live board activity notifications & AI digest
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-semibold text-indigo-500">
+                    Open →
+                  </span>
+                </button>
               </div>
             </div>
           )}

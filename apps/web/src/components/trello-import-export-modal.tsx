@@ -59,7 +59,7 @@ function analyzeImportPayload(
     );
     return {
       boardName: String(
-        raw.title || raw.name || "Imported Kinetix Board"
+        raw.title || raw.name || "Imported Kanbanify Board"
       ).slice(0, 150),
       description: String(raw.description || raw.desc || ""),
       format: "kinetix_json",
@@ -163,7 +163,7 @@ export function TrelloImportExportModal({
   const handleParseFile = async (file: File) => {
     setErrorMsg(null);
     if (!file.name.toLowerCase().endsWith(".json")) {
-      setErrorMsg("Please select a valid .json file exported from Trello or Kinetix.");
+      setErrorMsg("Please select a valid .json file exported from Trello or Kanbanify.");
       return;
     }
     try {
@@ -331,7 +331,7 @@ export function TrelloImportExportModal({
             }`}
           >
             <Upload className="h-3.5 w-3.5" />
-            <span>📥 Import Trello / Kinetix JSON</span>
+            <span>📥 Import Trello / Kanbanify JSON</span>
           </button>
 
           <button
@@ -408,12 +408,12 @@ export function TrelloImportExportModal({
                 <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
                   {loadedFileName
                     ? `Loaded: ${loadedFileName}`
-                    : "Drag & drop your Trello .json export or Kinetix backup here"}
+                    : "Drag & drop your Trello .json export or Kanbanify backup here"}
                 </p>
                 <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
                   Supports native Trello JSON (<code>lists</code>,{" "}
                   <code>cards</code>, <code>checklists</code>,{" "}
-                  <code>labels</code>) or Kinetix <code>BoardSchema</code> JSON
+                  <code>labels</code>) or Kanbanify <code>BoardSchema</code> JSON
                 </p>
               </div>
 
@@ -437,7 +437,7 @@ export function TrelloImportExportModal({
                     <span className="rounded-md bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-800 uppercase dark:text-emerald-200">
                       {preview.format === "trello_json"
                         ? "Trello JSON"
-                        : "Kinetix Backup"}
+                        : "Kanbanify Backup"}
                     </span>
                   </div>
 

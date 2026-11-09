@@ -120,6 +120,16 @@ function KanbanCardContent({
   const [isQuickEditing, setIsQuickEditing] = useState(false);
   const [quickTitle, setQuickTitle] = useState(card.title);
 
+  const presences = useWorkspaceStore((s) => s.presences);
+  const editingCollaborator = useMemo(() => {
+    return presences.find(
+      (p) =>
+        p.active_card_id === card.id &&
+        p.status === "EDITING" &&
+        p.user_id !== "88888888-8888-4888-8888-888888888881"
+    );
+  }, [presences, card.id]);
+
   useEffect(() => {
     setQuickTitle(card.title);
   }, [card.title]);
@@ -190,10 +200,26 @@ function KanbanCardContent({
                 backgroundPosition: "center",
               }
         }
-        className={`group relative min-h-[104px] cursor-pointer overflow-hidden rounded-xl border border-black/15 p-3.5 text-left text-white shadow-sm transition-all duration-150 hover:shadow-md ${
-          isOverlay ? "rotate-1 scale-[1.02] shadow-2xl ring-2 ring-white/40" : ""
+        className={`group relative min-h-[104px] cursor-pointer overflow-hidden rounded-xl border p-3.5 text-left text-white shadow-sm transition-all duration-150 hover:shadow-md ${
+          isOverlay
+            ? "rotate-1 scale-[1.02] shadow-2xl ring-2 ring-white/40"
+            : editingCollaborator
+              ? "border-violet-500 ring-2 ring-violet-400/80 shadow-[0_0_15px_rgba(139,92,246,0.5)] animate-pulse"
+              : "border-black/15"
         }`}
       >
+        {/* Live Editing Pill for Full Cover */}
+        {editingCollaborator && (
+          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-white/30 bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-xs">
+            <span>💬</span>
+            <span>{editingCollaborator.user_name} is editing...</span>
+            <span className="inline-flex items-center gap-0.5 ml-0.5">
+              <span className="h-1 w-1 rounded-full bg-white animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="h-1 w-1 rounded-full bg-white animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="h-1 w-1 rounded-full bg-white animate-bounce" style={{ animationDelay: "300ms" }} />
+            </span>
+          </div>
+        )}
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap gap-1">
             {activeLabels.map((lbl) => (
@@ -276,9 +302,11 @@ function KanbanCardContent({
       className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-white text-left transition-all duration-150 dark:bg-zinc-900/95 ${
         isOverlay
           ? "rotate-1 scale-[1.02] border-indigo-500/60 shadow-2xl ring-2 ring-indigo-500/20"
-          : isBlocked
-            ? "border-red-500/45 shadow-xs hover:border-red-500/75 dark:border-red-500/40 dark:hover:border-red-500/65"
-            : "border-zinc-200/85 shadow-xs hover:border-zinc-300 hover:shadow-md dark:border-zinc-800/90 dark:hover:border-zinc-700"
+          : editingCollaborator
+            ? "border-violet-500/80 shadow-[0_0_15px_rgba(139,92,246,0.35)] ring-2 ring-violet-500/40 animate-pulse"
+            : isBlocked
+              ? "border-red-500/45 shadow-xs hover:border-red-500/75 dark:border-red-500/40 dark:hover:border-red-500/65"
+              : "border-zinc-200/85 shadow-xs hover:border-zinc-300 hover:shadow-md dark:border-zinc-800/90 dark:hover:border-zinc-700"
       }`}
     >
       {/* Card Cover Banner ("normal" top strip) */}
@@ -323,6 +351,19 @@ function KanbanCardContent({
             <GripVertical className="h-3 w-3" />
           </button>
         </div>
+
+        {/* Live Collaborator Editing & Conflict Prevention Pill */}
+        {editingCollaborator && (
+          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-violet-500/40 bg-violet-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-violet-700 shadow-xs backdrop-blur-xs dark:bg-violet-500/25 dark:text-violet-200">
+            <span>💬</span>
+            <span>{editingCollaborator.user_name} is editing...</span>
+            <span className="inline-flex items-center gap-0.5 ml-0.5">
+              <span className="h-1 w-1 rounded-full bg-violet-600 dark:bg-violet-300 animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="h-1 w-1 rounded-full bg-violet-600 dark:bg-violet-300 animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="h-1 w-1 rounded-full bg-violet-600 dark:bg-violet-300 animate-bounce" style={{ animationDelay: "300ms" }} />
+            </span>
+          </div>
+        )}
 
         {/* Expandable Color Labels Row */}
         {activeLabels.length > 0 && (
@@ -1271,7 +1312,7 @@ export function KanbanBoard({
 
   return (
     <DndContext
-      id="kinetix-kanban-dnd"
+      id="kanbanify-kanban-dnd"
       sensors={sensors}
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}

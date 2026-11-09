@@ -12,11 +12,14 @@ import {
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateWebhookRequest,
   CreateWorkspaceRequest,
   UpdateAutomationRuleRequest,
   UpdateBoardRequest,
   UpdateCardRequest,
   UpdateColumnRequest,
+  UpdateWebhookRequest,
+  WebhookConfig,
   WorkspaceWithBoards,
 } from "@kinetix/contracts";
 import { apiClient } from "@/lib/api-client";
@@ -53,6 +56,7 @@ import { CreateBoardModal } from "./create-board-modal";
 import { CreateWorkspaceModal } from "./create-workspace-modal";
 import { BoardTemplatesModal } from "./board-templates-modal";
 import { ButlerAutomationModal } from "./butler-automation-modal";
+import { WebhooksModal } from "./webhooks-modal";
 import { ButlerToastContainer } from "./butler-toast";
 
 export function KinetixWorkspace() {
@@ -105,6 +109,16 @@ export function KinetixWorkspace() {
   const setImportExportModalOpen = useWorkspaceStore(
     (s) => s.setImportExportModalOpen
   );
+
+  const setPresences = useWorkspaceStore((s) => s.setPresences);
+  const upsertPresence = useWorkspaceStore((s) => s.upsertPresence);
+  const removePresence = useWorkspaceStore((s) => s.removePresence);
+  const isSimulatingCollaborator = useWorkspaceStore(
+    (s) => s.isSimulatingCollaborator
+  );
+
+  const upsertWebhook = useWorkspaceStore((s) => s.upsertWebhook);
+  const removeWebhook = useWorkspaceStore((s) => s.removeWebhook);
 
   const handleFallbackToMock = useCallback(
     (reason: string) => {
@@ -303,6 +317,18 @@ export function KinetixWorkspace() {
         queryClient.invalidateQueries({ queryKey: ["board-summaries"] });
         queryClient.invalidateQueries({ queryKey: ["workspaces"] });
       },
+      onPresenceSync: (presences) => {
+        setPresences(presences);
+      },
+      onUserJoined: (presence) => {
+        upsertPresence(presence);
+      },
+      onUserLeft: (userId) => {
+        removePresence(userId);
+      },
+      onUserTyping: (presence) => {
+        upsertPresence(presence);
+      },
     });
 
     return () => {
@@ -323,8 +349,140 @@ export function KinetixWorkspace() {
     upsertAutomationRule,
     removeAutomationRule,
     addToast,
+    setPresences,
+    upsertPresence,
+    removePresence,
     queryClient,
   ]);
+
+  // Simulated Collaborator Loop (Phase 5 Live Testing)
+  useEffect(() => {
+    if (!isSimulatingCollaborator) return;
+
+    const currentBoardCards = board.cards.filter((c) => !c.is_archived);
+    if (currentBoardCards.length === 0) return;
+
+    // Initial collaborators joined
+    const initialCollaborators = [
+      {
+        user_id: "88888888-8888-4888-8888-888888888881",
+        user_name: "Alex Rivera",
+        avatar_url: null,
+        initials: "AR",
+        color: "#3b82f6",
+        status: "ACTIVE" as const,
+        active_card_id: null,
+        last_seen: new Date().toISOString(),
+      },
+      {
+        user_id: "88888888-8888-4888-8888-888888888882",
+        user_name: "Maya Lin",
+        avatar_url: null,
+        initials: "ML",
+        color: "#8b5cf6",
+        status: "EDITING" as const,
+        active_card_id: currentBoardCards[0]?.id ?? null,
+        last_seen: new Date().toISOString(),
+      },
+      {
+        user_id: "88888888-8888-4888-8888-888888888883",
+        user_name: "Samir Patel",
+        avatar_url: null,
+        initials: "SP",
+        color: "#10b981",
+        status: "ACTIVE" as const,
+        active_card_id: null,
+        last_seen: new Date().toISOString(),
+      },
+      {
+        user_id: "88888888-8888-4888-8888-888888888884",
+        user_name: "Elena Rostova",
+        avatar_url: null,
+        initials: "ER",
+        color: "#f59e0b",
+        status: "IDLE" as const,
+        active_card_id: null,
+        last_seen: new Date().toISOString(),
+      },
+    ];
+
+    setPresences(initialCollaborators);
+
+    let step = 0;
+    const interval = setInterval(() => {
+      step++;
+      const currentCards = useWorkspaceStore
+        .getState()
+        .board.cards.filter((c) => !c.is_archived);
+      if (currentCards.length === 0) return;
+
+      const cardA =
+        currentCards[Math.floor(Math.random() * currentCards.length)];
+      const cardB =
+        currentCards[Math.floor(Math.random() * currentCards.length)];
+
+      const nextTeam = [
+        {
+          user_id: "88888888-8888-4888-8888-888888888881",
+          user_name: "Alex Rivera",
+          avatar_url: null,
+          initials: "AR",
+          color: "#3b82f6",
+          status: "ACTIVE" as const,
+          active_card_id: null,
+          last_seen: new Date().toISOString(),
+        },
+        {
+          user_id: "88888888-8888-4888-8888-888888888882",
+          user_name: "Maya Lin",
+          avatar_url: null,
+          initials: "ML",
+          color: "#8b5cf6",
+          status: step % 3 === 0 ? ("ACTIVE" as const) : ("EDITING" as const),
+          active_card_id: step % 3 === 0 ? null : cardA.id,
+          last_seen: new Date().toISOString(),
+        },
+        {
+          user_id: "88888888-8888-4888-8888-888888888883",
+          user_name: "Samir Patel",
+          avatar_url: null,
+          initials: "SP",
+          color: "#10b981",
+          status: step % 2 === 0 ? ("EDITING" as const) : ("ACTIVE" as const),
+          active_card_id: step % 2 === 0 ? cardB.id : null,
+          last_seen: new Date().toISOString(),
+        },
+        {
+          user_id: "88888888-8888-4888-8888-888888888884",
+          user_name: "Elena Rostova",
+          avatar_url: null,
+          initials: "ER",
+          color: "#f59e0b",
+          status: step % 4 === 0 ? ("IDLE" as const) : ("ACTIVE" as const),
+          active_card_id: null,
+          last_seen: new Date().toISOString(),
+        },
+      ];
+
+      setPresences(nextTeam);
+    }, 3800);
+
+    return () => {
+      clearInterval(interval);
+      setPresences([
+        {
+          user_id: "88888888-8888-4888-8888-888888888881",
+          user_name: "Alex Rivera",
+          avatar_url: null,
+          initials: "AR",
+          color: "#3b82f6",
+          status: "ACTIVE",
+          active_card_id: null,
+          last_seen: new Date().toISOString(),
+        },
+      ]);
+    };
+  }, [isSimulatingCollaborator, board.cards, setPresences]);
 
   // Filter active cards by Priority, Member, Labels, Due Date, Blockers, and Search Query
   const filteredCards = useMemo(() => {
@@ -554,6 +712,64 @@ export function KinetixWorkspace() {
       return parsed;
     },
     [board.id, useMockMode, handleFallbackToMock, upsertAutomationRule]
+  );
+
+  // Webhook CRUD, Test Ping, and AI Standup Summary Handlers
+  const handleCreateWebhook = useCallback(
+    async (payload: CreateWebhookRequest) => {
+      const created = await apiClient.createWebhook(board.id, payload, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      upsertWebhook(created);
+    },
+    [board.id, useMockMode, handleFallbackToMock, upsertWebhook]
+  );
+
+  const handleUpdateWebhook = useCallback(
+    async (webhookId: string, payload: UpdateWebhookRequest) => {
+      const updated = await apiClient.updateWebhook(webhookId, payload, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+      upsertWebhook(updated);
+    },
+    [useMockMode, handleFallbackToMock, upsertWebhook]
+  );
+
+  const handleDeleteWebhook = useCallback(
+    async (webhookId: string) => {
+      removeWebhook(webhookId);
+      await apiClient.deleteWebhook(webhookId, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+    },
+    [useMockMode, handleFallbackToMock, removeWebhook]
+  );
+
+  const handleTestWebhook = useCallback(
+    async (webhookId: string) => {
+      return await apiClient.testWebhook(webhookId, {
+        useMock: useMockMode,
+        onFallbackToMock: handleFallbackToMock,
+      });
+    },
+    [useMockMode, handleFallbackToMock]
+  );
+
+  const handleGenerateAISummary = useCallback(
+    async () => {
+      return await apiClient.generateAISummaryNotification(
+        board.title,
+        board.activities ?? [],
+        {
+          useMock: useMockMode,
+          onFallbackToMock: handleFallbackToMock,
+        }
+      );
+    },
+    [board.title, board.activities, useMockMode, handleFallbackToMock]
   );
 
   // Column (List) Handlers
@@ -1111,6 +1327,17 @@ export function KinetixWorkspace() {
         onUpdateRule={handleUpdateAutomationRule}
         onDeleteRule={handleDeleteAutomationRule}
         onAiGenerateRule={handleAiGenerateAutomationRule}
+      />
+
+      <WebhooksModal
+        boardId={board.id}
+        boardTitle={board.title}
+        webhooks={board.webhooks ?? []}
+        onCreateWebhook={handleCreateWebhook}
+        onUpdateWebhook={handleUpdateWebhook}
+        onDeleteWebhook={handleDeleteWebhook}
+        onTestWebhook={handleTestWebhook}
+        onGenerateAISummary={handleGenerateAISummary}
       />
 
       <TrelloImportExportModal

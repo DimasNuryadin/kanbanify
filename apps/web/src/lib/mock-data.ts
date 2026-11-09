@@ -3,6 +3,7 @@ import {
   AIAnalyticsReport,
   AIAnalyticsReportSchema,
   AIParseAutomationResponse,
+  AISummaryNotificationResponse,
   AutomationAction,
   AutomationRule,
   AutomationTrigger,
@@ -31,6 +32,7 @@ import {
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateWebhookRequest,
   CreateWorkspaceRequest,
   DEFAULT_BOARD_AUTOMATION_RULES,
   DEFAULT_BOARD_COLUMNS,
@@ -49,6 +51,7 @@ import {
   PriorityMetric,
   SprintHealthStatus,
   Subtask,
+  TestWebhookResponse,
   TrelloImportRequest,
   TrelloImportResult,
   TrelloImportResultSchema,
@@ -56,6 +59,9 @@ import {
   UpdateBoardRequest,
   UpdateCardRequest,
   UpdateColumnRequest,
+  UpdateWebhookRequest,
+  UserPresence,
+  WebhookConfig,
   Workspace,
   WorkspaceWithBoards,
 } from "@kinetix/contracts";
@@ -137,10 +143,38 @@ export function cloneDefaultAutomationRules(
   }));
 }
 
+export const DEFAULT_BOARD_WEBHOOKS: WebhookConfig[] = [
+  {
+    id: "99999999-9999-4999-8999-999999999991",
+    board_id: SEED_BOARD_ID,
+    name: "Engineering #sprint-updates",
+    platform: "SLACK",
+    url: "https://hooks.slack.example.com/services/sample-token",
+    is_enabled: true,
+    subscribed_events: [
+      "CARD_CREATED",
+      "CARD_MOVED",
+      "COMMENT_ADDED",
+      "AUTOMATION_TRIGGERED",
+    ],
+    created_at: "2026-11-08T08:30:00.000Z",
+  },
+  {
+    id: "99999999-9999-4999-8999-999999999992",
+    board_id: SEED_BOARD_ID,
+    name: "Product & Dev Feed",
+    platform: "DISCORD",
+    url: "https://discord.example.com/api/webhooks/sample-token",
+    is_enabled: true,
+    subscribed_events: ["CARD_CREATED", "CARD_MOVED", "CARD_ARCHIVED"],
+    created_at: "2026-11-08T09:00:00.000Z",
+  },
+];
+
 export const INITIAL_SEED_BOARD: Board = {
   id: SEED_BOARD_ID,
   workspace_id: SEED_WORKSPACE_ID,
-  title: "Kinetix Product Launch",
+  title: "Kanbanify Product Launch",
   description:
     "High-craftsmanship real-time workspace uniting Trello visual fluidity with Linear engineering precision and Butler automations.",
   is_starred: true,
@@ -287,7 +321,7 @@ export const INITIAL_SEED_BOARD: Board = {
         {
           id: "dddddddd-dddd-4ddd-8ddd-dddddddd0001",
           name: "Fractional Indexing Technical Spec.md",
-          url: "https://figma.com/file/kinetix-fractional-index",
+          url: "https://figma.com/file/kanbanify-fractional-index",
           type: "link",
           created_at: "2026-11-06T10:00:00.000Z",
         },
@@ -503,7 +537,7 @@ export const INITIAL_SEED_BOARD: Board = {
         {
           id: "dddddddd-dddd-4ddd-8ddd-dddddddd0002",
           name: "Redis PubSub Sequence Diagram",
-          url: "https://architecture.kinetix.dev/redis-pubsub",
+          url: "https://architecture.kanbanify.dev/redis-pubsub",
           type: "link",
           created_at: "2026-11-08T08:30:00.000Z",
         },
@@ -921,6 +955,7 @@ export const INITIAL_SEED_BOARD: Board = {
     },
   ],
   automation_rules: cloneDefaultAutomationRules(SEED_BOARD_ID),
+  webhooks: DEFAULT_BOARD_WEBHOOKS.map((w) => ({ ...w })),
 };
 
 export const INITIAL_SPRINT_BOARD: Board = {
@@ -1149,6 +1184,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
     },
   ],
   automation_rules: cloneDefaultAutomationRules(SEED_BOARD_SPRINT_ID),
+  webhooks: [],
 };
 
 export const INITIAL_MARKETING_BOARD: Board = {
@@ -1274,7 +1310,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       column_id: "33333333-3333-4333-8333-333333333353",
       title: "Customer Case Study: Series-A Dev Team",
       description:
-        "Interview CTO on how replacing Jira with Kinetix reduced cycle time by 42%.",
+        "Interview CTO on how replacing Jira with Kanbanify reduced cycle time by 42%.",
       position: "a0",
       priority: "MEDIUM",
       story_points: 3,
@@ -1360,6 +1396,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
     },
   ],
   automation_rules: cloneDefaultAutomationRules(SEED_BOARD_MARKETING_ID).slice(0, 1),
+  webhooks: [],
 };
 
 export const INITIAL_SEED_BOARDS = [
@@ -1368,9 +1405,9 @@ export const INITIAL_SEED_BOARDS = [
   INITIAL_MARKETING_BOARD,
 ];
 
-const STORAGE_KEY_BOARDS = "kinetix_mock_boards_v3";
-const STORAGE_KEY_WORKSPACES = "kinetix_mock_workspaces_v3";
-const STORAGE_KEY = "kinetix_mock_board_v2";
+const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v5";
+const STORAGE_KEY_WORKSPACES = "kanbanify_mock_workspaces_v5";
+const STORAGE_KEY = "kanbanify_mock_board_v5";
 
 export function syncSubtasksAndChecklists(
   subtasks?: Subtask[],
@@ -1459,6 +1496,7 @@ function sortBoardEntities(board: Board): Board {
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     ),
+    webhooks: board.webhooks ?? [],
   };
 }
 
@@ -2155,6 +2193,7 @@ export class MockApiService {
       columns,
       cards: [],
       automation_rules: cloneDefaultAutomationRules(boardId),
+      webhooks: [],
     };
 
     this.saveState(nextBoard);
@@ -2771,6 +2810,178 @@ export class MockApiService {
   async exportBoardJson(boardId: string): Promise<Board> {
     return this.getBoard(boardId);
   }
+
+  // --- Phase 5: Outbound Webhooks CRUD & Test Ping ---
+  async getWebhooks(boardId: string): Promise<WebhookConfig[]> {
+    const board = await this.getBoard(boardId);
+    return board.webhooks ?? [];
+  }
+
+  async createWebhook(
+    boardId: string,
+    payload: CreateWebhookRequest
+  ): Promise<WebhookConfig> {
+    this.loadState();
+    const board = await this.getBoard(boardId);
+    const newWebhook: WebhookConfig = {
+      id: createDeterministicUuid(),
+      board_id: boardId,
+      name: payload.name,
+      platform: payload.platform,
+      url: payload.url,
+      is_enabled: payload.is_enabled ?? true,
+      subscribed_events: [...payload.subscribed_events],
+      created_at: new Date().toISOString(),
+    };
+    const nextWebhooks = [...(board.webhooks ?? []), newWebhook];
+    this.saveState({
+      ...board,
+      webhooks: nextWebhooks,
+    });
+    return newWebhook;
+  }
+
+  async updateWebhook(
+    webhookId: string,
+    payload: UpdateWebhookRequest
+  ): Promise<WebhookConfig> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const idx = (board.webhooks ?? []).findIndex((w) => w.id === webhookId);
+      if (idx !== -1) {
+        const existing = board.webhooks[idx];
+        const updated: WebhookConfig = {
+          ...existing,
+          ...(payload.name !== undefined ? { name: payload.name } : {}),
+          ...(payload.platform !== undefined ? { platform: payload.platform } : {}),
+          ...(payload.url !== undefined ? { url: payload.url } : {}),
+          ...(payload.is_enabled !== undefined ? { is_enabled: payload.is_enabled } : {}),
+          ...(payload.subscribed_events !== undefined
+            ? { subscribed_events: [...payload.subscribed_events] }
+            : {}),
+        };
+        const nextWebhooks = [...board.webhooks];
+        nextWebhooks[idx] = updated;
+        this.saveState({
+          ...board,
+          webhooks: nextWebhooks,
+        });
+        return updated;
+      }
+    }
+    throw new Error(`Webhook not found: ${webhookId}`);
+  }
+
+  async deleteWebhook(webhookId: string): Promise<void> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const idx = (board.webhooks ?? []).findIndex((w) => w.id === webhookId);
+      if (idx !== -1) {
+        const nextWebhooks = board.webhooks.filter((w) => w.id !== webhookId);
+        this.saveState({
+          ...board,
+          webhooks: nextWebhooks,
+        });
+        return;
+      }
+    }
+  }
+
+  async testWebhook(webhookId: string): Promise<TestWebhookResponse> {
+    this.loadState();
+    let foundWebhook: WebhookConfig | null = null;
+    for (const board of this.boards.values()) {
+      const found = (board.webhooks ?? []).find((w) => w.id === webhookId);
+      if (found) {
+        foundWebhook = found;
+        break;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    if (!foundWebhook) {
+      return {
+        success: true,
+        status_code: 200,
+        message: "Test webhook notification dispatched successfully (mock endpoint).",
+        delivered_at: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: true,
+      status_code: 200,
+      message: `Test payload delivered to ${foundWebhook.platform} webhook endpoint (${foundWebhook.name}) successfully.`,
+      delivered_at: new Date().toISOString(),
+    };
+  }
+
+  async generateAISummaryNotification(
+    boardTitle: string,
+    activities: Activity[] = []
+  ): Promise<AISummaryNotificationResponse> {
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const nowIso = new Date().toISOString();
+    return {
+      slack_block_kit_payload: {
+        blocks: [
+          {
+            type: "header",
+            text: {
+              type: "plain_text",
+              text: `📋 Kanbanify Standup Digest: ${boardTitle}`,
+              emoji: true,
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*Sprint Status*: 🟢 *On Track* — Team velocity at 84% completion.\n*Highlights*: Recent cards progressed smoothly through Review and Done columns.`,
+            },
+          },
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `⚡ Dispatched via Kanbanify Webhook Dispatcher | ${nowIso}`,
+              },
+            ],
+          },
+        ],
+      },
+      discord_embed_payload: {
+        username: "Kanbanify Bot",
+        avatar_url: "https://kanbanify.internal/icons/bot-avatar.png",
+        embeds: [
+          {
+            title: `📋 Daily Standup Digest: ${boardTitle}`,
+            color: 5793266, // #5865F2 Discord blurple
+            description: `Daily automated standup digest for **${boardTitle}** generated by Kanbanify AI Engine:`,
+            fields: [
+              {
+                name: "🚀 Team Velocity",
+                value: "All active sprint cards on track. 0 critical blockers.",
+                inline: true,
+              },
+              {
+                name: "⚡ Butler Automations",
+                value: "Automated rules executed successfully across Backlog and Done.",
+                inline: true,
+              },
+            ],
+            footer: {
+              text: "Kanbanify Webhook Dispatcher",
+            },
+            timestamp: nowIso,
+          },
+        ],
+      },
+      summary_text: `Kanbanify Standup Digest for ${boardTitle}: Sprint on track with high team velocity and 0 critical blockers.`,
+    };
+  }
 }
 
 export function computeBoardAnalyticsFromBoard(board: Board): BoardAnalytics {
@@ -3322,7 +3533,7 @@ export function parseTrelloOrKinetixImport(
 
     const boardTitle = (
       request.board_title_override?.trim() ||
-      String(rawPayload.title || rawPayload.name || "Imported Kinetix Board")
+      String(rawPayload.title || rawPayload.name || "Imported Kanbanify Board")
     ).slice(0, 150);
 
     const newBoard: Board = sortBoardEntities(
@@ -3333,7 +3544,7 @@ export function parseTrelloOrKinetixImport(
         description: String(
           rawPayload.description ||
             rawPayload.desc ||
-            "Imported from Kinetix JSON backup"
+            "Imported from Kanbanify JSON backup"
         ),
         is_starred: Boolean(rawPayload.is_starred),
         background: rawPayload.background ?? {
@@ -3358,6 +3569,7 @@ export function parseTrelloOrKinetixImport(
           },
         ],
         automation_rules: cloneDefaultAutomationRules(newBoardId),
+        webhooks: [],
         created_at: nowIso,
       })
     );
@@ -3603,6 +3815,7 @@ export function parseTrelloOrKinetixImport(
         },
       ],
       automation_rules: cloneDefaultAutomationRules(newBoardId),
+      webhooks: [],
       created_at: nowIso,
     })
   );
@@ -3629,7 +3842,7 @@ function PriorityEnumSafe(val: unknown): Priority {
 
 export const SAMPLE_TRELLO_EXPORT_JSON = {
   name: "Trello Cloud Migration & Q4 Release",
-  desc: "Full Trello board export with Lists, Cards, Labels, Due Dates, and Checklists ready for 1-click Kinetix import.",
+  desc: "Full Trello board export with Lists, Cards, Labels, Due Dates, and Checklists ready for 1-click Kanbanify import.",
   lists: [
     { id: "trello-list-1", name: "Backlog & Discovery", closed: false },
     { id: "trello-list-2", name: "In Progress (Sprint 14)", closed: false },
@@ -3639,7 +3852,7 @@ export const SAMPLE_TRELLO_EXPORT_JSON = {
   cards: [
     {
       id: "trello-card-1",
-      name: "Migrate legacy Trello boards to Kinetix O(1) engine",
+      name: "Migrate legacy Trello boards to Kanbanify O(1) engine",
       desc: "Support full JSON lists, cards, color labels, due dates, and multi-item checklists with lexicographical fractional positions.",
       idList: "trello-list-2",
       due: "2026-11-18T00:00:00.000Z",
@@ -3705,7 +3918,7 @@ export const SAMPLE_TRELLO_EXPORT_JSON = {
           state: "complete",
         },
         {
-          name: "Map cards, labels, and checklists to Kinetix Zod schema",
+          name: "Map cards, labels, and checklists to Kanbanify Zod schema",
           state: "complete",
         },
         {

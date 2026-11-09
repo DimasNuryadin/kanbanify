@@ -10,6 +10,8 @@ import {
   Comment,
   DEFAULT_WORKSPACE,
   Priority,
+  UserPresence,
+  WebhookConfig,
   WorkspaceWithBoards,
 } from "@kinetix/contracts";
 import {
@@ -74,6 +76,11 @@ interface WorkspaceState {
   isCreateBoardModalOpen: boolean;
   isCreateWorkspaceModalOpen: boolean;
   isImportExportModalOpen: boolean;
+  isWebhooksModalOpen: boolean;
+
+  // Real-Time Co-Presence & Live Typing Indicators
+  presences: UserPresence[];
+  isSimulatingCollaborator: boolean;
 
   // Butler Active Rules & Execution Toasts
   automationRules: AutomationRule[];
@@ -120,6 +127,18 @@ interface WorkspaceState {
   setCreateBoardModalOpen: (open: boolean) => void;
   setCreateWorkspaceModalOpen: (open: boolean) => void;
   setImportExportModalOpen: (open: boolean) => void;
+  setWebhooksModalOpen: (open: boolean) => void;
+
+  // Real-Time Co-Presence Actions
+  setPresences: (presences: UserPresence[]) => void;
+  upsertPresence: (presence: UserPresence) => void;
+  removePresence: (userId: string) => void;
+  setSimulatingCollaborator: (simulating: boolean) => void;
+
+  // Outbound Webhook Integrations
+  setWebhooks: (webhooks: WebhookConfig[]) => void;
+  upsertWebhook: (webhook: WebhookConfig) => void;
+  removeWebhook: (webhookId: string) => void;
 
   // Butler Automation Rules
   setAutomationRules: (rules: AutomationRule[]) => void;
@@ -175,6 +194,7 @@ function sortBoard(board: Board): Board {
           .sort((a, b) => comparePositions(a.position, b.position)),
       }))
       .sort((a, b) => comparePositions(a.position, b.position)),
+    webhooks: board.webhooks ?? [],
   };
 }
 
@@ -237,6 +257,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   isCreateBoardModalOpen: false,
   isCreateWorkspaceModalOpen: false,
   isImportExportModalOpen: false,
+  isWebhooksModalOpen: false,
+
+  presences: [
+    {
+      user_id: "88888888-8888-4888-8888-888888888881",
+      user_name: "Alex Rivera",
+      avatar_url: null,
+      initials: "AR",
+      color: "#3b82f6",
+      status: "ACTIVE",
+      active_card_id: null,
+      last_seen: new Date().toISOString(),
+    },
+  ],
+  isSimulatingCollaborator: false,
 
   automationRules: [...(INITIAL_SEED_BOARD.automation_rules ?? [])],
   toasts: [],
@@ -368,6 +403,58 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set({ isCreateWorkspaceModalOpen }),
   setImportExportModalOpen: (isImportExportModalOpen) =>
     set({ isImportExportModalOpen }),
+  setWebhooksModalOpen: (isWebhooksModalOpen) => set({ isWebhooksModalOpen }),
+
+  setPresences: (presences) => set({ presences }),
+  upsertPresence: (presence) =>
+    set((state) => {
+      const idx = state.presences.findIndex((p) => p.user_id === presence.user_id);
+      if (idx !== -1) {
+        const next = [...state.presences];
+        next[idx] = presence;
+        return { presences: next };
+      }
+      return { presences: [...state.presences, presence] };
+    }),
+  removePresence: (userId) =>
+    set((state) => ({
+      presences: state.presences.filter((p) => p.user_id !== userId),
+    })),
+  setSimulatingCollaborator: (isSimulatingCollaborator) =>
+    set({ isSimulatingCollaborator }),
+
+  setWebhooks: (webhooks) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        webhooks,
+      },
+    })),
+  upsertWebhook: (webhook) =>
+    set((state) => {
+      const existing = state.board.webhooks ?? [];
+      const idx = existing.findIndex((w) => w.id === webhook.id);
+      const nextWebhooks =
+        idx !== -1
+          ? existing.map((w) => (w.id === webhook.id ? webhook : w))
+          : [...existing, webhook];
+      return {
+        board: {
+          ...state.board,
+          webhooks: nextWebhooks,
+        },
+      };
+    }),
+  removeWebhook: (webhookId) =>
+    set((state) => {
+      const existing = state.board.webhooks ?? [];
+      return {
+        board: {
+          ...state.board,
+          webhooks: existing.filter((w) => w.id !== webhookId),
+        },
+      };
+    }),
 
   setAutomationRules: (automationRules) => set({ automationRules }),
   upsertAutomationRule: (rule) =>

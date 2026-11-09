@@ -109,10 +109,10 @@ export function WorkspaceSidebar({
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                    {currentWorkspace?.name || "Kinetix Workspace"}
+                    {currentWorkspace?.name || "Kanbanify Workspace"}
                   </p>
                   <p className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                    @{currentWorkspace?.slug || "kinetix"}
+                    @{currentWorkspace?.slug || "kanbanify"}
                   </p>
                 </div>
               </div>

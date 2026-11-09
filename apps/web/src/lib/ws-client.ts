@@ -9,6 +9,8 @@ import {
   CardMovedEventData,
   CardMovedEventDataSchema,
   CardSchema,
+  ClientPresenceEvent,
+  ClientPresenceMessage,
   Column,
   ColumnMovedEventData,
   ColumnMovedEventDataSchema,
@@ -16,8 +18,13 @@ import {
   Comment,
   CommentSchema,
   CopyColumnResponseSchema,
+  PresenceMessage,
+  PresenceMessageSchema,
+  UserPresence,
+  UserPresenceSchema,
   WSMessageSchema,
 } from "@kinetix/contracts";
+import { z } from "zod";
 
 export const WS_BASE_URL =
   process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws";
@@ -45,6 +52,11 @@ export interface WSBoardHandlers {
   onAutomationRuleDeleted?: (data: { id: string }) => void;
   onBoardDeleted?: (data: { id: string }) => void;
   onBoardImported?: (board: Board) => void;
+  // Phase 5 Real-Time Co-Presence & Live Typing
+  onPresenceSync?: (presences: UserPresence[]) => void;
+  onUserJoined?: (presence: UserPresence) => void;
+  onUserLeft?: (userId: string) => void;
+  onUserTyping?: (presence: UserPresence) => void;
 }
 
 export class BoardWebSocketClient {
@@ -87,12 +99,62 @@ export class BoardWebSocketClient {
         if (this.isDisposed) return;
         try {
           const raw = JSON.parse(String(event.data));
+
+          // 1. Check if direct PresenceMessage broadcast
+          const parsedPresence = PresenceMessageSchema.safeParse(raw);
+          if (parsedPresence.success) {
+            const p = parsedPresence.data;
+            if (p.event === "PRESENCE_SYNC") {
+              this.handlers?.onPresenceSync?.(p.presences);
+            } else if (p.event === "USER_JOINED") {
+              this.handlers?.onUserJoined?.(p.actor);
+            } else if (p.event === "USER_LEFT") {
+              this.handlers?.onUserLeft?.(p.actor.user_id);
+            } else if (p.event === "USER_TYPING") {
+              this.handlers?.onUserTyping?.(p.actor);
+            }
+            return;
+          }
+
+          // 2. Check if WSMessage envelope
           const parsedMsg = WSMessageSchema.safeParse(raw);
           if (!parsedMsg.success) return;
 
           const { event: eventType, data } = parsedMsg.data;
 
           switch (eventType) {
+            case "PRESENCE_SYNC": {
+              if (Array.isArray(data)) {
+                const list = z.array(UserPresenceSchema).safeParse(data);
+                if (list.success) this.handlers?.onPresenceSync?.(list.data);
+              } else if (data && typeof data === "object" && "presences" in data) {
+                const list = z.array(UserPresenceSchema).safeParse(
+                  (data as { presences: unknown }).presences
+                );
+                if (list.success) this.handlers?.onPresenceSync?.(list.data);
+              }
+              break;
+            }
+            case "USER_JOINED": {
+              const u = UserPresenceSchema.safeParse(data);
+              if (u.success) this.handlers?.onUserJoined?.(u.data);
+              break;
+            }
+            case "USER_LEFT": {
+              if (typeof data === "string") {
+                this.handlers?.onUserLeft?.(data);
+              } else if (data && typeof data === "object" && "user_id" in data) {
+                this.handlers?.onUserLeft?.(
+                  String((data as { user_id: unknown }).user_id)
+                );
+              }
+              break;
+            }
+            case "USER_TYPING": {
+              const u = UserPresenceSchema.safeParse(data);
+              if (u.success) this.handlers?.onUserTyping?.(u.data);
+              break;
+            }
             case "CARD_MOVED": {
               const moved = CardMovedEventDataSchema.safeParse(data);
               if (moved.success) {
@@ -269,6 +331,23 @@ export class BoardWebSocketClient {
       };
     } catch {
       this.handlers?.onStatusChange("disconnected");
+    }
+  }
+
+  sendClientPresence(
+    event: ClientPresenceEvent,
+    cardId: string | null = null
+  ): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        const msg: ClientPresenceMessage = {
+          event,
+          card_id: cardId,
+        };
+        this.ws.send(JSON.stringify(msg));
+      } catch {
+        // Ignore send errors on disconnecting socket
+      }
     }
   }
 
