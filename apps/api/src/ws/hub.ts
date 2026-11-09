@@ -67,7 +67,10 @@ export class BoardRealtimeHub {
               return;
             }
             const validated = WSMessageSchema.parse(parsed.message);
-            this.broadcastLocal(validated.board_id, validated);
+            this.broadcastLocal(validated.board_id, {
+              ...validated,
+              data: validated.data,
+            });
           } catch (err) {
             console.warn(
               "[BoardRealtimeHub] Ignored invalid Redis Pub/Sub payload:",

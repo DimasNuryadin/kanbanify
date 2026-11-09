@@ -18,7 +18,7 @@
       "@/*": ["./src/*"],
       "@kinetix/contracts": ["../../packages/contracts/index.ts"],
       "@kinetix/contracts/*": ["../../packages/contracts/*"],
-      "zod": ["./node_modules/zod"]
+      "zod": ["./node_modules/zod/v3/index.d.cts"]
     }
   },
   "include": [
