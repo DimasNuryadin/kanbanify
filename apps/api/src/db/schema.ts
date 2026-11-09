@@ -20,6 +20,7 @@ import type {
   Label,
   Member,
   Subtask,
+  WebhookConfig,
 } from "@kinetix/contracts";
 
 export const priorityEnum = pgEnum("priority", [
@@ -57,6 +58,7 @@ export const boards = pgTable("boards", {
   members: jsonb("members").$type<Member[]>().default([]).notNull(),
   activities: jsonb("activities").$type<Activity[]>().default([]).notNull(),
   automation_rules: jsonb("automation_rules").$type<AutomationRule[]>().default([]).notNull(),
+  webhooks: jsonb("webhooks").$type<WebhookConfig[]>().default([]).notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),

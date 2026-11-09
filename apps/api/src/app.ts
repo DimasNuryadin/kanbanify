@@ -31,27 +31,35 @@ import {
   CreateColumnRequestSchema,
   CreateCommentRequestSchema,
   CreateWorkspaceRequestSchema,
+  CreateWebhookRequestSchema,
   HealthCheckResponseSchema,
   MoveCardRequestSchema,
   MoveColumnRequestSchema,
   StandardErrorSchema,
+  TestWebhookResponseSchema,
   TrelloImportRequestSchema,
   TrelloImportResultSchema,
   UpdateAutomationRuleRequestSchema,
   UpdateBoardRequestSchema,
   UpdateCardRequestSchema,
   UpdateColumnRequestSchema,
+  UpdateWebhookRequestSchema,
+  UserPresenceSchema,
+  WebhookConfigSchema,
   WorkspaceSchema,
   WorkspaceWithBoardsSchema,
   type Checklist,
   type Priority,
   type Subtask,
+  type UserPresence,
 } from "@kinetix/contracts";
 import { StorageRepository } from "./db/repository.js";
 import { BoardRealtimeHub } from "./ws/hub.js";
 import { AutomationEngine } from "./services/automation-engine.js";
 import { AnalyticsService } from "./services/analytics-service.js";
 import { ImportExportService } from "./services/import-export-service.js";
+import { PresenceService } from "./services/presence-service.js";
+import { WebhookDispatcher } from "./services/webhook-dispatcher.js";
 import { AppError, buildErrorPayload } from "./errors.js";
 
 const UuidParamSchema = z.string().uuid();
@@ -74,6 +82,8 @@ export interface BuildAppOptions {
   automationEngine?: AutomationEngine;
   analyticsService?: AnalyticsService;
   importExportService?: ImportExportService;
+  presenceService?: PresenceService;
+  webhookDispatcher?: WebhookDispatcher;
 }
 
 export async function buildApp(
@@ -85,6 +95,8 @@ export async function buildApp(
   automationEngine: AutomationEngine;
   analyticsService: AnalyticsService;
   importExportService: ImportExportService;
+  presenceService: PresenceService;
+  webhookDispatcher: WebhookDispatcher;
 }> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -92,6 +104,10 @@ export async function buildApp(
 
   const repository = options.repository ?? new StorageRepository();
   const hub = options.hub ?? new BoardRealtimeHub();
+  const presenceService =
+    options.presenceService ?? new PresenceService(hub);
+  const webhookDispatcher =
+    options.webhookDispatcher ?? new WebhookDispatcher(repository);
   const automationEngine =
     options.automationEngine ?? new AutomationEngine(repository, hub);
   const analyticsService =
@@ -881,6 +897,35 @@ export async function buildApp(
       });
 
       const validated = CardSchema.parse(autoResult.card);
+
+      void webhookDispatcher.dispatchBoardEvent(boardId, {
+        event: "CARD_CREATED",
+        board_id: boardId,
+        actor: { id: getActorId(req.headers), name: "Alex Rivera" },
+        data: {
+          card_id: validated.id,
+          card_title: validated.title,
+          column_id: validated.column_id,
+          priority: validated.priority,
+        },
+      });
+
+      if (autoResult.executedRules.length > 0) {
+        for (const exec of autoResult.executedRules) {
+          void webhookDispatcher.dispatchBoardEvent(boardId, {
+            event: "AUTOMATION_TRIGGERED",
+            board_id: boardId,
+            actor: { id: "butler", name: "Kinetix Butler" },
+            data: {
+              rule_id: exec.rule.id,
+              rule_name: exec.rule.name,
+              card_id: validated.id,
+              card_title: validated.title,
+            },
+          });
+        }
+      }
+
       return reply.status(201).send(validated);
     }
   );
@@ -925,6 +970,37 @@ export async function buildApp(
       );
 
       const validated = CardSchema.parse(autoResult.card);
+
+      if (archiveChanged && body.is_archived) {
+        void webhookDispatcher.dispatchBoardEvent(existing.board_id, {
+          event: "CARD_ARCHIVED",
+          board_id: existing.board_id,
+          actor: { id: getActorId(req.headers), name: "Alex Rivera" },
+          data: {
+            card_id: validated.id,
+            card_title: validated.title,
+            is_archived: true,
+            priority: validated.priority,
+          },
+        });
+      }
+
+      if (autoResult.executedRules.length > 0) {
+        for (const exec of autoResult.executedRules) {
+          void webhookDispatcher.dispatchBoardEvent(existing.board_id, {
+            event: "AUTOMATION_TRIGGERED",
+            board_id: existing.board_id,
+            actor: { id: "butler", name: "Kinetix Butler" },
+            data: {
+              rule_id: exec.rule.id,
+              rule_name: exec.rule.name,
+              card_id: validated.id,
+              card_title: validated.title,
+            },
+          });
+        }
+      }
+
       return reply.status(200).send(validated);
     }
   );
@@ -964,6 +1040,36 @@ export async function buildApp(
       );
 
       const validated = CardSchema.parse(autoResult.card);
+
+      void webhookDispatcher.dispatchBoardEvent(card.board_id, {
+        event: "CARD_MOVED",
+        board_id: card.board_id,
+        actor: { id: getActorId(req.headers), name: "Alex Rivera" },
+        data: {
+          card_id: validated.id,
+          card_title: validated.title,
+          source_column_id: sourceColumnId,
+          target_column_id: validated.column_id,
+          priority: validated.priority,
+        },
+      });
+
+      if (autoResult.executedRules.length > 0) {
+        for (const exec of autoResult.executedRules) {
+          void webhookDispatcher.dispatchBoardEvent(card.board_id, {
+            event: "AUTOMATION_TRIGGERED",
+            board_id: card.board_id,
+            actor: { id: "butler", name: "Kinetix Butler" },
+            data: {
+              rule_id: exec.rule.id,
+              rule_name: exec.rule.name,
+              card_id: validated.id,
+              card_title: validated.title,
+            },
+          });
+        }
+      }
+
       return reply.status(200).send(validated);
     }
   );
@@ -998,6 +1104,16 @@ export async function buildApp(
         board_id: result.board_id,
         data: { id: result.id, deleted: true },
         actor_id: getActorId(req.headers),
+      });
+
+      void webhookDispatcher.dispatchBoardEvent(result.board_id, {
+        event: "CARD_ARCHIVED",
+        board_id: result.board_id,
+        actor: { id: getActorId(req.headers), name: "Alex Rivera" },
+        data: {
+          card_id: result.id,
+          is_archived: true,
+        },
       });
 
       return reply.status(200).send({
@@ -1047,6 +1163,21 @@ export async function buildApp(
         board_id: validatedCard.board_id,
         data: validatedComment,
         actor_id: getActorId(req.headers),
+      });
+
+      void webhookDispatcher.dispatchBoardEvent(validatedCard.board_id, {
+        event: "COMMENT_ADDED",
+        board_id: validatedCard.board_id,
+        actor: {
+          id: getActorId(req.headers),
+          name: validatedComment.author_name,
+        },
+        data: {
+          card_id: validatedCard.id,
+          card_title: validatedCard.title,
+          comment_id: validatedComment.id,
+          comment_text: validatedComment.content,
+        },
       });
 
       return reply.status(201).send(validatedComment);
@@ -1397,9 +1528,120 @@ export async function buildApp(
   );
 
   // ==========================================================================
-  // 7. REAL-TIME WEBSOCKET ENDPOINT (WS /ws/boards/:boardId)
+  // 7. PHASE 5: OUTBOUND WEBHOOK MANAGEMENT ENDPOINTS
   // ==========================================================================
+
   app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/webhooks",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const webhooks = await repository.listWebhooks(boardId);
+      const validated = z.array(WebhookConfigSchema).parse(webhooks);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/webhooks",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = CreateWebhookRequestSchema.parse(req.body);
+      const webhook = await repository.createWebhook(boardId, body);
+      const validated = WebhookConfigSchema.parse(webhook);
+      return reply.status(201).send(validated);
+    }
+  );
+
+  app.patch<{ Params: { webhookId: string } }>(
+    "/api/v1/webhooks/:webhookId",
+    async (req, reply) => {
+      const webhookId = NonEmptyIdParamSchema.parse(req.params.webhookId);
+      const body = UpdateWebhookRequestSchema.parse(req.body);
+      const { webhook } = await repository.updateWebhook(webhookId, body);
+      const validated = WebhookConfigSchema.parse(webhook);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.delete<{ Params: { webhookId: string } }>(
+    "/api/v1/webhooks/:webhookId",
+    async (req, reply) => {
+      const webhookId = NonEmptyIdParamSchema.parse(req.params.webhookId);
+      await repository.deleteWebhook(webhookId);
+      return reply.status(204).send();
+    }
+  );
+
+  app.post<{ Params: { webhookId: string } }>(
+    "/api/v1/webhooks/:webhookId/test",
+    async (req, reply) => {
+      const webhookId = NonEmptyIdParamSchema.parse(req.params.webhookId);
+      const result = await webhookDispatcher.testWebhook(webhookId);
+      TestWebhookResponseSchema.parse(result);
+      return reply.status(200).send(result);
+    }
+  );
+
+  // ==========================================================================
+  // 8. PHASE 5: REST PRESENCE & LIVE CO-PRESENCE ENDPOINTS
+  // ==========================================================================
+
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/presence",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+      const presences = presenceService.getPresences(boardId);
+      const validated = z.array(UserPresenceSchema).parse(presences);
+      return reply.status(200).send({
+        board_id: boardId,
+        presences: validated,
+      });
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/presence",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+      const rawBody = (req.body ?? {}) as Record<string, unknown>;
+      const result = await presenceService.updatePresenceRest(boardId, rawBody);
+      return reply.status(200).send(result);
+    }
+  );
+
+  // ==========================================================================
+  // 9. REAL-TIME WEBSOCKET ENDPOINT (WS /ws/boards/:boardId)
+  // ==========================================================================
+  app.get<{
+    Params: { boardId: string };
+    Querystring: {
+      userId?: string;
+      userName?: string;
+      user_id?: string;
+      user_name?: string;
+      avatar_url?: string;
+      initials?: string;
+      color?: string;
+    };
+  }>(
     "/ws/boards/:boardId",
     { websocket: true },
     (socket, req) => {
@@ -1409,7 +1651,15 @@ export async function buildApp(
         return;
       }
       const boardId = parsed.data;
-      hub.addClient(boardId, socket);
+      const q = req.query ?? {};
+      const initialUser: Partial<UserPresence> = {
+        user_id: q.user_id ?? q.userId,
+        user_name: q.user_name ?? q.userName,
+        avatar_url: q.avatar_url,
+        initials: q.initials,
+        color: q.color,
+      };
+      presenceService.registerSocket(boardId, socket, initialUser);
     }
   );
 
@@ -1425,5 +1675,7 @@ export async function buildApp(
     automationEngine,
     analyticsService,
     importExportService,
+    presenceService,
+    webhookDispatcher,
   };
 }
