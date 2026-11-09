@@ -1,4 +1,4 @@
-# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 3: Multi-Board Workspaces, Templates & Butler Automation)
+# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 4: Sprint Analytics, AI Executive Insights & Trello Import/Export)
 
 All payloads MUST strictly validate against `packages/contracts/index.ts` (Zod) and `packages/contracts/schemas.py` (Pydantic v2).
 
@@ -583,6 +583,209 @@ Proxies a user's natural language automation command along with current board co
 
 ---
 
+### 3.7 Team Productivity & Sprint Analytics Endpoints (Phase 4)
+
+#### `GET /api/v1/boards/:boardId/analytics` — Get Real-Time Board & Sprint Analytics
+Computes and returns `BoardAnalyticsSchema` in real time from the board's columns, cards, checklists, members, Butler automation rules, and burndown history.
+- **Response `200 OK` (`BoardAnalyticsSchema`)**:
+```json
+{
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "total_cards": 12,
+  "completed_cards": 5,
+  "archived_cards": 1,
+  "completion_rate": 41.7,
+  "total_story_points": 42,
+  "completed_story_points": 18,
+  "overdue_cards_count": 2,
+  "blocked_cards_count": 1,
+  "checklist_completion_rate": 68.5,
+  "automation_executions_total": 9,
+  "cards_by_column": [
+    {
+      "column_id": "33333333-3333-4333-8333-333333333331",
+      "column_title": "Backlog",
+      "card_count": 3,
+      "total_story_points": 11,
+      "wip_limit": null,
+      "is_bottleneck": false
+    },
+    {
+      "column_id": "33333333-3333-4333-8333-333333333332",
+      "column_title": "In Progress",
+      "card_count": 4,
+      "total_story_points": 13,
+      "wip_limit": 3,
+      "is_bottleneck": true
+    },
+    {
+      "column_id": "33333333-3333-4333-8333-333333333334",
+      "column_title": "Done",
+      "card_count": 5,
+      "total_story_points": 18,
+      "wip_limit": null,
+      "is_bottleneck": false
+    }
+  ],
+  "workload_by_member": [
+    {
+      "member_id": "88888888-8888-4888-8888-888888888881",
+      "member_name": "Alex Rivera",
+      "member_initials": "AR",
+      "member_color": "#3b82f6",
+      "assigned_cards_count": 5,
+      "completed_cards_count": 2,
+      "active_story_points": 13,
+      "overdue_cards_count": 1
+    }
+  ],
+  "cards_by_priority": [
+    { "priority": "URGENT", "count": 2, "story_points": 13 },
+    { "priority": "HIGH", "count": 4, "story_points": 16 },
+    { "priority": "MEDIUM", "count": 4, "story_points": 10 },
+    { "priority": "LOW", "count": 2, "story_points": 3 }
+  ],
+  "cards_by_label": [
+    {
+      "label_id": "77777777-7777-4777-8777-777777777771",
+      "label_name": "Ship Ready",
+      "label_color": "green",
+      "count": 5
+    },
+    {
+      "label_id": "77777777-7777-4777-8777-777777777774",
+      "label_name": "Blocker",
+      "label_color": "red",
+      "count": 1
+    }
+  ],
+  "burndown_series": [
+    {
+      "date": "Day 1",
+      "ideal_remaining_points": 42,
+      "actual_remaining_points": 42,
+      "completed_cards_count": 0
+    },
+    {
+      "date": "Day 7",
+      "ideal_remaining_points": 0,
+      "actual_remaining_points": 24,
+      "completed_cards_count": 5
+    }
+  ]
+}
+```
+
+#### `POST /api/v1/boards/:boardId/analytics/ai-report` — Generate AI Executive Sprint Health & Bottleneck Report
+Computes `BoardAnalyticsSchema` for the board, forwards `AIAnalyticsRequestSchema` (`{ board_title, analytics }`) to `services/ai-engine` (`POST http://localhost:8001/internal/v1/analyze-board`), and returns `AIAnalyticsReportSchema`.
+- **Response `200 OK` (`AIAnalyticsReportSchema`)**:
+```json
+{
+  "health_score": 74,
+  "health_status": "ON_TRACK",
+  "executive_summary": "Sprint velocity is steady at **41.7% completion** (18/42 story points delivered), though a WIP limit breach in **In Progress** (4/3 cards) and 2 overdue cards require attention.",
+  "bottlenecks": [
+    "Column 'In Progress' exceeds its WIP limit (4 active cards vs limit of 3).",
+    "2 cards are currently past their due date and 1 card is flagged as blocked.",
+    "Alex Rivera is carrying 13 active story points across 3 open cards."
+  ],
+  "actionable_recommendations": [
+    "Swarm on the 1 blocked card in 'In Progress' to bring the column back within its WIP limit of 3.",
+    "Rebalance 1 High-priority card from Alex Rivera to Samir Patel or Elena Rostova.",
+    "Review and update due dates for the 2 overdue cards during tomorrow's standup."
+  ],
+  "generated_at": "2026-11-09T09:00:00.000Z"
+}
+```
+
+---
+
+### 3.8 Native Trello JSON Import & Board Export Endpoints (Phase 4)
+
+#### `POST /api/v1/boards/import` — Import Board from Trello JSON or Kinetix JSON
+Accepts `TrelloImportRequestSchema` containing either a raw Trello board JSON export (`lists`, `cards`, `checklists`, `labels`) or a complete Kinetix `BoardSchema` JSON. Maps Trello `lists` -> `columns` (generating lexicographical fractional index `position`), `cards` -> `cards` (mapping `idList`, `labels`, `due`, `dueComplete`, `idMembers`, and matching `checklists`), persists the new board into the target workspace, broadcasts `BOARD_IMPORTED` via WebSocket, and returns `TrelloImportResultSchema`.
+- **Request Body (`TrelloImportRequestSchema`)**:
+```json
+{
+  "workspace_id": "22222222-2222-4222-8222-222222222222",
+  "board_title_override": "Imported Trello Roadmap",
+  "format": "trello_json",
+  "payload": {
+    "name": "Trello Product Launch",
+    "desc": "Imported from Trello JSON export",
+    "lists": [
+      { "id": "trello-list-1", "name": "To Do", "closed": false },
+      { "id": "trello-list-2", "name": "Doing", "closed": false },
+      { "id": "trello-list-3", "name": "Done", "closed": false }
+    ],
+    "cards": [
+      {
+        "id": "trello-card-1",
+        "name": "Migrate legacy Trello boards to Kinetix",
+        "desc": "Support full JSON lists, cards, labels, and checklists",
+        "idList": "trello-list-1",
+        "due": "2026-11-20T00:00:00.000Z",
+        "dueComplete": false,
+        "closed": false,
+        "labels": [{ "id": "tl-1", "name": "Ship Ready", "color": "green" }]
+      }
+    ],
+    "checklists": [
+      {
+        "id": "trello-chk-1",
+        "idCard": "trello-card-1",
+        "name": "Migration Steps",
+        "checkItems": [
+          { "name": "Parse Trello lists and generate fractional positions", "state": "complete" },
+          { "name": "Map cards and checklists to Kinetix schema", "state": "incomplete" }
+        ]
+      }
+    ]
+  }
+}
+```
+- **Response `201 Created` (`TrelloImportResultSchema`)**:
+```json
+{
+  "board": {
+    "id": "99999999-9999-4999-8999-999999999999",
+    "workspace_id": "22222222-2222-4222-8222-222222222222",
+    "title": "Imported Trello Roadmap",
+    "description": "Imported from Trello JSON export",
+    "is_starred": false,
+    "background": {
+      "type": "gradient",
+      "value": "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)"
+    },
+    "columns": [],
+    "cards": [],
+    "labels": [],
+    "members": [],
+    "activities": [],
+    "automation_rules": [],
+    "created_at": "2026-11-09T09:00:00.000Z"
+  },
+  "imported_lists_count": 3,
+  "imported_cards_count": 1,
+  "imported_checklists_count": 1
+}
+```
+
+#### `GET /api/v1/boards/:boardId/export?format=csv|json` — Export Board as CSV or JSON
+Exports full board data either as downloadable CSV (`Card ID, Title, Column, Priority, Story Points, Labels, Members, Due Date, Due Complete, Checklist Progress, Blocked By, Created/Updated At`) or complete Kinetix/Trello-compatible JSON.
+- **Query Parameter**: `format` (`"csv"` | `"json"`, default `"json"`).
+- **Response `200 OK` (`format=json` -> `BoardSchema`)**: Returns full `BoardSchema` JSON.
+- **Response `200 OK` (`format=csv` -> `BoardExportCsvResponseSchema`)**:
+```json
+{
+  "filename": "kinetix-platform-launch-export.csv",
+  "content_type": "text/csv",
+  "csv_data": "Card ID,Title,Column,Priority,Story Points,Labels,Members,Due Date,Due Complete,Checklist Progress,Blocked By,Updated At\n\"44444444-4444-4444-8444-444444444441\",\"Implement OAuth2 PKCE flow\",\"In Progress\",\"HIGH\",5,\"Ship Ready\",\"Alex Rivera\",\"2026-11-15T00:00:00.000Z\",false,\"2/3\",\"\",\"2026-11-09T09:00:00.000Z\""
+}
+```
+
+---
+
 ## 4. Runtime Automation Execution Contract
 
 Whenever a card mutation endpoint is executed on `apps/api` (`PATCH /api/v1/cards/:cardId/move`, `POST /api/v1/boards/:boardId/cards`, or `PATCH /api/v1/cards/:cardId`), the backend executes the **Butler Automation Pipeline**:
@@ -666,6 +869,7 @@ Whenever a card mutation endpoint is executed on `apps/api` (`PATCH /api/v1/card
   - `"COMMENT_ADDED"`
   - `"BOARD_UPDATED"`
   - `"BOARD_DELETED"`
+  - `"BOARD_IMPORTED"`
   - `"AUTOMATION_TRIGGERED"`
   - `"AUTOMATION_RULE_CREATED"`
   - `"AUTOMATION_RULE_UPDATED"`
@@ -809,5 +1013,88 @@ Translates freeform plain text instructions into structured trigger conditions a
       "due_complete_value": null
     }
   ]
+}
+```
+
+### 6.4 `POST /internal/v1/analyze-board` (Phase 4 AI Executive Sprint Health & Bottleneck Analyzer)
+Analyzes real-time board metrics (`BoardAnalyticsSchema`) and generates an executive sprint health score (`0` to `100`), status classification (`EXCELLENT | ON_TRACK | AT_RISK | CRITICAL`), markdown executive summary, detected workflow bottlenecks, and 3 to 5 concrete actionable recommendations.
+- **Required Header**: `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>` (returns `401 UNAUTHORIZED` with `StandardErrorSchema` if missing or invalid).
+- **Request Body (`AIAnalyticsRequestSchema`)**:
+```json
+{
+  "board_title": "Kinetix Platform Launch",
+  "analytics": {
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "total_cards": 12,
+    "completed_cards": 5,
+    "archived_cards": 1,
+    "completion_rate": 41.7,
+    "total_story_points": 42,
+    "completed_story_points": 18,
+    "overdue_cards_count": 2,
+    "blocked_cards_count": 1,
+    "checklist_completion_rate": 68.5,
+    "automation_executions_total": 9,
+    "cards_by_column": [
+      {
+        "column_id": "33333333-3333-4333-8333-333333333332",
+        "column_title": "In Progress",
+        "card_count": 4,
+        "total_story_points": 13,
+        "wip_limit": 3,
+        "is_bottleneck": true
+      }
+    ],
+    "workload_by_member": [
+      {
+        "member_id": "88888888-8888-4888-8888-888888888881",
+        "member_name": "Alex Rivera",
+        "member_initials": "AR",
+        "member_color": "#3b82f6",
+        "assigned_cards_count": 5,
+        "completed_cards_count": 2,
+        "active_story_points": 13,
+        "overdue_cards_count": 1
+      }
+    ],
+    "cards_by_priority": [
+      { "priority": "URGENT", "count": 2, "story_points": 13 }
+    ],
+    "cards_by_label": [
+      {
+        "label_id": "77777777-7777-4777-8777-777777777774",
+        "label_name": "Blocker",
+        "label_color": "red",
+        "count": 1
+      }
+    ],
+    "burndown_series": [
+      {
+        "date": "Day 1",
+        "ideal_remaining_points": 42,
+        "actual_remaining_points": 42,
+        "completed_cards_count": 0
+      }
+    ]
+  }
+}
+```
+- **Response `200 OK` (`AIAnalyticsReportSchema`)**:
+```json
+{
+  "health_score": 74,
+  "health_status": "ON_TRACK",
+  "executive_summary": "Sprint velocity is steady at **41.7% completion** (18/42 story points delivered), though a WIP limit breach in **In Progress** (4/3 cards) and 2 overdue cards require attention.",
+  "bottlenecks": [
+    "Column 'In Progress' exceeds its WIP limit (4 active cards vs limit of 3).",
+    "2 cards are currently past their due date and 1 card is flagged as blocked.",
+    "Alex Rivera is carrying 13 active story points across 3 open cards."
+  ],
+  "actionable_recommendations": [
+    "Swarm on the 1 blocked card in 'In Progress' to bring the column back within its WIP limit of 3.",
+    "Rebalance 1 High-priority card from Alex Rivera to Samir Patel or Elena Rostova.",
+    "Review and update due dates for the 2 overdue cards during tomorrow's standup."
+  ],
+  "generated_at": "2026-11-09T09:00:00.000Z"
 }
 ```

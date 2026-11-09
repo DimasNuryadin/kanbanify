@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Kinetix Core API & Internal AI Engine Contract
-  version: 3.0.0
+  version: 4.0.0
   description: >
     Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kinetix
-    High-Performance Real-Time Kanban & AI Workspace (Phase 3 Multi-Board Workspace,
-    Board Templates & Trello Butler Automation Engine).
+    High-Performance Real-Time Kanban & AI Workspace (Phase 4 Team Productivity Analytics
+    Dashboard, AI Executive Sprint Insights, Native Trello JSON Import & CSV/JSON Export).
 servers:
   - url: http://localhost:8000
     description: Fastify Core API Server (apps/api)
@@ -681,6 +681,120 @@ paths:
                 $ref: "#/components/schemas/StandardError"
 
   # ============================================================================
+  # TEAM ANALYTICS, AI SPRINT INSIGHTS & TRELLO IMPORT/EXPORT ENDPOINTS (Phase 4)
+  # ============================================================================
+  /api/v1/boards/{boardId}/analytics:
+    get:
+      summary: Compute and return real-time team productivity & sprint analytics for a board
+      operationId: getBoardAnalytics
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Computed board analytics (KPIs, column bottlenecks, member workload, priority/label distribution, burndown series)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardAnalytics"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/analytics/ai-report:
+    post:
+      summary: Compute board analytics and generate an AI Executive Sprint Health & Bottleneck Report via services/ai-engine
+      operationId: generateBoardAIAnalyticsReport
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: AI Executive Sprint Health & Bottleneck Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIAnalyticsReport"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/import:
+    post:
+      summary: Import a board from raw Trello JSON export or Kinetix JSON format
+      operationId: importBoard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrelloImportRequest"
+      responses:
+        "201":
+          description: Imported board and summary counts of imported lists, cards, and checklists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrelloImportResult"
+        "400":
+          description: Validation error or malformed import payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/export:
+    get:
+      summary: Export full board data as CSV or complete Kinetix/Trello-compatible JSON
+      operationId: exportBoard
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [csv, json]
+            default: json
+      responses:
+        "200":
+          description: Exported board payload (BoardExportCsvResponse JSON wrapper/text/csv when format=csv, or Board JSON when format=json)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Board"
+                  - $ref: "#/components/schemas/BoardExportCsvResponse"
+            text/csv:
+              schema:
+                type: string
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
   # INTERNAL AI ENGINE ENDPOINTS (Port 8001)
   # ============================================================================
   /internal/v1/decompose-task:
@@ -754,6 +868,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AIParseAutomationResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /internal/v1/analyze-board:
+    post:
+      summary: Internal AI Engine sprint health & bottleneck analyzer (Port 8001)
+      operationId: internalAnalyzeBoard
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIAnalyticsRequest"
+      responses:
+        "200":
+          description: Executive sprint health score, status, bottlenecks, and actionable recommendations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIAnalyticsReport"
         "401":
           description: Unauthorized
           content:
@@ -1812,6 +1956,257 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AutomationAction"
+
+    SprintHealthStatusEnum:
+      type: string
+      enum: [EXCELLENT, ON_TRACK, AT_RISK, CRITICAL]
+
+    BoardImportFormatEnum:
+      type: string
+      enum: [trello_json, kinetix_json]
+
+    BurndownDataPoint:
+      type: object
+      required:
+        - date
+        - ideal_remaining_points
+        - actual_remaining_points
+        - completed_cards_count
+      properties:
+        date:
+          type: string
+        ideal_remaining_points:
+          type: number
+        actual_remaining_points:
+          type: number
+        completed_cards_count:
+          type: integer
+
+    ColumnMetric:
+      type: object
+      required:
+        - column_id
+        - column_title
+        - card_count
+        - total_story_points
+        - wip_limit
+        - is_bottleneck
+      properties:
+        column_id:
+          type: string
+        column_title:
+          type: string
+        card_count:
+          type: integer
+        total_story_points:
+          type: number
+        wip_limit:
+          type: [integer, "null"]
+        is_bottleneck:
+          type: boolean
+
+    MemberWorkload:
+      type: object
+      required:
+        - member_id
+        - member_name
+        - member_initials
+        - member_color
+        - assigned_cards_count
+        - completed_cards_count
+        - active_story_points
+        - overdue_cards_count
+      properties:
+        member_id:
+          type: string
+        member_name:
+          type: string
+        member_initials:
+          type: string
+        member_color:
+          type: string
+        assigned_cards_count:
+          type: integer
+        completed_cards_count:
+          type: integer
+        active_story_points:
+          type: number
+        overdue_cards_count:
+          type: integer
+
+    PriorityMetric:
+      type: object
+      required: [priority, count, story_points]
+      properties:
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        count:
+          type: integer
+        story_points:
+          type: number
+
+    LabelMetric:
+      type: object
+      required: [label_id, label_name, label_color, count]
+      properties:
+        label_id:
+          type: string
+        label_name:
+          type: string
+        label_color:
+          type: string
+        count:
+          type: integer
+
+    BoardAnalytics:
+      type: object
+      required:
+        - board_id
+        - total_cards
+        - completed_cards
+        - archived_cards
+        - completion_rate
+        - total_story_points
+        - completed_story_points
+        - overdue_cards_count
+        - blocked_cards_count
+        - checklist_completion_rate
+        - automation_executions_total
+        - cards_by_column
+        - workload_by_member
+        - cards_by_priority
+        - cards_by_label
+        - burndown_series
+      properties:
+        board_id:
+          type: string
+        total_cards:
+          type: integer
+        completed_cards:
+          type: integer
+        archived_cards:
+          type: integer
+        completion_rate:
+          type: number
+          minimum: 0
+          maximum: 100
+        total_story_points:
+          type: number
+        completed_story_points:
+          type: number
+        overdue_cards_count:
+          type: integer
+        blocked_cards_count:
+          type: integer
+        checklist_completion_rate:
+          type: number
+          minimum: 0
+          maximum: 100
+        automation_executions_total:
+          type: integer
+        cards_by_column:
+          type: array
+          items:
+            $ref: "#/components/schemas/ColumnMetric"
+        workload_by_member:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberWorkload"
+        cards_by_priority:
+          type: array
+          items:
+            $ref: "#/components/schemas/PriorityMetric"
+        cards_by_label:
+          type: array
+          items:
+            $ref: "#/components/schemas/LabelMetric"
+        burndown_series:
+          type: array
+          items:
+            $ref: "#/components/schemas/BurndownDataPoint"
+
+    AIAnalyticsRequest:
+      type: object
+      required: [board_title, analytics]
+      properties:
+        board_title:
+          type: string
+        analytics:
+          $ref: "#/components/schemas/BoardAnalytics"
+
+    AIAnalyticsReport:
+      type: object
+      required:
+        - health_score
+        - health_status
+        - executive_summary
+        - bottlenecks
+        - actionable_recommendations
+        - generated_at
+      properties:
+        health_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        health_status:
+          $ref: "#/components/schemas/SprintHealthStatusEnum"
+        executive_summary:
+          type: string
+        bottlenecks:
+          type: array
+          items:
+            type: string
+        actionable_recommendations:
+          type: array
+          items:
+            type: string
+        generated_at:
+          type: string
+          format: date-time
+
+    TrelloImportRequest:
+      type: object
+      required: [payload]
+      properties:
+        workspace_id:
+          type: string
+        board_title_override:
+          type: string
+        format:
+          $ref: "#/components/schemas/BoardImportFormatEnum"
+          default: trello_json
+        payload:
+          type: object
+          additionalProperties: true
+
+    TrelloImportResult:
+      type: object
+      required:
+        - board
+        - imported_lists_count
+        - imported_cards_count
+        - imported_checklists_count
+      properties:
+        board:
+          $ref: "#/components/schemas/Board"
+        imported_lists_count:
+          type: integer
+        imported_cards_count:
+          type: integer
+        imported_checklists_count:
+          type: integer
+
+    BoardExportCsvResponse:
+      type: object
+      required: [filename, content_type, csv_data]
+      properties:
+        filename:
+          type: string
+        content_type:
+          type: string
+          enum: [text/csv]
+        csv_data:
+          type: string
 
     StandardError:
       type: object
