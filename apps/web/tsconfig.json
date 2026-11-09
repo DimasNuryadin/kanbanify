@@ -27,7 +27,7 @@
         "./src/*"
       ],
       "@kinetix/contracts": [
-        "../../packages/contracts/index.ts"
+        "./src/lib/contracts.ts"
       ],
       "@kinetix/contracts/*": [
         "../../packages/contracts/*"
@@ -42,7 +42,6 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "../../packages/contracts/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [

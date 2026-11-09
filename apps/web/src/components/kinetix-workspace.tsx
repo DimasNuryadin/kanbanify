@@ -42,6 +42,8 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 import { KanbanBoard } from "./kanban-board";
 import { TableView } from "./table-view";
 import { CalendarView } from "./calendar-view";
+import { AnalyticsView } from "./analytics-view";
+import { TrelloImportExportModal } from "./trello-import-export-modal";
 import { CardDetailDrawer } from "./card-detail-drawer";
 import { ArchivedItemsDrawer } from "./archived-items-drawer";
 import { BoardMenuDrawer } from "./board-menu-drawer";
@@ -100,6 +102,9 @@ export function KinetixWorkspace() {
   const toasts = useWorkspaceStore((s) => s.toasts);
   const addToast = useWorkspaceStore((s) => s.addToast);
   const removeToast = useWorkspaceStore((s) => s.removeToast);
+  const setImportExportModalOpen = useWorkspaceStore(
+    (s) => s.setImportExportModalOpen
+  );
 
   const handleFallbackToMock = useCallback(
     (reason: string) => {
@@ -292,6 +297,11 @@ export function KinetixWorkspace() {
       },
       onAutomationRuleDeleted: (data) => {
         removeAutomationRule(data.id);
+      },
+      onBoardImported: (importedBoard) => {
+        setBoard(importedBoard);
+        queryClient.invalidateQueries({ queryKey: ["board-summaries"] });
+        queryClient.invalidateQueries({ queryKey: ["workspaces"] });
       },
     });
 
@@ -1043,10 +1053,14 @@ export function KinetixWorkspace() {
               filteredCards={filteredCards}
               onPersistCardMove={handlePersistCardMove}
             />
-          ) : (
+          ) : viewMode === "calendar" ? (
             <CalendarView
               filteredCards={filteredCards}
               onUpdateCard={handleUpdateCard}
+            />
+          ) : (
+            <AnalyticsView
+              onOpenImportExport={() => setImportExportModalOpen(true)}
             />
           )}
         </main>
@@ -1097,6 +1111,25 @@ export function KinetixWorkspace() {
         onUpdateRule={handleUpdateAutomationRule}
         onDeleteRule={handleDeleteAutomationRule}
         onAiGenerateRule={handleAiGenerateAutomationRule}
+      />
+
+      <TrelloImportExportModal
+        onImportSuccess={(result) => {
+          setBoard(result.board);
+          queryClient.invalidateQueries({ queryKey: ["board-summaries"] });
+          queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+          addToast({
+            id: createDeterministicUuid(),
+            ruleName: "Trello Board Imported",
+            cardTitle: result.board.title,
+            actionSummary: `${result.imported_lists_count} lists • ${result.imported_cards_count} cards • ${result.imported_checklists_count} checklists`,
+            timestamp: new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            }),
+          });
+        }}
       />
 
       <ButlerToastContainer toasts={toasts} onDismiss={removeToast} />

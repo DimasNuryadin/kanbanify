@@ -1,17 +1,25 @@
 import {
   Activity,
+  AIAnalyticsReport,
+  AIAnalyticsReportSchema,
   AIParseAutomationResponse,
   AutomationAction,
   AutomationRule,
   AutomationTrigger,
   Board,
+  BoardAnalytics,
+  BoardAnalyticsSchema,
+  BoardExportCsvResponse,
+  BoardExportCsvResponseSchema,
   BoardSchema,
   BoardSummary,
   BoardTemplate,
+  BurndownDataPoint,
   Card,
   CardSchema,
   Checklist,
   Column,
+  ColumnMetric,
   ColumnSchema,
   Comment,
   CommentSchema,
@@ -30,10 +38,20 @@ import {
   DEFAULT_BOARD_MEMBERS,
   DEFAULT_BOARD_TEMPLATES,
   DEFAULT_WORKSPACE,
+  Label,
+  LabelColor,
+  LabelColorEnum,
+  LabelMetric,
+  MemberWorkload,
   MoveCardRequest,
   MoveColumnRequest,
   Priority,
+  PriorityMetric,
+  SprintHealthStatus,
   Subtask,
+  TrelloImportRequest,
+  TrelloImportResult,
+  TrelloImportResultSchema,
   UpdateAutomationRuleRequest,
   UpdateBoardRequest,
   UpdateCardRequest,
@@ -2719,6 +2737,1014 @@ export class MockApiService {
     }
     throw new Error(`Card ${cardId} not found`);
   }
+
+  // --- Phase 4: Team Productivity & Sprint Analytics ---
+  async getBoardAnalytics(boardId: string): Promise<BoardAnalytics> {
+    const board = await this.getBoard(boardId);
+    return computeBoardAnalyticsFromBoard(board);
+  }
+
+  async generateAIAnalyticsReport(
+    boardId: string
+  ): Promise<AIAnalyticsReport> {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    const board = await this.getBoard(boardId);
+    const analytics = computeBoardAnalyticsFromBoard(board);
+    return synthesizeAIAnalyticsReport(board.title, analytics);
+  }
+
+  // --- Phase 4: Trello JSON Importer & Board CSV/JSON Exporter ---
+  async importBoard(
+    request: TrelloImportRequest
+  ): Promise<TrelloImportResult> {
+    this.loadState();
+    const result = parseTrelloOrKinetixImport(request, DEFAULT_WORKSPACE.id);
+    this.saveState(result.board);
+    return result;
+  }
+
+  async exportBoardCsv(boardId: string): Promise<BoardExportCsvResponse> {
+    const board = await this.getBoard(boardId);
+    return generateBoardCsvExport(board);
+  }
+
+  async exportBoardJson(boardId: string): Promise<Board> {
+    return this.getBoard(boardId);
+  }
 }
+
+export function computeBoardAnalyticsFromBoard(board: Board): BoardAnalytics {
+  const activeColumns = board.columns
+    .filter((col) => !col.is_archived)
+    .sort((a, b) => comparePositions(a.position, b.position));
+  const archivedColIds = new Set(
+    board.columns.filter((col) => col.is_archived).map((col) => col.id)
+  );
+
+  const archivedCardsCount = board.cards.filter(
+    (c) => c.is_archived || archivedColIds.has(c.column_id)
+  ).length;
+  const activeCards = board.cards.filter(
+    (c) => !c.is_archived && !archivedColIds.has(c.column_id)
+  );
+
+  const doneColIds = new Set(
+    activeColumns
+      .filter((col) => {
+        const lower = col.title.toLowerCase();
+        return (
+          lower.includes("done") ||
+          lower.includes("shipped") ||
+          lower.includes("published") ||
+          lower.includes("complete")
+        );
+      })
+      .map((col) => col.id)
+  );
+
+  const isCardDone = (c: Card): boolean =>
+    doneColIds.has(c.column_id) || c.is_due_complete;
+
+  const totalCards = activeCards.length;
+  const completedCardsList = activeCards.filter(isCardDone);
+  const completedCards = completedCardsList.length;
+
+  const completionRate =
+    totalCards > 0
+      ? Number(((completedCards / totalCards) * 100).toFixed(1))
+      : 0;
+
+  const totalStoryPoints = activeCards.reduce(
+    (sum, c) => sum + (c.story_points ?? 0),
+    0
+  );
+  const completedStoryPoints = completedCardsList.reduce(
+    (sum, c) => sum + (c.story_points ?? 0),
+    0
+  );
+
+  const now = Date.now();
+  const isCardOverdue = (c: Card): boolean => {
+    if (!c.due_date || c.is_due_complete || doneColIds.has(c.column_id)) {
+      return false;
+    }
+    return new Date(c.due_date).getTime() < now;
+  };
+
+  const overdueCardsCount = activeCards.filter(isCardOverdue).length;
+  const blockedCardsCount = activeCards.filter(
+    (c) => c.blocked_by_card_ids.length > 0 && !doneColIds.has(c.column_id)
+  ).length;
+
+  let totalChecklistItems = 0;
+  let completedChecklistItems = 0;
+  for (const c of activeCards) {
+    if (c.checklists && c.checklists.length > 0) {
+      for (const cl of c.checklists) {
+        totalChecklistItems += cl.items.length;
+        completedChecklistItems += cl.items.filter((i) => i.is_completed).length;
+      }
+    } else if (c.subtasks && c.subtasks.length > 0) {
+      totalChecklistItems += c.subtasks.length;
+      completedChecklistItems += c.subtasks.filter((s) => s.is_completed).length;
+    }
+  }
+  const checklistCompletionRate =
+    totalChecklistItems > 0
+      ? Number(
+          ((completedChecklistItems / totalChecklistItems) * 100).toFixed(1)
+        )
+      : 0;
+
+  const rulesExecutions = (board.automation_rules ?? []).reduce(
+    (sum, r) => sum + (r.execution_count ?? 0),
+    0
+  );
+  const automatedActivities = (board.activities ?? []).filter(
+    (a) => a.is_automated
+  ).length;
+  const automationExecutionsTotal =
+    rulesExecutions > 0
+      ? rulesExecutions
+      : automatedActivities > 0
+        ? automatedActivities
+        : (board.automation_rules ?? []).filter((r) => r.is_enabled).length * 4;
+
+  const cardsByColumn: ColumnMetric[] = activeColumns.map((col) => {
+    const colCards = activeCards.filter((c) => c.column_id === col.id);
+    const pts = colCards.reduce((sum, c) => sum + (c.story_points ?? 0), 0);
+    const isDoneCol = doneColIds.has(col.id);
+    const isBacklogCol =
+      col.title.toLowerCase().includes("backlog") ||
+      col.title.toLowerCase().includes("to do") ||
+      col.title.toLowerCase().includes("ideas");
+    const exceedsWip =
+      col.wip_limit !== null && colCards.length >= col.wip_limit;
+    const highActiveConcentration =
+      !isDoneCol &&
+      !isBacklogCol &&
+      col.wip_limit === null &&
+      colCards.length >= 4;
+
+    return {
+      column_id: col.id,
+      column_title: col.title,
+      card_count: colCards.length,
+      total_story_points: pts,
+      wip_limit: col.wip_limit,
+      is_bottleneck: !isDoneCol && (exceedsWip || highActiveConcentration),
+    };
+  });
+
+  const workloadByMember: MemberWorkload[] = board.members.map((m) => {
+    const memberCards = activeCards.filter((c) => c.member_ids.includes(m.id));
+    const memberCompleted = memberCards.filter(isCardDone);
+    const memberActive = memberCards.filter((c) => !isCardDone(c));
+    const activePts = memberActive.reduce(
+      (sum, c) => sum + (c.story_points ?? 0),
+      0
+    );
+    const memberOverdue = memberCards.filter(isCardOverdue).length;
+
+    return {
+      member_id: m.id,
+      member_name: m.name,
+      member_initials: m.initials,
+      member_color: m.color,
+      assigned_cards_count: memberCards.length,
+      completed_cards_count: memberCompleted.length,
+      active_story_points: activePts,
+      overdue_cards_count: memberOverdue,
+    };
+  });
+
+  const priorityOrder: Priority[] = ["URGENT", "HIGH", "MEDIUM", "LOW"];
+  const cardsByPriority: PriorityMetric[] = priorityOrder.map((p) => {
+    const matching = activeCards.filter((c) => c.priority === p);
+    return {
+      priority: p,
+      count: matching.length,
+      story_points: matching.reduce(
+        (sum, c) => sum + (c.story_points ?? 0),
+        0
+      ),
+    };
+  });
+
+  const cardsByLabel: LabelMetric[] = board.labels.map((lbl) => {
+    const count = activeCards.filter((c) => c.label_ids.includes(lbl.id)).length;
+    return {
+      label_id: lbl.id,
+      label_name: lbl.name || lbl.color,
+      label_color: lbl.color,
+      count,
+    };
+  });
+
+  // 7-Day Sprint Burndown Series
+  const totalPts = Math.max(totalStoryPoints, 10);
+  const remainingNow = Math.max(totalStoryPoints - completedStoryPoints, 0);
+  const deliveredSoFar = Math.max(totalPts - remainingNow, 0);
+  const dailyBurn = deliveredSoFar / 6;
+
+  const burndownSeries: BurndownDataPoint[] = Array.from(
+    { length: 7 },
+    (_, idx) => {
+      const dayNum = idx + 1;
+      const ideal = Math.max(
+        0,
+        Number((totalPts - (totalPts / 6) * idx).toFixed(1))
+      );
+      let actual: number;
+      let dailyCompletedCards: number;
+      if (idx === 0) {
+        actual = totalPts;
+        dailyCompletedCards = 0;
+      } else if (idx === 6) {
+        actual = remainingNow;
+        dailyCompletedCards = completedCards;
+      } else {
+        // Realistic sprint curve with slight mid-sprint plateau before acceleration
+        const progressFactor =
+          idx === 1
+            ? 0.12
+            : idx === 2
+              ? 0.25
+              : idx === 3
+                ? 0.42
+                : idx === 4
+                  ? 0.68
+                  : 0.85;
+        actual = Math.max(
+          0,
+          Number((totalPts - deliveredSoFar * progressFactor).toFixed(1))
+        );
+        dailyCompletedCards = Math.min(
+          completedCards,
+          Math.round(completedCards * progressFactor)
+        );
+      }
+
+      // Ensure we also reflect daily burn
+      void dailyBurn;
+
+      return {
+        date: `Day ${dayNum}`,
+        ideal_remaining_points: ideal,
+        actual_remaining_points: actual,
+        completed_cards_count: dailyCompletedCards,
+      };
+    }
+  );
+
+  return BoardAnalyticsSchema.parse({
+    board_id: board.id,
+    total_cards: totalCards,
+    completed_cards: completedCards,
+    archived_cards: archivedCardsCount,
+    completion_rate: completionRate,
+    total_story_points: totalStoryPoints,
+    completed_story_points: completedStoryPoints,
+    overdue_cards_count: overdueCardsCount,
+    blocked_cards_count: blockedCardsCount,
+    checklist_completion_rate: checklistCompletionRate,
+    automation_executions_total: automationExecutionsTotal,
+    cards_by_column: cardsByColumn,
+    workload_by_member: workloadByMember,
+    cards_by_priority: cardsByPriority,
+    cards_by_label: cardsByLabel,
+    burndown_series: burndownSeries,
+  });
+}
+
+export function synthesizeAIAnalyticsReport(
+  boardTitle: string,
+  analytics: BoardAnalytics
+): AIAnalyticsReport {
+  const bottleneckCols = analytics.cards_by_column.filter(
+    (c) => c.is_bottleneck
+  );
+
+  // Compute health score (0-100)
+  let score = 62 + Math.round(analytics.completion_rate * 0.35);
+  score += Math.round(analytics.checklist_completion_rate * 0.08);
+  score -= analytics.overdue_cards_count * 7;
+  score -= analytics.blocked_cards_count * 8;
+  score -= bottleneckCols.length * 6;
+  score = Math.max(18, Math.min(98, score));
+
+  let status: SprintHealthStatus = "ON_TRACK";
+  if (score >= 82) status = "EXCELLENT";
+  else if (score >= 65) status = "ON_TRACK";
+  else if (score >= 45) status = "AT_RISK";
+  else status = "CRITICAL";
+
+  const remainingPts = Math.max(
+    0,
+    analytics.total_story_points - analytics.completed_story_points
+  );
+
+  const summary = `**${boardTitle}** is operating at **${analytics.completion_rate}% card completion** (${analytics.completed_cards}/${analytics.total_cards} cards) with **${analytics.completed_story_points}/${analytics.total_story_points} story points** delivered (${remainingPts} pts remaining) and **${analytics.checklist_completion_rate}%** checklist completion.${
+    bottleneckCols.length > 0 || analytics.overdue_cards_count > 0
+      ? ` Attention is required on **${bottleneckCols.length} workflow bottleneck(s)**, **${analytics.overdue_cards_count} overdue card(s)**, and **${analytics.blocked_cards_count} active blocker(s)**.`
+      : " Workflow throughput is smooth with zero critical WIP breaches."
+  }`;
+
+  const bottlenecks: string[] = [];
+  for (const col of bottleneckCols) {
+    if (col.wip_limit !== null) {
+      bottlenecks.push(
+        `Column '${col.column_title}' is at or above its WIP limit (${col.card_count} active cards vs WIP limit of ${col.wip_limit}, carrying ${col.total_story_points} story points).`
+      );
+    } else {
+      bottlenecks.push(
+        `Column '${col.column_title}' has a high concentration of ${col.card_count} active cards (${col.total_story_points} story points) without a WIP cap.`
+      );
+    }
+  }
+
+  if (analytics.overdue_cards_count > 0 || analytics.blocked_cards_count > 0) {
+    bottlenecks.push(
+      `${analytics.overdue_cards_count} card(s) are currently past their due date and ${analytics.blocked_cards_count} card(s) are flagged as blocked by upstream dependencies.`
+    );
+  }
+
+  const sortedMembers = [...analytics.workload_by_member].sort(
+    (a, b) => b.active_story_points - a.active_story_points
+  );
+  if (sortedMembers.length > 0 && sortedMembers[0].active_story_points > 0) {
+    const top = sortedMembers[0];
+    bottlenecks.push(
+      `${top.member_name} is carrying the highest active load (${top.active_story_points} active story points across ${Math.max(0, top.assigned_cards_count - top.completed_cards_count)} open cards${top.overdue_cards_count > 0 ? `, with ${top.overdue_cards_count} overdue` : ""}).`
+    );
+  }
+
+  if (bottlenecks.length === 0) {
+    bottlenecks.push(
+      "No severe WIP limit breaches or overdue blockers detected across active sprint lists."
+    );
+  }
+
+  const recommendations: string[] = [];
+  if (analytics.blocked_cards_count > 0) {
+    recommendations.push(
+      `Swarm on the ${analytics.blocked_cards_count} blocked card(s) first to unblock downstream engineering dependencies before starting new backlog items.`
+    );
+  }
+  if (bottleneckCols.length > 0) {
+    recommendations.push(
+      `Pause new pull-ins into '${bottleneckCols[0].column_title}' until at least 1–2 in-flight cards transition to Review or Done.`
+    );
+  }
+  if (sortedMembers.length >= 2) {
+    const heaviest = sortedMembers[0];
+    const lightest = sortedMembers[sortedMembers.length - 1];
+    if (heaviest.active_story_points > lightest.active_story_points + 3) {
+      recommendations.push(
+        `Rebalance 1 High/Urgent card (~3–5 pts) from ${heaviest.member_name} (${heaviest.active_story_points} active pts) to ${lightest.member_name} (${lightest.active_story_points} active pts).`
+      );
+    }
+  }
+  if (analytics.overdue_cards_count > 0) {
+    recommendations.push(
+      `Audit and re-baseline due dates for the ${analytics.overdue_cards_count} overdue card(s) during the next daily standup.`
+    );
+  }
+  recommendations.push(
+    `Leverage Butler Automation rules (${analytics.automation_executions_total} automated actions executed so far) to auto-triage incoming Urgent cards and auto-complete Done checklists.`
+  );
+
+  return AIAnalyticsReportSchema.parse({
+    health_score: score,
+    health_status: status,
+    executive_summary: summary,
+    bottlenecks,
+    actionable_recommendations: recommendations.slice(0, 5),
+    generated_at: new Date().toISOString(),
+  });
+}
+
+export function generateBoardCsvExport(board: Board): BoardExportCsvResponse {
+  const slug =
+    board.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "board";
+  const filename = `${slug}-export.csv`;
+
+  const colMap = new Map(board.columns.map((c) => [c.id, c.title]));
+  const labelMap = new Map(
+    board.labels.map((l) => [l.id, l.name || l.color])
+  );
+  const memberMap = new Map(board.members.map((m) => [m.id, m.name]));
+
+  const escapeCsv = (val: string | number | boolean | null | undefined) => {
+    if (val === null || val === undefined) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const headers = [
+    "Card ID",
+    "Title",
+    "Column",
+    "Priority",
+    "Story Points",
+    "Labels",
+    "Members",
+    "Due Date",
+    "Due Complete",
+    "Checklist Progress",
+    "Blocked By",
+    "Updated At",
+  ];
+
+  const rows = board.cards
+    .filter((c) => !c.is_archived)
+    .map((card) => {
+      const colTitle = colMap.get(card.column_id) ?? "Unknown";
+      const labels = card.label_ids
+        .map((id) => labelMap.get(id))
+        .filter(Boolean)
+        .join("; ");
+      const members = card.member_ids
+        .map((id) => memberMap.get(id))
+        .filter(Boolean)
+        .join("; ");
+
+      let totalChk = 0;
+      let doneChk = 0;
+      for (const cl of card.checklists ?? []) {
+        totalChk += cl.items.length;
+        doneChk += cl.items.filter((i) => i.is_completed).length;
+      }
+      const chkProgress = totalChk > 0 ? `${doneChk}/${totalChk}` : "0/0";
+      const blockedBy = card.blocked_by_card_ids.join("; ");
+
+      return [
+        escapeCsv(card.id),
+        escapeCsv(card.title),
+        escapeCsv(colTitle),
+        escapeCsv(card.priority),
+        card.story_points ?? "",
+        escapeCsv(labels),
+        escapeCsv(members),
+        escapeCsv(card.due_date ?? ""),
+        card.is_due_complete,
+        escapeCsv(chkProgress),
+        escapeCsv(blockedBy),
+        escapeCsv(card.updated_at),
+      ].join(",");
+    });
+
+  const csvData = [headers.join(","), ...rows].join("\n");
+
+  return BoardExportCsvResponseSchema.parse({
+    filename,
+    content_type: "text/csv",
+    csv_data: csvData,
+  });
+}
+
+export function parseTrelloOrKinetixImport(
+  request: TrelloImportRequest,
+  fallbackWorkspaceId: string
+): TrelloImportResult {
+  const rawPayload = request.payload as Record<string, any>;
+  const workspaceId = request.workspace_id || fallbackWorkspaceId;
+  const newBoardId = createDeterministicUuid();
+  const nowIso = new Date().toISOString();
+
+  // Check if it is already a Kinetix Board backup format (has columns & cards arrays)
+  const isKinetixFormat =
+    request.format === "kinetix_json" ||
+    (Array.isArray(rawPayload?.columns) && !Array.isArray(rawPayload?.lists));
+
+  if (isKinetixFormat && Array.isArray(rawPayload?.columns)) {
+    const colIdMap = new Map<string, string>();
+    const labelIdMap = new Map<string, string>();
+
+    const columns: Column[] = (rawPayload.columns as any[]).map((col, idx) => {
+      const nextColId = createDeterministicUuid();
+      if (col.id) colIdMap.set(String(col.id), nextColId);
+      return ColumnSchema.parse({
+        id: nextColId,
+        board_id: newBoardId,
+        title: String(col.title || `List ${idx + 1}`).slice(0, 100),
+        position: typeof col.position === "string" ? col.position : `a${idx}`,
+        wip_limit: typeof col.wip_limit === "number" ? col.wip_limit : null,
+        color: typeof col.color === "string" ? col.color : null,
+        is_archived: Boolean(col.is_archived),
+      });
+    });
+
+    const labels: Label[] = Array.isArray(rawPayload.labels)
+      ? (rawPayload.labels as any[]).map((l) => {
+          const nextLblId = createDeterministicUuid();
+          if (l.id) labelIdMap.set(String(l.id), nextLblId);
+          const parsedColor = LabelColorEnum.safeParse(l.color);
+          return {
+            id: nextLblId,
+            board_id: newBoardId,
+            name: String(l.name ?? "").slice(0, 100),
+            color: parsedColor.success ? parsedColor.data : "blue",
+          };
+        })
+      : DEFAULT_BOARD_LABELS.map((l) => ({ ...l, board_id: newBoardId }));
+
+    let totalChecklistsCount = 0;
+    const fallbackColId = columns[0]?.id ?? createDeterministicUuid();
+
+    const cards: Card[] = Array.isArray(rawPayload.cards)
+      ? (rawPayload.cards as any[]).map((c, idx) => {
+          const mappedColId =
+            colIdMap.get(String(c.column_id)) ?? fallbackColId;
+          const mappedLabels = Array.isArray(c.label_ids)
+            ? c.label_ids
+                .map((id: string) => labelIdMap.get(String(id)) ?? id)
+                .filter(Boolean)
+            : [];
+          const checklists: Checklist[] = Array.isArray(c.checklists)
+            ? c.checklists.map((cl: any, clIdx: number) => {
+                totalChecklistsCount += 1;
+                return {
+                  id: createDeterministicUuid(),
+                  title: String(cl.title || "Checklist").slice(0, 150),
+                  position: `a${clIdx}`,
+                  items: Array.isArray(cl.items)
+                    ? cl.items.map((item: any, itemIdx: number) => ({
+                        id: createDeterministicUuid(),
+                        title: String(item.title || "Item").slice(0, 280),
+                        is_completed: Boolean(item.is_completed),
+                        position: `a${itemIdx}`,
+                        due_date: null,
+                        assignee_id: null,
+                      }))
+                    : [],
+                };
+              })
+            : [];
+          const synced = syncSubtasksAndChecklists(undefined, checklists);
+
+          return CardSchema.parse({
+            id: createDeterministicUuid(),
+            board_id: newBoardId,
+            column_id: mappedColId,
+            title: String(c.title || `Imported Card ${idx + 1}`).slice(0, 255),
+            description: String(c.description || ""),
+            position: typeof c.position === "string" ? c.position : `a${idx}`,
+            priority: PriorityEnumSafe(c.priority),
+            story_points:
+              typeof c.story_points === "number" ? c.story_points : 3,
+            tags: Array.isArray(c.tags) ? c.tags.map(String) : ["imported"],
+            subtasks: synced.subtasks,
+            blocked_by_card_ids: [],
+            due_date:
+              typeof c.due_date === "string" && !isNaN(Date.parse(c.due_date))
+                ? new Date(c.due_date).toISOString()
+                : null,
+            updated_at: nowIso,
+            cover: c.cover ?? { type: "none", value: null, size: "normal" },
+            label_ids: mappedLabels,
+            member_ids: Array.isArray(c.member_ids)
+              ? c.member_ids
+              : [MEMBER_ALEX],
+            checklists: synced.checklists,
+            comments: [],
+            attachments: [],
+            start_date: null,
+            is_due_complete: Boolean(c.is_due_complete),
+            is_archived: Boolean(c.is_archived),
+            is_watching: false,
+          });
+        })
+      : [];
+
+    const boardTitle = (
+      request.board_title_override?.trim() ||
+      String(rawPayload.title || rawPayload.name || "Imported Kinetix Board")
+    ).slice(0, 150);
+
+    const newBoard: Board = sortBoardEntities(
+      BoardSchema.parse({
+        id: newBoardId,
+        workspace_id: workspaceId,
+        title: boardTitle,
+        description: String(
+          rawPayload.description ||
+            rawPayload.desc ||
+            "Imported from Kinetix JSON backup"
+        ),
+        is_starred: Boolean(rawPayload.is_starred),
+        background: rawPayload.background ?? {
+          type: "gradient",
+          value:
+            "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)",
+        },
+        columns,
+        cards,
+        labels,
+        members: DEFAULT_BOARD_MEMBERS.map((m) => ({ ...m })),
+        activities: [
+          {
+            id: createDeterministicUuid(),
+            board_id: newBoardId,
+            card_id: null,
+            actor_name: "Alex Rivera",
+            action_type: "CARD_CREATED",
+            description: `imported board "${boardTitle}" (${columns.length} lists, ${cards.length} cards)`,
+            created_at: nowIso,
+            is_automated: false,
+          },
+        ],
+        automation_rules: cloneDefaultAutomationRules(newBoardId),
+        created_at: nowIso,
+      })
+    );
+
+    return TrelloImportResultSchema.parse({
+      board: newBoard,
+      imported_lists_count: columns.length,
+      imported_cards_count: cards.length,
+      imported_checklists_count: totalChecklistsCount,
+    });
+  }
+
+  // Native Trello JSON Import Format (`lists`, `cards`, `checklists`, `labels`)
+  const rawLists = Array.isArray(rawPayload?.lists)
+    ? (rawPayload.lists as any[]).filter((l) => !l.closed)
+    : [];
+  const rawCards = Array.isArray(rawPayload?.cards)
+    ? (rawPayload.cards as any[]).filter((c) => !c.closed)
+    : [];
+  const rawChecklists = Array.isArray(rawPayload?.checklists)
+    ? (rawPayload.checklists as any[])
+    : [];
+
+  const listIdToColId = new Map<string, string>();
+  const colColors = ["#64748b", "#3b82f6", "#8b5cf6", "#10b981", "#f59e0b"];
+
+  let prevColPos: string | undefined = undefined;
+  const columns: Column[] = (
+    rawLists.length > 0
+      ? rawLists
+      : [
+          { id: "tl-1", name: "To Do" },
+          { id: "tl-2", name: "In Progress" },
+          { id: "tl-3", name: "Review" },
+          { id: "tl-4", name: "Done" },
+        ]
+  ).map((tList, idx) => {
+    const colId = createDeterministicUuid();
+    if (tList.id) listIdToColId.set(String(tList.id), colId);
+    const pos = generatePositionBetween(prevColPos, undefined);
+    prevColPos = pos;
+
+    return ColumnSchema.parse({
+      id: colId,
+      board_id: newBoardId,
+      title: String(tList.name || tList.title || `List ${idx + 1}`).slice(
+        0,
+        100
+      ),
+      position: pos,
+      wip_limit: idx === 1 ? 4 : null,
+      color: colColors[idx % colColors.length],
+      is_archived: false,
+    });
+  });
+
+  const boardLabels: Label[] = DEFAULT_BOARD_LABELS.map((l) => ({
+    ...l,
+    board_id: newBoardId,
+  }));
+
+  const resolveTrelloLabelIds = (trelloLabels: any[]): string[] => {
+    if (!Array.isArray(trelloLabels)) return [];
+    const matchedIds: string[] = [];
+    for (const tl of trelloLabels) {
+      const nameStr = String(tl?.name || "").toLowerCase();
+      const colorStr = String(tl?.color || "blue").toLowerCase();
+      let found = boardLabels.find(
+        (bl) =>
+          (nameStr && bl.name.toLowerCase() === nameStr) ||
+          bl.color.toLowerCase() === colorStr
+      );
+      if (!found) {
+        const validColor = LabelColorEnum.safeParse(colorStr);
+        found = {
+          id: createDeterministicUuid(),
+          board_id: newBoardId,
+          name: String(tl?.name || colorStr).slice(0, 100),
+          color: validColor.success ? validColor.data : "blue",
+        };
+        boardLabels.push(found);
+      }
+      if (!matchedIds.includes(found.id)) {
+        matchedIds.push(found.id);
+      }
+    }
+    return matchedIds;
+  };
+
+  // Track last card position per column for clean fractional indexing
+  const lastCardPosByCol = new Map<string, string>();
+  let importedChecklistsCount = 0;
+
+  const cards: Card[] = rawCards.map((tc, idx) => {
+    const targetColId =
+      listIdToColId.get(String(tc.idList || tc.column_id)) ?? columns[0].id;
+    const prevPos = lastCardPosByCol.get(targetColId);
+    const cardPos = generatePositionBetween(prevPos, undefined);
+    lastCardPosByCol.set(targetColId, cardPos);
+
+    // Match checklists from top-level `checklists` by `idCard` OR inline `tc.checklists`
+    const matchingRawChecklists = [
+      ...rawChecklists.filter((chk) => String(chk.idCard) === String(tc.id)),
+      ...(Array.isArray(tc.checklists) ? tc.checklists : []),
+    ];
+
+    let prevChkPos: string | undefined = undefined;
+    const cardChecklists: Checklist[] = matchingRawChecklists.map(
+      (chk: any, chkIdx: number) => {
+        importedChecklistsCount += 1;
+        const chkPos = generatePositionBetween(prevChkPos, undefined);
+        prevChkPos = chkPos;
+        const rawItems = Array.isArray(chk.checkItems)
+          ? chk.checkItems
+          : Array.isArray(chk.items)
+            ? chk.items
+            : [];
+        let prevItemPos: string | undefined = undefined;
+        return {
+          id: createDeterministicUuid(),
+          title: String(chk.name || chk.title || `Checklist ${chkIdx + 1}`).slice(
+            0,
+            150
+          ),
+          position: chkPos,
+          items: rawItems.map((item: any, itemIdx: number) => {
+            const itemPos = generatePositionBetween(prevItemPos, undefined);
+            prevItemPos = itemPos;
+            const isComplete =
+              item.state === "complete" || Boolean(item.is_completed);
+            return {
+              id: createDeterministicUuid(),
+              title: String(item.name || item.title || `Step ${itemIdx + 1}`).slice(
+                0,
+                280
+              ),
+              is_completed: isComplete,
+              position: itemPos,
+              due_date: null,
+              assignee_id: DEFAULT_BOARD_MEMBERS[idx % DEFAULT_BOARD_MEMBERS.length].id,
+            };
+          }),
+        };
+      }
+    );
+
+    const synced = syncSubtasksAndChecklists(undefined, cardChecklists);
+    const labelIds = resolveTrelloLabelIds(tc.labels);
+
+    const dueIso =
+      typeof tc.due === "string" && !isNaN(Date.parse(tc.due))
+        ? new Date(tc.due).toISOString()
+        : typeof tc.due_date === "string" && !isNaN(Date.parse(tc.due_date))
+          ? new Date(tc.due_date).toISOString()
+          : null;
+
+    // Infer priority & story points from labels or title
+    const hasRedLabel = tc.labels?.some((l: any) => l.color === "red");
+    const hasOrangeLabel = tc.labels?.some((l: any) => l.color === "orange");
+    const priority: Priority = tc.priority
+      ? PriorityEnumSafe(tc.priority)
+      : hasRedLabel
+        ? "URGENT"
+        : hasOrangeLabel
+          ? "HIGH"
+          : idx % 3 === 0
+            ? "HIGH"
+            : "MEDIUM";
+
+    const storyPoints =
+      typeof tc.story_points === "number"
+        ? tc.story_points
+        : Math.max(2, Math.min(8, (synced.subtasks.length || 1) * 2 + 1));
+
+    const assignedMember =
+      DEFAULT_BOARD_MEMBERS[idx % DEFAULT_BOARD_MEMBERS.length].id;
+
+    return CardSchema.parse({
+      id: createDeterministicUuid(),
+      board_id: newBoardId,
+      column_id: targetColId,
+      title: String(tc.name || tc.title || `Trello Card ${idx + 1}`).slice(
+        0,
+        255
+      ),
+      description: String(tc.desc || tc.description || ""),
+      position: cardPos,
+      priority,
+      story_points: storyPoints,
+      tags: ["trello-import"],
+      subtasks: synced.subtasks,
+      blocked_by_card_ids: [],
+      due_date: dueIso,
+      updated_at: nowIso,
+      cover: { type: "none", value: null, size: "normal" },
+      label_ids: labelIds,
+      member_ids: [assignedMember],
+      checklists: synced.checklists,
+      comments: [],
+      attachments: [],
+      start_date: null,
+      is_due_complete: Boolean(tc.dueComplete || tc.is_due_complete),
+      is_archived: false,
+      is_watching: false,
+    });
+  });
+
+  const boardTitle = (
+    request.board_title_override?.trim() ||
+    String(rawPayload?.name || rawPayload?.title || "Imported Trello Board")
+  ).slice(0, 150);
+
+  const newBoard: Board = sortBoardEntities(
+    BoardSchema.parse({
+      id: newBoardId,
+      workspace_id: workspaceId,
+      title: boardTitle,
+      description: String(
+        rawPayload?.desc ||
+          rawPayload?.description ||
+          "Imported directly from Trello JSON export with fractional indexing."
+      ),
+      is_starred: true,
+      background: {
+        type: "gradient",
+        value:
+          "linear-gradient(135deg, #0c4a6e 0%, #0369a1 50%, #0d9488 100%)",
+      },
+      columns,
+      cards,
+      labels: boardLabels,
+      members: DEFAULT_BOARD_MEMBERS.map((m) => ({ ...m })),
+      activities: [
+        {
+          id: createDeterministicUuid(),
+          board_id: newBoardId,
+          card_id: null,
+          actor_name: "Alex Rivera",
+          action_type: "CARD_CREATED",
+          description: `imported Trello board "${boardTitle}" (${columns.length} lists, ${cards.length} cards, ${importedChecklistsCount} checklists)`,
+          created_at: nowIso,
+          is_automated: false,
+        },
+      ],
+      automation_rules: cloneDefaultAutomationRules(newBoardId),
+      created_at: nowIso,
+    })
+  );
+
+  return TrelloImportResultSchema.parse({
+    board: newBoard,
+    imported_lists_count: columns.length,
+    imported_cards_count: cards.length,
+    imported_checklists_count: importedChecklistsCount,
+  });
+}
+
+function PriorityEnumSafe(val: unknown): Priority {
+  if (
+    val === "LOW" ||
+    val === "MEDIUM" ||
+    val === "HIGH" ||
+    val === "URGENT"
+  ) {
+    return val;
+  }
+  return "MEDIUM";
+}
+
+export const SAMPLE_TRELLO_EXPORT_JSON = {
+  name: "Trello Cloud Migration & Q4 Release",
+  desc: "Full Trello board export with Lists, Cards, Labels, Due Dates, and Checklists ready for 1-click Kinetix import.",
+  lists: [
+    { id: "trello-list-1", name: "Backlog & Discovery", closed: false },
+    { id: "trello-list-2", name: "In Progress (Sprint 14)", closed: false },
+    { id: "trello-list-3", name: "Code Review & QA", closed: false },
+    { id: "trello-list-4", name: "Done & Shipped", closed: false },
+  ],
+  cards: [
+    {
+      id: "trello-card-1",
+      name: "Migrate legacy Trello boards to Kinetix O(1) engine",
+      desc: "Support full JSON lists, cards, color labels, due dates, and multi-item checklists with lexicographical fractional positions.",
+      idList: "trello-list-2",
+      due: "2026-11-18T00:00:00.000Z",
+      dueComplete: false,
+      closed: false,
+      labels: [
+        { id: "tl-1", name: "Ship Ready", color: "green" },
+        { id: "tl-2", name: "Architecture", color: "blue" },
+      ],
+    },
+    {
+      id: "trello-card-2",
+      name: "Zero-dependency Interactive SVG Sprint Burndown Chart",
+      desc: "Render crisp dual-line Ideal vs Actual remaining story points with daily completed cards bars and hover tooltips.",
+      idList: "trello-list-2",
+      due: "2026-11-16T00:00:00.000Z",
+      dueComplete: false,
+      closed: false,
+      labels: [{ id: "tl-3", name: "AI Assisted", color: "purple" }],
+    },
+    {
+      id: "trello-card-3",
+      name: "Executive AI Sprint Health & Bottleneck Analyzer",
+      desc: "Compute real-time board velocity, WIP limit breaches, and overloaded member workloads for executive AI briefings.",
+      idList: "trello-list-3",
+      due: "2026-11-14T00:00:00.000Z",
+      dueComplete: false,
+      closed: false,
+      labels: [
+        { id: "tl-4", name: "AI Assisted", color: "purple" },
+        { id: "tl-5", name: "Needs Spec", color: "yellow" },
+      ],
+    },
+    {
+      id: "trello-card-4",
+      name: "Audit SSO & SAML 2.0 Enterprise Role Mapping",
+      desc: "Ensure workspace roles map cleanly from Okta and Azure AD groups.",
+      idList: "trello-list-1",
+      due: "2026-11-22T00:00:00.000Z",
+      dueComplete: false,
+      closed: false,
+      labels: [{ id: "tl-6", name: "Tech Debt", color: "orange" }],
+    },
+    {
+      id: "trello-card-5",
+      name: "Establish Polyglot Zod + Pydantic Contract Gate",
+      desc: "Completed foundational schema lock across Next.js, Fastify, and FastAPI services.",
+      idList: "trello-list-4",
+      due: "2026-11-08T00:00:00.000Z",
+      dueComplete: true,
+      closed: false,
+      labels: [{ id: "tl-1", name: "Ship Ready", color: "green" }],
+    },
+  ],
+  checklists: [
+    {
+      id: "trello-chk-1",
+      idCard: "trello-card-1",
+      name: "Trello Importer Verification",
+      checkItems: [
+        {
+          name: "Parse Trello lists and generate fractional positions (a0, a1, a2)",
+          state: "complete",
+        },
+        {
+          name: "Map cards, labels, and checklists to Kinetix Zod schema",
+          state: "complete",
+        },
+        {
+          name: "Auto-switch active workspace board upon import completion",
+          state: "incomplete",
+        },
+      ],
+    },
+    {
+      id: "trello-chk-2",
+      idCard: "trello-card-2",
+      name: "SVG Chart Craftsmanship",
+      checkItems: [
+        {
+          name: "Build responsive viewBox with dashed Ideal vs solid Actual curves",
+          state: "complete",
+        },
+        {
+          name: "Verify interactive hover tooltip in Light and Dark mode",
+          state: "incomplete",
+        },
+      ],
+    },
+    {
+      id: "trello-chk-3",
+      idCard: "trello-card-3",
+      name: "AI Report Deliverables",
+      checkItems: [
+        {
+          name: "Circular health score gauge (0-100) with status badge",
+          state: "complete",
+        },
+        {
+          name: "Detected bottlenecks and actionable recommendations checklist",
+          state: "complete",
+        },
+      ],
+    },
+  ],
+};
 
 export const mockApi = new MockApiService();

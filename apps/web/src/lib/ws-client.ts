@@ -44,6 +44,7 @@ export interface WSBoardHandlers {
   onAutomationRuleUpdated?: (rule: AutomationRule) => void;
   onAutomationRuleDeleted?: (data: { id: string }) => void;
   onBoardDeleted?: (data: { id: string }) => void;
+  onBoardImported?: (board: Board) => void;
 }
 
 export class BoardWebSocketClient {
@@ -227,6 +228,24 @@ export class BoardWebSocketClient {
                 typeof (data as { id: unknown }).id === "string"
               ) {
                 this.handlers?.onBoardDeleted?.(data as { id: string });
+              }
+              break;
+            }
+            case "BOARD_IMPORTED": {
+              const importedBoard = BoardSchema.safeParse(data);
+              if (importedBoard.success) {
+                this.handlers?.onBoardImported?.(importedBoard.data);
+              } else if (
+                data &&
+                typeof data === "object" &&
+                "board" in data
+              ) {
+                const nested = BoardSchema.safeParse(
+                  (data as { board: unknown }).board
+                );
+                if (nested.success) {
+                  this.handlers?.onBoardImported?.(nested.data);
+                }
               }
               break;
             }

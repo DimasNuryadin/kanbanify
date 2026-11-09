@@ -1,9 +1,15 @@
 import {
+  AIAnalyticsReport,
+  AIAnalyticsReportSchema,
   AIParseAutomationResponse,
   AIParseAutomationResponseSchema,
   AutomationRule,
   AutomationRuleSchema,
   Board,
+  BoardAnalytics,
+  BoardAnalyticsSchema,
+  BoardExportCsvResponse,
+  BoardExportCsvResponseSchema,
   BoardSchema,
   BoardSummary,
   BoardSummarySchema,
@@ -28,6 +34,9 @@ import {
   MoveCardRequest,
   MoveColumnRequest,
   StandardErrorSchema,
+  TrelloImportRequest,
+  TrelloImportResult,
+  TrelloImportResultSchema,
   UpdateAutomationRuleRequest,
   UpdateBoardRequest,
   UpdateCardRequest,
@@ -718,6 +727,139 @@ export const apiClient = {
         err instanceof Error ? err.message : "AI Automation builder unreachable"
       );
       return mockApi.parseAutomationWithAi(boardId, prompt);
+    }
+  },
+
+  async getBoardAnalytics(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<BoardAnalytics> {
+    if (opts.useMock) {
+      return mockApi.getBoardAnalytics(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/analytics`,
+        { method: "GET" },
+        (raw) => BoardAnalyticsSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Analytics API unreachable"
+      );
+      return mockApi.getBoardAnalytics(boardId);
+    }
+  },
+
+  async generateAIAnalyticsReport(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<AIAnalyticsReport> {
+    if (opts.useMock) {
+      return mockApi.generateAIAnalyticsReport(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/analytics/ai-report`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        (raw) => AIAnalyticsReportSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "AI Analytics API unreachable"
+      );
+      return mockApi.generateAIAnalyticsReport(boardId);
+    }
+  },
+
+  async importBoard(
+    payload: TrelloImportRequest,
+    opts: ApiClientOptions
+  ): Promise<TrelloImportResult> {
+    if (opts.useMock) {
+      return mockApi.importBoard(payload);
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/boards/import",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => TrelloImportResultSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Board Import API unreachable"
+      );
+      return mockApi.importBoard(payload);
+    }
+  },
+
+  async exportBoardCsv(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<BoardExportCsvResponse> {
+    if (opts.useMock) {
+      return mockApi.exportBoardCsv(boardId);
+    }
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const res = await fetch(
+          `${API_BASE_URL}/api/v1/boards/${boardId}/export?format=csv`,
+          {
+            method: "GET",
+            signal: controller.signal,
+          }
+        );
+        if (!res.ok) {
+          throw new Error(`API Error (${res.status}): ${res.statusText}`);
+        }
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("text/csv")) {
+          const text = await res.text();
+          return {
+            filename: `board-${boardId.slice(0, 8)}-export.csv`,
+            content_type: "text/csv",
+            csv_data: text,
+          };
+        }
+        const data = await res.json();
+        return BoardExportCsvResponseSchema.parse(data);
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Board Export API unreachable"
+      );
+      return mockApi.exportBoardCsv(boardId);
+    }
+  },
+
+  async exportBoardJson(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<Board> {
+    if (opts.useMock) {
+      return mockApi.exportBoardJson(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/export?format=json`,
+        { method: "GET" },
+        (raw) => BoardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Board Export API unreachable"
+      );
+      return mockApi.exportBoardJson(boardId);
     }
   },
 };

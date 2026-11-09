@@ -5,8 +5,10 @@ import {
   AlertTriangle,
   Archive,
   ArrowRight,
+  BarChart3,
   Calendar,
   Command,
+  Download,
   Filter,
   FolderPlus,
   Kanban,
@@ -73,6 +75,9 @@ export function CommandPalette({
   );
   const setAutomationModalOpen = useWorkspaceStore(
     (s) => s.setAutomationModalOpen
+  );
+  const setImportExportModalOpen = useWorkspaceStore(
+    (s) => s.setImportExportModalOpen
   );
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar);
 
@@ -148,6 +153,22 @@ export function CommandPalette({
         shortcut: "V C",
         icon: <Calendar className="h-4 w-4 text-zinc-500" />,
         action: run(() => setViewMode("calendar")),
+      },
+      {
+        id: "view-analytics",
+        group: "Workspace Views",
+        label: "📊 Switch to Team Productivity & Sprint Analytics View",
+        shortcut: "V A",
+        icon: <BarChart3 className="h-4 w-4 text-indigo-500" />,
+        action: run(() => setViewMode("analytics")),
+      },
+      {
+        id: "open-import-export",
+        group: "Actions",
+        label: "📥 Import Trello JSON / 📤 Export Board as CSV or JSON",
+        shortcut: "I E",
+        icon: <Download className="h-4 w-4 text-indigo-500" />,
+        action: run(() => setImportExportModalOpen(true)),
       },
       {
         id: "theme-light",
@@ -322,6 +343,7 @@ export function CommandPalette({
     setBoardMenuOpen,
     setCreateBoardModalOpen,
     setCreateWorkspaceModalOpen,
+    setImportExportModalOpen,
     setOnlyBlockedFilter,
     setOpen,
     setPriorityFilter,
