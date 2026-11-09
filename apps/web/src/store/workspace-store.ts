@@ -23,7 +23,7 @@ import { WSConnectionStatus } from "@/lib/ws-client";
 import { comparePositions } from "@/lib/fractional-index";
 import { ButlerExecutionToast } from "@/lib/automation-engine";
 
-export type ViewMode = "kanban" | "table" | "calendar";
+export type ViewMode = "kanban" | "table" | "calendar" | "analytics";
 export type ThemeMode = "light" | "dark" | "system";
 export type DueFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "COMPLETED" | "NO_DATE";
 
@@ -73,6 +73,7 @@ interface WorkspaceState {
   isTemplatesModalOpen: boolean;
   isCreateBoardModalOpen: boolean;
   isCreateWorkspaceModalOpen: boolean;
+  isImportExportModalOpen: boolean;
 
   // Butler Active Rules & Execution Toasts
   automationRules: AutomationRule[];
@@ -118,6 +119,7 @@ interface WorkspaceState {
   setTemplatesModalOpen: (open: boolean) => void;
   setCreateBoardModalOpen: (open: boolean) => void;
   setCreateWorkspaceModalOpen: (open: boolean) => void;
+  setImportExportModalOpen: (open: boolean) => void;
 
   // Butler Automation Rules
   setAutomationRules: (rules: AutomationRule[]) => void;
@@ -234,6 +236,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   isTemplatesModalOpen: false,
   isCreateBoardModalOpen: false,
   isCreateWorkspaceModalOpen: false,
+  isImportExportModalOpen: false,
 
   automationRules: [...(INITIAL_SEED_BOARD.automation_rules ?? [])],
   toasts: [],
@@ -363,6 +366,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set({ isCreateBoardModalOpen }),
   setCreateWorkspaceModalOpen: (isCreateWorkspaceModalOpen) =>
     set({ isCreateWorkspaceModalOpen }),
+  setImportExportModalOpen: (isImportExportModalOpen) =>
+    set({ isImportExportModalOpen }),
 
   setAutomationRules: (automationRules) => set({ automationRules }),
   upsertAutomationRule: (rule) =>

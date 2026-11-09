@@ -4,9 +4,11 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Archive,
+  BarChart3,
   Calendar,
   Check,
   Command,
+  Download,
   Filter,
   Kanban,
   Laptop,
@@ -95,6 +97,9 @@ export function WorkspaceHeader({
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar);
   const setAutomationModalOpen = useWorkspaceStore(
     (s) => s.setAutomationModalOpen
+  );
+  const setImportExportModalOpen = useWorkspaceStore(
+    (s) => s.setImportExportModalOpen
   );
   const automationRules = useWorkspaceStore((s) => s.automationRules);
   const activeRulesCount = automationRules.filter((r) => r.is_enabled).length;
@@ -400,6 +405,17 @@ export function WorkspaceHeader({
             </span>
           </button>
 
+          {/* Import / Export Button */}
+          <button
+            type="button"
+            onClick={() => setImportExportModalOpen(true)}
+            title="Import Trello JSON or Export Board as CSV / JSON"
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-500/20 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300 dark:hover:bg-indigo-400/20"
+          >
+            <Download className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+            <span className="hidden sm:inline">📥 Import / 📤 Export</span>
+          </button>
+
           {/* Board Menu / Background Picker Button */}
           <button
             type="button"
@@ -464,6 +480,18 @@ export function WorkspaceHeader({
             >
               <Calendar className="h-3.5 w-3.5" />
               <span>Calendar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("analytics")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-150 ${
+                viewMode === "analytics"
+                  ? "bg-white text-indigo-600 shadow-xs dark:bg-zinc-800 dark:text-indigo-300"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <BarChart3 className="h-3.5 w-3.5 text-indigo-500" />
+              <span>📊 Analytics</span>
             </button>
           </div>
 

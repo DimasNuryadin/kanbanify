@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   Compass,
+  Download,
   FolderPlus,
   LayoutGrid,
   LayoutTemplate,
@@ -46,6 +47,9 @@ export function WorkspaceSidebar({
   );
   const setAutomationModalOpen = useWorkspaceStore(
     (s) => s.setAutomationModalOpen
+  );
+  const setImportExportModalOpen = useWorkspaceStore(
+    (s) => s.setImportExportModalOpen
   );
 
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
@@ -199,6 +203,16 @@ export function WorkspaceSidebar({
               <span>Butler AI</span>
             </button>
           </div>
+
+          {/* Import / Export Button in Left Workspace Sidebar */}
+          <button
+            type="button"
+            onClick={() => setImportExportModalOpen(true)}
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-700 shadow-2xs transition-all hover:bg-indigo-500/20 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300 dark:hover:bg-indigo-400/20"
+          >
+            <Download className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+            <span>📥 Import / 📤 Export</span>
+          </button>
         </div>
 
         {/* Scrollable Navigation Body */}
