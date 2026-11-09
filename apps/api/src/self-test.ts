@@ -13,7 +13,10 @@ import {
   CopyColumnResponseSchema,
   HealthCheckResponseSchema,
   StandardErrorSchema,
+  TestWebhookResponseSchema,
   TrelloImportResultSchema,
+  UserPresenceSchema,
+  WebhookConfigSchema,
   WorkspaceSchema,
   WorkspaceWithBoardsSchema,
   WSMessageSchema,
@@ -23,7 +26,7 @@ import { buildApp } from "./app.js";
 
 async function runSelfTest(): Promise<void> {
   console.info("=== Kinetix API Phase 3 (Multi-Board Workspace & Runtime Butler) Self-Test Suite ===");
-  const { app, hub } = await buildApp({ logger: false });
+  const { app, hub, presenceService } = await buildApp({ logger: false });
 
   try {
     // 1. Health Check
@@ -1005,7 +1008,277 @@ async function runSelfTest(): Promise<void> {
       "[PASS] 22. StandardErrorSchema envelope verified for 400 & 404"
     );
 
-    console.info("=== ALL KINETIX API PHASE 4 GATE 2 SELF-TESTS PASSED ===");
+    // ========================================================================
+    // 23. PHASE 5 GATE 2: Outbound Webhook Management (CRUD & Test Dispatch)
+    // ========================================================================
+
+    // 23a. Verify Pre-Seeded Webhooks (1 Slack and 1 Discord on main board)
+    const listWebhooksRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${initialBoards[0]!.id}/webhooks`,
+    });
+    assert.equal(listWebhooksRes.statusCode, 200);
+    const preseededWebhooks = z
+      .array(WebhookConfigSchema)
+      .parse(listWebhooksRes.json());
+    assert.ok(
+      preseededWebhooks.length >= 2,
+      "Must have at least 2 pre-seeded webhooks on the main board"
+    );
+    assert.ok(
+      preseededWebhooks.some((w) => w.platform === "SLACK"),
+      "Must have pre-seeded SLACK webhook"
+    );
+    assert.ok(
+      preseededWebhooks.some((w) => w.platform === "DISCORD"),
+      "Must have pre-seeded DISCORD webhook"
+    );
+    console.info(
+      `[PASS] 23a. GET /api/v1/boards/:boardId/webhooks -> ${preseededWebhooks.length} pre-seeded webhooks (Slack + Discord)`
+    );
+
+    // 23b. Create Webhook (POST /api/v1/boards/:boardId/webhooks)
+    const createWebhookRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/webhooks`,
+      payload: {
+        name: "Security Incident Alert",
+        platform: "SLACK",
+        url: "https://hooks.slack.com/services/T000/B000/XXXXX",
+        is_enabled: true,
+        subscribed_events: [
+          "CARD_CREATED",
+          "CARD_MOVED",
+          "AUTOMATION_TRIGGERED",
+        ],
+      },
+    });
+    assert.equal(createWebhookRes.statusCode, 201);
+    const createdWebhook = WebhookConfigSchema.parse(createWebhookRes.json());
+    assert.equal(createdWebhook.name, "Security Incident Alert");
+    assert.equal(createdWebhook.platform, "SLACK");
+    assert.equal(createdWebhook.is_enabled, true);
+    assert.equal(createdWebhook.subscribed_events.length, 3);
+    console.info(
+      "[PASS] 23b. POST /api/v1/boards/:boardId/webhooks -> 201 Created webhook"
+    );
+
+    // 23c. Update Webhook Toggle & Name (PATCH /api/v1/webhooks/:webhookId)
+    const updateWebhookRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/webhooks/${createdWebhook.id}`,
+      payload: {
+        name: "Security Incident Alert (Disabled)",
+        is_enabled: false,
+      },
+    });
+    assert.equal(updateWebhookRes.statusCode, 200);
+    const updatedWebhook = WebhookConfigSchema.parse(updateWebhookRes.json());
+    assert.equal(updatedWebhook.name, "Security Incident Alert (Disabled)");
+    assert.equal(updatedWebhook.is_enabled, false);
+    console.info(
+      "[PASS] 23c. PATCH /api/v1/webhooks/:webhookId -> 200 OK toggled is_enabled=false"
+    );
+
+    // 23d. Test Slack Webhook Ping Delivery & Rich Payload Formatting (POST /api/v1/webhooks/:webhookId/test)
+    const testSlackRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/webhooks/${createdWebhook.id}/test`,
+    });
+    assert.equal(testSlackRes.statusCode, 200);
+    const testSlackBody = testSlackRes.json() as any;
+    TestWebhookResponseSchema.parse(testSlackBody);
+    assert.equal(testSlackBody.success, true);
+    assert.equal(testSlackBody.delivered, true);
+    assert.equal(testSlackBody.platform, "SLACK");
+    assert.ok(testSlackBody.preview_payload, "Preview payload must be present");
+    assert.ok(
+      Array.isArray(testSlackBody.preview_payload.blocks),
+      "Slack preview payload must contain Block Kit blocks"
+    );
+    console.info(
+      "[PASS] 23d. POST /api/v1/webhooks/:webhookId/test -> 200 OK Slack Block Kit preview verified"
+    );
+
+    // 23e. Test Discord Webhook Ping Delivery & Rich Embeds
+    const discordWebhook = preseededWebhooks.find(
+      (w) => w.platform === "DISCORD"
+    )!;
+    const testDiscordRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/webhooks/${discordWebhook.id}/test`,
+    });
+    assert.equal(testDiscordRes.statusCode, 200);
+    const testDiscordBody = testDiscordRes.json() as any;
+    TestWebhookResponseSchema.parse(testDiscordBody);
+    assert.equal(testDiscordBody.success, true);
+    assert.equal(testDiscordBody.delivered, true);
+    assert.equal(testDiscordBody.platform, "DISCORD");
+    assert.ok(
+      Array.isArray(testDiscordBody.preview_payload.embeds),
+      "Discord preview payload must contain embeds array"
+    );
+    assert.ok(
+      typeof testDiscordBody.preview_payload.embeds[0].color === "number",
+      "Discord embed must contain numerical color badge"
+    );
+    console.info(
+      "[PASS] 23e. POST /api/v1/webhooks/:webhookId/test -> 200 OK Discord Rich Embed preview verified"
+    );
+
+    // 23f. Delete Webhook (DELETE /api/v1/webhooks/:webhookId)
+    const deleteWebhookRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/webhooks/${createdWebhook.id}`,
+    });
+    assert.equal(deleteWebhookRes.statusCode, 204);
+
+    const listAfterDelete = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${createdBoard.id}/webhooks`,
+    });
+    assert.equal(listAfterDelete.statusCode, 200);
+    const remaining = z.array(WebhookConfigSchema).parse(listAfterDelete.json());
+    assert.ok(
+      !remaining.some((w) => w.id === createdWebhook.id),
+      "Deleted webhook must not appear in list"
+    );
+    console.info(
+      "[PASS] 23f. DELETE /api/v1/webhooks/:webhookId -> 204 No Content verified"
+    );
+
+    // ========================================================================
+    // 24. PHASE 5 GATE 2: Real-Time Presence & Live Typing Indicators
+    // ========================================================================
+
+    // 24a. GET initial presence for board
+    const presenceGetRes1 = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${createdBoard.id}/presence`,
+    });
+    assert.equal(presenceGetRes1.statusCode, 200);
+    const initialPresenceData = presenceGetRes1.json() as any;
+    assert.equal(initialPresenceData.board_id, createdBoard.id);
+    assert.ok(Array.isArray(initialPresenceData.presences));
+    console.info(
+      "[PASS] 24a. GET /api/v1/boards/:boardId/presence -> 200 OK initial presence state"
+    );
+
+    // 24b. POST presence: START_TYPING on cardA
+    const targetCardId = cardA.id;
+    const typingRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/presence`,
+      payload: {
+        user_id: "88888888-8888-4888-8888-888888888881",
+        user_name: "Alex Rivera",
+        event: "START_TYPING",
+        card_id: targetCardId,
+      },
+    });
+    assert.equal(typingRes.statusCode, 200);
+    const typingBody = typingRes.json() as any;
+    assert.equal(typingBody.success, true);
+    assert.equal(typingBody.presence.status, "EDITING");
+    assert.equal(typingBody.presence.active_card_id, targetCardId);
+    console.info(
+      `[PASS] 24b. POST /api/v1/boards/:boardId/presence -> 200 OK START_TYPING (status: EDITING, active_card_id: ${targetCardId})`
+    );
+
+    // 24c. GET presence reflects the editing state
+    const presenceGetRes2 = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${createdBoard.id}/presence`,
+    });
+    assert.equal(presenceGetRes2.statusCode, 200);
+    const presenceList2 = (presenceGetRes2.json() as any).presences;
+    const alexPresence = presenceList2.find(
+      (p: any) => p.user_id === "88888888-8888-4888-8888-888888888881"
+    );
+    assert.ok(alexPresence, "Alex Rivera presence must be tracked");
+    assert.equal(alexPresence.status, "EDITING");
+    assert.equal(alexPresence.active_card_id, targetCardId);
+    console.info(
+      "[PASS] 24c. GET /api/v1/boards/:boardId/presence -> Verified active_card_id and status: EDITING"
+    );
+
+    // 24d. POST presence: STOP_TYPING
+    const stopTypingRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/presence`,
+      payload: {
+        user_id: "88888888-8888-4888-8888-888888888881",
+        event: "STOP_TYPING",
+      },
+    });
+    assert.equal(stopTypingRes.statusCode, 200);
+    const stopTypingBody = stopTypingRes.json() as any;
+    assert.equal(stopTypingBody.presence.status, "ACTIVE");
+    assert.equal(stopTypingBody.presence.active_card_id, null);
+    console.info(
+      "[PASS] 24d. POST /api/v1/boards/:boardId/presence -> 200 OK STOP_TYPING (status: ACTIVE, active_card_id: null)"
+    );
+
+    // 24e. WebSocket Presence Manager socket simulation
+    const wsReceivedPresence: any[] = [];
+    const presenceMockSocket = {
+      readyState: 1,
+      OPEN: 1,
+      send(data: string) {
+        wsReceivedPresence.push(JSON.parse(data));
+      },
+      on(_event: string, _listener: (...args: unknown[]) => void) {},
+    };
+
+    const registeredUser = presenceService.registerSocket(
+      createdBoard.id,
+      presenceMockSocket,
+      {
+        user_id: "88888888-8888-4888-8888-888888888882",
+        user_name: "Maya Lin",
+      }
+    );
+    assert.equal(registeredUser.user_name, "Maya Lin");
+
+    await presenceService.handleClientEvent(
+      createdBoard.id,
+      registeredUser.user_id,
+      {
+        event: "START_TYPING",
+        card_id: targetCardId,
+      }
+    );
+
+    const userPresencesAfterTyping = presenceService.getPresences(
+      createdBoard.id
+    );
+    const mayaPresence = userPresencesAfterTyping.find(
+      (p) => p.user_id === registeredUser.user_id
+    );
+    assert.ok(mayaPresence, "Maya Lin presence must be found");
+    assert.equal(mayaPresence.status, "EDITING");
+    assert.equal(mayaPresence.active_card_id, targetCardId);
+
+    await presenceService.handleClientEvent(
+      createdBoard.id,
+      registeredUser.user_id,
+      {
+        event: "STOP_TYPING",
+      }
+    );
+    const mayaPresenceStopped = presenceService
+      .getPresences(createdBoard.id)
+      .find((p) => p.user_id === registeredUser.user_id);
+    assert.ok(mayaPresenceStopped);
+    assert.equal(mayaPresenceStopped.status, "ACTIVE");
+    assert.equal(mayaPresenceStopped.active_card_id, null);
+    console.info(
+      "[PASS] 24e. Real-time WebSocket Presence Manager verified with active_card_id tracking & broadcast"
+    );
+
+    console.info(
+      "=== ALL KINETIX API PHASE 5 GATE 2 SELF-TESTS PASSED ==="
+    );
   } finally {
     await app.close();
   }

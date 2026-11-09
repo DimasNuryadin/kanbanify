@@ -39,6 +39,9 @@ import {
   type UpdateBoardRequest,
   type UpdateCardRequest,
   type UpdateColumnRequest,
+  type CreateWebhookRequest,
+  type UpdateWebhookRequest,
+  type WebhookConfig,
   type Workspace,
   type WorkspaceWithBoards,
 } from "@kinetix/contracts";
@@ -438,6 +441,37 @@ function createPreseededMemoryStore(): InMemoryStore {
     },
   ];
 
+  const seedWebhooks: WebhookConfig[] = [
+    {
+      id: "55555555-5555-4555-8555-555555555551",
+      board_id: SEED_BOARD_ID,
+      name: "Engineering Slack Alerts",
+      platform: "SLACK",
+      url: "https://example.com/webhooks/slack-incoming",
+      is_enabled: true,
+      subscribed_events: [
+        "CARD_CREATED",
+        "CARD_MOVED",
+        "AUTOMATION_TRIGGERED",
+      ],
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+    {
+      id: "55555555-5555-4555-8555-555555555552",
+      board_id: SEED_BOARD_ID,
+      name: "Dev Discord Feed",
+      platform: "DISCORD",
+      url: "https://example.com/webhooks/discord-incoming",
+      is_enabled: true,
+      subscribed_events: [
+        "CARD_MOVED",
+        "COMMENT_ADDED",
+        "CARD_ARCHIVED",
+      ],
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+  ];
+
   // Board 1: Primary Platform Launch Board
   boards.set(SEED_BOARD_ID, {
     id: SEED_BOARD_ID,
@@ -451,6 +485,7 @@ function createPreseededMemoryStore(): InMemoryStore {
     members: buildDefaultBoardMembers(),
     activities: seedActivities,
     automation_rules: primaryButlerRules,
+    webhooks: seedWebhooks,
     created_at: createdAt,
   });
 
@@ -1079,6 +1114,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       },
     ],
     automation_rules: [],
+    webhooks: [],
     created_at: createdAt,
   });
 
@@ -1196,6 +1232,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       },
     ],
     automation_rules: [],
+    webhooks: [],
     created_at: createdAt,
   });
 
@@ -1390,6 +1427,7 @@ export class StorageRepository {
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS members JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS activities JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS automation_rules JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS webhooks JSONB NOT NULL DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS columns (
         id UUID PRIMARY KEY,
@@ -1493,6 +1531,7 @@ export class StorageRepository {
           members: b.members,
           activities: b.activities,
           automation_rules: b.automation_rules,
+          webhooks: b.webhooks,
           created_at: b.created_at,
         })
         .onConflictDoNothing();
@@ -1656,6 +1695,9 @@ export class StorageRepository {
     const automationRules: AutomationRule[] = Array.isArray(row.automation_rules)
       ? row.automation_rules
       : [];
+    const webhooks: WebhookConfig[] = Array.isArray(row.webhooks)
+      ? row.webhooks
+      : [];
 
     return {
       id: row.id,
@@ -1668,6 +1710,7 @@ export class StorageRepository {
       members,
       activities,
       automation_rules: automationRules,
+      webhooks,
       columns: cols,
       cards: boardCards,
       created_at: normalizeIsoTimestamp(row.created_at),
@@ -2030,6 +2073,7 @@ export class StorageRepository {
       members,
       activities,
       automation_rules: automationRules,
+      webhooks: [],
       created_at: createdAt,
     });
     for (const col of defaultColumns) {
@@ -2052,6 +2096,7 @@ export class StorageRepository {
           members,
           activities,
           automation_rules: automationRules,
+          webhooks: [],
           created_at: createdAt,
         });
         await this.db.insert(schema.columns).values(
@@ -2114,6 +2159,7 @@ export class StorageRepository {
       members,
       activities,
       automation_rules: automationRules,
+      webhooks: [],
       columns: defaultColumns,
       cards: sampleCards,
       created_at: createdAt,
@@ -2132,6 +2178,7 @@ export class StorageRepository {
       members: board.members,
       activities: board.activities,
       automation_rules: board.automation_rules,
+      webhooks: board.webhooks ?? [],
       created_at: board.created_at,
     });
 
@@ -2156,6 +2203,7 @@ export class StorageRepository {
           members: board.members,
           activities: board.activities,
           automation_rules: board.automation_rules,
+          webhooks: board.webhooks ?? [],
           created_at: board.created_at,
         });
 
@@ -2307,6 +2355,7 @@ export class StorageRepository {
       members: updatedMembers,
       activities: existing.activities,
       automation_rules: existing.automation_rules,
+      webhooks: existing.webhooks,
       created_at: existing.created_at,
     });
 
@@ -3556,5 +3605,198 @@ export class StorageRepository {
       card: updatedCard,
       deleted: true,
     };
+  }
+
+  // ==========================================================================
+  // PHASE 5: OUTBOUND WEBHOOKS REPOSITORY METHODS
+  // ==========================================================================
+
+  public async listWebhooks(boardId: string): Promise<WebhookConfig[]> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+    return board.webhooks ?? [];
+  }
+
+  public async getWebhookById(
+    webhookId: string
+  ): Promise<{ webhook: WebhookConfig; boardId: string } | null> {
+    const allBoards = await this.listBoards();
+    for (const b of allBoards) {
+      const wh = (b.webhooks ?? []).find((w) => w.id === webhookId);
+      if (wh) {
+        return { webhook: wh, boardId: b.id };
+      }
+    }
+    return null;
+  }
+
+  public async createWebhook(
+    boardId: string,
+    input: CreateWebhookRequest
+  ): Promise<WebhookConfig> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const webhook: WebhookConfig = {
+      id: randomUUID(),
+      board_id: boardId,
+      name: input.name,
+      platform: input.platform ?? "CUSTOM",
+      url: input.url,
+      is_enabled: input.is_enabled ?? true,
+      subscribed_events: input.subscribed_events,
+      created_at: new Date().toISOString(),
+    };
+
+    const nextWebhooks = [...(board.webhooks ?? []), webhook];
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.webhooks = nextWebhooks;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ webhooks: nextWebhooks })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in createWebhook, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return webhook;
+  }
+
+  public async updateWebhook(
+    webhookId: string,
+    input: UpdateWebhookRequest
+  ): Promise<{ webhook: WebhookConfig; boardId: string }> {
+    const found = await this.getWebhookById(webhookId);
+    if (!found) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Webhook '${webhookId}' not found`,
+        { webhook_id: webhookId }
+      );
+    }
+
+    const { webhook, boardId } = found;
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const updatedWebhook: WebhookConfig = {
+      ...webhook,
+      name: input.name ?? webhook.name,
+      platform: input.platform ?? webhook.platform,
+      url: input.url ?? webhook.url,
+      is_enabled:
+        input.is_enabled !== undefined ? input.is_enabled : webhook.is_enabled,
+      subscribed_events: input.subscribed_events ?? webhook.subscribed_events,
+    };
+
+    const nextWebhooks = (board.webhooks ?? []).map((w) =>
+      w.id === webhookId ? updatedWebhook : w
+    );
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.webhooks = nextWebhooks;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ webhooks: nextWebhooks })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in updateWebhook, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { webhook: updatedWebhook, boardId };
+  }
+
+  public async deleteWebhook(
+    webhookId: string
+  ): Promise<{ deleted: boolean; boardId: string }> {
+    const found = await this.getWebhookById(webhookId);
+    if (!found) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Webhook '${webhookId}' not found`,
+        { webhook_id: webhookId }
+      );
+    }
+
+    const { boardId } = found;
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const nextWebhooks = (board.webhooks ?? []).filter(
+      (w) => w.id !== webhookId
+    );
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.webhooks = nextWebhooks;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ webhooks: nextWebhooks })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        console.warn(
+          "[StorageRepository] PostgreSQL failed in deleteWebhook, falling back to memory:",
+          err
+        );
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { deleted: true, boardId };
   }
 }

@@ -128,13 +128,16 @@ export class BoardRealtimeHub {
     data: TData;
     actor_id?: string;
   }): Promise<WSMessage<TData>> {
-    const message: WSMessage<TData> = {
+    const message = {
       event: params.event,
       board_id: params.board_id,
       data: params.data,
       actor_id: params.actor_id ?? "system",
       timestamp: new Date().toISOString(),
-    };
+      ...(typeof params.data === "object" && params.data !== null
+        ? (params.data as Record<string, unknown>)
+        : {}),
+    } as WSMessage<TData>;
 
     WSMessageSchema.parse(message);
 
