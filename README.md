@@ -2,7 +2,7 @@
 
 **High-Performance Real-Time Kanban & AI Workspace**
 
-Kinetix is a polyglot monorepo combining an optimistic real-time Multi-Board Kanban, Calendar & Table workspace (`apps/web`), a low-latency Fastify REST + WebSocket coordination server with lexicographical O(1) fractional indexing and a Trello Butler Runtime Automation Engine (`apps/api`), and a stateless FastAPI AI task-decomposition & Natural Language Butler Rule Compiler microservice (`services/ai-engine`), unified by strict 1:1 physical data contracts (`packages/contracts`).
+Kinetix is a polyglot monorepo combining an optimistic real-time Multi-Board Kanban, Calendar, Table & Sprint Analytics workspace (`apps/web`), a low-latency Fastify REST + WebSocket coordination server with lexicographical O(1) fractional indexing, a Trello Butler Runtime Automation Engine, real-time Sprint Analytics Aggregator, and Native Trello JSON Importer / CSV Exporter (`apps/api`), and a stateless FastAPI AI task-decomposition, Natural Language Butler Rule Compiler & Executive Sprint Health Analyzer microservice (`services/ai-engine`), unified by strict 1:1 physical data contracts (`packages/contracts`).
 
 ---
 
@@ -11,13 +11,14 @@ Kinetix is a polyglot monorepo combining an optimistic real-time Multi-Board Kan
 ```mermaid
 flowchart LR
     subgraph Client ["apps/web (Next.js 16 — Port 3000)"]
-        UI["React 19 + Tailwind v4\nMulti-Board Sidebar + Butler Modal + Cmd+K"]
+        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics + Import/Export + Cmd+K"]
         Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer & Butler Engine"]
     end
 
     subgraph CoreAPI ["apps/api (Fastify v5 — Port 8000)"]
         REST["REST API (/api/v1/*)\nZod Contract Validation"]
         Butler["Butler Automation Engine\nRuntime Trigger & Action Executor"]
+        Analytics["Analytics & Data Portability\nBurndown + Trello JSON Import + CSV/JSON Export"]
         WS["WebSocket Hub (/ws/boards/:boardId)\nReal-Time Broadcast"]
         Repo["Drizzle ORM + In-Memory Fallback"]
     end
@@ -25,6 +26,7 @@ flowchart LR
     subgraph AIEngine ["services/ai-engine (FastAPI — Port 8001)"]
         Decomposer["POST /internal/v1/decompose-task\nPOST /internal/v1/enrich-card"]
         RuleParser["POST /internal/v1/parse-automation\nBilingual ID/EN Butler Rule Compiler"]
+        BoardAnalyzer["POST /internal/v1/analyze-board\nAI Executive Sprint Health & Bottleneck Analyzer"]
     end
 
     subgraph Infra ["Infrastructure (Docker Compose)"]
@@ -36,22 +38,25 @@ flowchart LR
     Store -- "REST JSON (HTTP :8000)" --> REST
     Store <-- "Live Events (WS :8000)" --> WS
     REST --> Butler
+    REST --> Analytics
     Butler --> Repo
+    Analytics --> Repo
     REST --> Repo
     Repo <--> PG
     WS <--> RD
     REST -- "X-Internal-Token (:8001)" --> Decomposer
     REST -- "X-Internal-Token (:8001)" --> RuleParser
+    REST -- "X-Internal-Token (:8001)" --> BoardAnalyzer
 ```
 
 ### Tech Stack Summary
 
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
-| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
-| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
-| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition, Trello Smart Card Enrichment, and Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler with deterministic zero-config fallback |
-| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, Workspace, Template, Butler Automation, and Internal AI schemas |
+| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
+| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator (`GET /api/v1/boards/:boardId/analytics`), Native Trello JSON Importer (`POST /api/v1/boards/import`), CSV/JSON Exporter (`GET /api/v1/boards/:boardId/export`), WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
+| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, and AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`) with deterministic zero-config fallback |
+| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, and Internal AI schemas |
 | **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 
 ---
@@ -134,7 +139,7 @@ Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Automated E2E Smoke Test
 
-Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 + Phase 2 + Phase 3 lifecycle:
+Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 4 lifecycle:
 1. **Health Checks:** Verifies `GET /health` on both `http://localhost:8001/health` and `http://localhost:8000/health` return `200 OK`.
 2. **Workspaces & Board Templates Verification (Phase 3):**
    - Calls `GET /api/v1/workspaces` and asserts at least 1 workspace and multiple seeded boards exist.
@@ -148,7 +153,10 @@ Kinetix includes a cross-platform automated End-to-End smoke test (`scripts/e2e_
 8. **Card Copy & Archive:** Copies the card via `POST /api/v1/cards/:cardId/copy` and archives the copy via `PATCH /api/v1/cards/:copiedCardId` (`{ is_archived: true }`).
 9. **AI Natural Language to Butler Rule Generation (`API -> AI Engine`):** Calls `POST /api/v1/boards/:boardId/automations/ai-generate` ($\rightarrow$ `POST /internal/v1/parse-automation`) with `"When a card is moved to Done, mark due date complete and assign a member"` and asserts a `WHEN_CARD_MOVED_TO_COLUMN` trigger targeting `"Done"` with `MARK_DUE_DATE_COMPLETE` and `ASSIGN_MEMBER` actions.
 10. **Runtime Butler Automation Execution:** Creates a card in `"Backlog"` (`is_due_complete: false`, `member_ids: []`), moves it to `"Done"` via `PATCH /api/v1/cards/:cardId/move`, and verifies that Butler automatically sets `card.is_due_complete === true`, assigns a member (`card.member_ids.length > 0`), increments the rule's `execution_count >= 1`, and appends an `"AUTOMATION_TRIGGERED"` entry to `board.activities`.
-11. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId`.
+11. **Real-Time Board Analytics Verification (Phase 4):** Calls `GET /api/v1/boards/:boardId/analytics` and asserts `200 OK` with valid `total_cards`, `completion_rate`, 7-day `burndown_series`, `cards_by_column`, and `workload_by_member`.
+12. **AI Executive Sprint Insights (`API -> AI Engine`, Phase 4):** Calls `POST /api/v1/boards/:boardId/analytics/ai-report` ($\rightarrow$ `POST /internal/v1/analyze-board` with `X-Internal-Token`) and asserts `200 OK` returning `health_score` (`0-100`), `health_status`, `executive_summary`, `bottlenecks`, and `actionable_recommendations`.
+13. **Native Trello JSON Import & CSV/JSON Export (Phase 4):** Calls `POST /api/v1/boards/import` with a mock raw Trello JSON payload (`name`, `lists`, `cards`, `checklists`) and asserts successful board creation (`imported_lists_count > 0`) with valid O(1) fractional index positions (`"a0"`, `"a1"`, `"a2"`), then calls `GET /api/v1/boards/:boardId/export?format=csv` (and `format=json`) and asserts `200 OK` with `content_type: "text/csv"` and valid CSV data rows.
+14. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId`.
 
 Run the E2E smoke test with a single command:
 
@@ -157,6 +165,22 @@ node scripts/e2e_test.mjs
 # or via root package.json:
 npm run test:e2e
 ```
+
+---
+
+## Phase 4 Team Productivity Analytics, AI Sprint Health Insights & Trello Data Portability
+
+- **Real-Time Team Productivity Analytics Dashboard (`Analytics` View & `GET /api/v1/boards/:boardId/analytics`):**
+  - **KPI Summary Cards:** Track **Completion Rate (%)**, **Story Points Velocity** (`completed_story_points / total_story_points`), **Overdue & Blocked Risk Radar** (`overdue_cards_count` & `blocked_cards_count`), and **Butler Automation Velocity** (`automation_executions_count` across active rules).
+  - **7-Day Sprint Burndown & Story Points Velocity SVG Chart:** Interactive SVG area & line chart plotting `ideal_remaining_points` vs. `actual_remaining_points` and `completed_cards_cumulative` across the 7-day sprint window (`burndown_series`).
+  - **Column Distribution & WIP Bottleneck Alerts:** Visualizes card & story-point distribution across columns (`cards_by_column`), highlighting any column where `card_count > wip_limit` with a pulsing `WIP EXCEEDED` alert badge.
+  - **Team Member Workload & Priority Breakdown:** Stacked completion vs. open workload bars per member (`workload_by_member`), overdue task badges, and priority distribution (`URGENT`, `HIGH`, `MEDIUM`, `LOW`).
+- **✨ AI Executive Sprint Health Report (`POST /api/v1/boards/:boardId/analytics/ai-report` $\rightarrow$ `POST /internal/v1/analyze-board`):**
+  - Click **✨ Generate AI Sprint Insights** inside the Analytics view (or via `Cmd+K`) to proxy live board analytics to `services/ai-engine` (`X-Internal-Token` authenticated).
+  - Synthesizes a **Sprint Health Score (`0–100`)** with radial gauge and status badge (`EXCELLENT`, `ON_TRACK`, `AT_RISK`, `CRITICAL`), an **Executive Summary**, **Detected Bottlenecks** (WIP breaches, blocked/overdue cards, member overload), and **Actionable Recommendations**.
+- **Native Trello JSON Import & 1-Click CSV/JSON Export (`Import / Export` Modal):**
+  - **Native Trello JSON & Kinetix Backup Importer (`POST /api/v1/boards/import`):** Drag-and-drop any raw Trello JSON export (`lists`, `cards`, `checklists`, `labels`, `members`) or Kinetix JSON backup, or load the built-in **Sample Trello Export** in 1 click. Automatically converts open Trello lists into Kinetix columns with valid O(1) lexicographical fractional indices (`"a0"`, `"a1"`, `"a2"`, ...), maps cards, labels, members, due dates, and multi-item checklists, and broadcasts `BOARD_IMPORTED` over WebSocket.
+  - **1-Click CSV & JSON Board Exporter (`GET /api/v1/boards/:boardId/export?format=csv|json`):** Export the active board as a spreadsheet-ready `.csv` file (with RFC 4180 escaping across card IDs, columns, priorities, story points, labels, assignees, checklist progress, and due dates) or a full `.json` backup snapshot.
 
 ---
 
