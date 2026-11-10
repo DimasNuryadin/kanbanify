@@ -52,6 +52,7 @@ export function BoardTemplatesModal({
         is_starred: false,
         background: tmpl.background,
         template_id: tmpl.id,
+        visibility: "WORKSPACE",
       });
       setOpen(false);
     } finally {

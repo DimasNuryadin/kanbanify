@@ -627,6 +627,9 @@ function KanbanCardContent({
 }
 
 function SortableKanbanCard(props: KanbanCardItemProps) {
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const isViewer = activeRole === "VIEWER";
+
   const {
     attributes,
     listeners,
@@ -636,6 +639,7 @@ function SortableKanbanCard(props: KanbanCardItemProps) {
     isDragging,
   } = useSortable({
     id: props.card.id,
+    disabled: isViewer,
     data: {
       type: "Card",
       card: props.card,
@@ -697,6 +701,9 @@ function SortableKanbanColumn({
   onUpdateColumn,
   onCopyColumn,
 }: SortableKanbanColumnProps) {
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const isViewer = activeRole === "VIEWER";
+
   const {
     attributes,
     listeners,
@@ -706,6 +713,7 @@ function SortableKanbanColumn({
     isDragging,
   } = useSortable({
     id: column.id,
+    disabled: isViewer,
     data: {
       type: "Column",
       column,
@@ -827,17 +835,19 @@ function SortableKanbanColumn({
       {/* List Header */}
       <div className="mb-2.5 flex items-center justify-between gap-2 px-1">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {/* Column Drag Handle */}
-          <button
-            type="button"
-            title="Drag list horizontally"
-            {...listeners}
-            className="cursor-grab rounded p-0.5 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700 active:cursor-grabbing dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          >
-            <GripVertical className="h-3.5 w-3.5" />
-          </button>
+          {/* Column Drag Handle (Disabled for Viewer) */}
+          {!isViewer && (
+            <button
+              type="button"
+              title="Drag list horizontally"
+              {...listeners}
+              className="cursor-grab rounded p-0.5 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700 active:cursor-grabbing dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <GripVertical className="h-3.5 w-3.5" />
+            </button>
+          )}
 
-          {isEditingTitle ? (
+          {isEditingTitle && !isViewer ? (
             <input
               type="text"
               autoFocus
@@ -853,7 +863,7 @@ function SortableKanbanColumn({
               }}
               className="w-full rounded-md border border-indigo-500 bg-white px-2 py-0.5 text-xs font-bold text-zinc-900 focus:outline-none dark:bg-zinc-950 dark:text-zinc-100"
             />
-          ) : (
+          ) : !isViewer ? (
             <button
               type="button"
               onClick={() => setIsEditingTitle(true)}
@@ -862,6 +872,10 @@ function SortableKanbanColumn({
             >
               {column.title}
             </button>
+          ) : (
+            <span className="truncate px-1 py-0.5 text-left text-xs font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+              {column.title}
+            </span>
           )}
 
           <span
@@ -876,18 +890,19 @@ function SortableKanbanColumn({
           </span>
         </div>
 
-        {/* List Header Actions Menu (...) */}
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            title="List actions"
-            className="rounded-lg p-1 text-zinc-500 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
+        {/* List Header Actions Menu (...) - Disabled for Viewers */}
+        {!isViewer && (
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              title="List actions"
+              className="rounded-lg p-1 text-zinc-500 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
 
-          {isMenuOpen && (
+            {isMenuOpen && (
             <div className="absolute top-full right-0 z-40 mt-1 w-56 rounded-xl border border-zinc-200/90 bg-white p-2 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
               <div className="mb-1.5 flex items-center justify-between border-b border-zinc-100 px-2 pb-1.5 text-[11px] font-semibold text-zinc-500 dark:border-zinc-800">
                 <span>List Actions</span>
@@ -982,6 +997,7 @@ function SortableKanbanColumn({
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Scrollable Cards List */}
@@ -1002,67 +1018,69 @@ function SortableKanbanColumn({
         </div>
       </SortableContext>
 
-      {/* Inline Bottom Card Composer ("+ Add a card") */}
-      <div className="mt-2 pt-1">
-        {isComposerOpen ? (
-          <div className="rounded-xl border border-zinc-200/90 bg-white p-2 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
-            <textarea
-              ref={composerInputRef}
-              rows={2}
-              autoFocus
-              value={composerTitle}
-              onChange={(e) => setComposerTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleInlineCreateCard();
-                } else if (e.key === "Escape") {
-                  setIsComposerOpen(false);
-                  setComposerTitle("");
-                }
-              }}
-              placeholder="Enter a title for this card..."
-              className="w-full resize-none bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleInlineCreateCard}
-                  className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500"
-                >
-                  Add card
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
+      {/* Inline Bottom Card Composer ("+ Add a card") - Disabled for Viewers */}
+      {!isViewer && (
+        <div className="mt-2 pt-1">
+          {isComposerOpen ? (
+            <div className="rounded-xl border border-zinc-200/90 bg-white p-2 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+              <textarea
+                ref={composerInputRef}
+                rows={2}
+                autoFocus
+                value={composerTitle}
+                onChange={(e) => setComposerTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleInlineCreateCard();
+                  } else if (e.key === "Escape") {
                     setIsComposerOpen(false);
                     setComposerTitle("");
-                  }}
-                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                  }
+                }}
+                placeholder="Enter a title for this card..."
+                className="w-full resize-none bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
+              />
+              <div className="mt-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleInlineCreateCard}
+                    className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500"
+                  >
+                    Add card
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsComposerOpen(false);
+                      setComposerTitle("");
+                    }}
+                    className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <span className="font-mono text-[10px] text-zinc-400">
+                  ↵ to add
+                </span>
               </div>
-              <span className="font-mono text-[10px] text-zinc-400">
-                ↵ to add
-              </span>
             </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setIsComposerOpen(true);
-              setTimeout(() => composerInputRef.current?.focus(), 20);
-            }}
-            className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200/75 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/80 dark:hover:text-zinc-100"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add a card</span>
-          </button>
-        )}
-      </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setIsComposerOpen(true);
+                setTimeout(() => composerInputRef.current?.focus(), 20);
+              }}
+              className="flex w-full items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-left text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200/75 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/80 dark:hover:text-zinc-100"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add a card</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1106,6 +1124,8 @@ export function KanbanBoard({
   onCopyColumn,
 }: KanbanBoardProps) {
   const board = useWorkspaceStore((s) => s.board);
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const isViewer = activeRole === "VIEWER";
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
   const areLabelsExpanded = useWorkspaceStore((s) => s.areLabelsExpanded);
   const toggleLabelsExpanded = useWorkspaceStore((s) => s.toggleLabelsExpanded);
@@ -1347,77 +1367,79 @@ export function KanbanBoard({
           })}
         </SortableContext>
 
-        {/* "+ Add another list" Button at Far Right of Board Canvas */}
-        <div className="w-[300px] shrink-0">
-          {isAddingList ? (
-            <form
-              onSubmit={handleCreateNewList}
-              className="rounded-2xl border border-zinc-200/90 bg-white/95 p-3 shadow-lg backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/95"
-            >
-              <input
-                type="text"
-                autoFocus
-                value={newListTitle}
-                onChange={(e) => setNewListTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setIsAddingList(false);
-                    setNewListTitle("");
-                  }
-                }}
-                placeholder="Enter list title..."
-                className="w-full rounded-xl border border-indigo-500 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:outline-none dark:bg-zinc-950 dark:text-zinc-100"
-              />
-
-              <div className="mt-2.5 flex items-center gap-1.5">
-                {LIST_COLOR_ACCENTS.map((acc) => (
-                  <button
-                    key={acc.name}
-                    type="button"
-                    onClick={() => setNewListColor(acc.value)}
-                    title={`Accent: ${acc.name}`}
-                    className={`h-4 w-4 rounded-full border ${
-                      newListColor === acc.value
-                        ? "scale-110 ring-2 ring-indigo-500"
-                        : "border-zinc-300 dark:border-zinc-700"
-                    }`}
-                    style={{
-                      backgroundColor: acc.value ?? "transparent",
-                    }}
-                  />
-                ))}
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="submit"
-                  className="rounded-xl bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
-                >
-                  Add list
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAddingList(false);
-                    setNewListTitle("");
+        {/* "+ Add another list" Button at Far Right of Board Canvas - Hidden for Viewers */}
+        {!isViewer && (
+          <div className="w-[300px] shrink-0">
+            {isAddingList ? (
+              <form
+                onSubmit={handleCreateNewList}
+                className="rounded-2xl border border-zinc-200/90 bg-white/95 p-3 shadow-lg backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/95"
+              >
+                <input
+                  type="text"
+                  autoFocus
+                  value={newListTitle}
+                  onChange={(e) => setNewListTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setIsAddingList(false);
+                      setNewListTitle("");
+                    }
                   }}
-                  className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </form>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIsAddingList(true)}
-              className="flex w-full items-center gap-2 rounded-2xl border border-zinc-200/70 bg-white/75 px-4 py-3 text-left text-xs font-semibold text-zinc-700 shadow-2xs backdrop-blur-md transition-all hover:bg-white/95 dark:border-zinc-800/70 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              <Plus className="h-4 w-4 text-indigo-500" />
-              <span>+ Add another list</span>
-            </button>
-          )}
-        </div>
+                  placeholder="Enter list title..."
+                  className="w-full rounded-xl border border-indigo-500 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-900 placeholder:text-zinc-400 focus:bg-white focus:outline-none dark:bg-zinc-950 dark:text-zinc-100"
+                />
+
+                <div className="mt-2.5 flex items-center gap-1.5">
+                  {LIST_COLOR_ACCENTS.map((acc) => (
+                    <button
+                      key={acc.name}
+                      type="button"
+                      onClick={() => setNewListColor(acc.value)}
+                      title={`Accent: ${acc.name}`}
+                      className={`h-4 w-4 rounded-full border ${
+                        newListColor === acc.value
+                          ? "scale-110 ring-2 ring-indigo-500"
+                          : "border-zinc-300 dark:border-zinc-700"
+                      }`}
+                      style={{
+                        backgroundColor: acc.value ?? "transparent",
+                      }}
+                    />
+                  ))}
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                  >
+                    Add list
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingList(false);
+                      setNewListTitle("");
+                    }}
+                    className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAddingList(true)}
+                className="flex w-full items-center gap-2 rounded-2xl border border-zinc-200/70 bg-white/75 px-4 py-3 text-left text-xs font-semibold text-zinc-700 shadow-2xs backdrop-blur-md transition-all hover:bg-white/95 dark:border-zinc-800/70 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                <Plus className="h-4 w-4 text-indigo-500" />
+                <span>+ Add another list</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <DragOverlay>

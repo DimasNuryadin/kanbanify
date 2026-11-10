@@ -10,9 +10,11 @@ import {
   Check,
   Command,
   Download,
+  Eye,
   Filter,
   Kanban,
   Laptop,
+  Lock,
   Moon,
   Palette,
   PanelLeft,
@@ -25,12 +27,14 @@ import {
   Star,
   Sun,
   Table2,
+  UserPlus,
   Users,
   X,
   Zap,
 } from "lucide-react";
-import { Priority, UpdateBoardRequest } from "@kinetix/contracts";
+import { BoardRole, Priority, UpdateBoardRequest } from "@kinetix/contracts";
 import {
+  DEMO_USERS,
   DueFilter,
   ThemeMode,
   useWorkspaceStore,
@@ -122,6 +126,17 @@ export function WorkspaceHeader({
     (w) => w.is_enabled
   ).length;
 
+  const currentUser = useWorkspaceStore((s) => s.currentUser);
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const setActiveRole = useWorkspaceStore((s) => s.setActiveRole);
+  const switchDemoUser = useWorkspaceStore((s) => s.switchDemoUser);
+  const setAuthModalOpen = useWorkspaceStore((s) => s.setAuthModalOpen);
+  const setShareModalOpen = useWorkspaceStore((s) => s.setShareModalOpen);
+
+  // User Profile & 1-Click Role Switcher Dropdown
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
   // Inline Board Title Editing
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(board.title);
@@ -140,13 +155,16 @@ export function WorkspaceHeader({
       ) {
         setIsFilterOpen(false);
       }
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(e.target as Node)
+      ) {
+        setIsUserMenuOpen(false);
+      }
     };
-    if (isFilterOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () =>
-        document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [isFilterOpen]);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleSaveBoardTitle = async () => {
     setIsEditingTitle(false);
@@ -276,6 +294,17 @@ export function WorkspaceHeader({
                   }`}
                 />
               </button>
+
+              {/* View-Only Mode Pill when activeRole === "VIEWER" */}
+              {activeRole === "VIEWER" && (
+                <div
+                  title="You have read-only Viewer permissions on this board"
+                  className="hidden md:flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-bold text-amber-700 shadow-xs dark:border-amber-400/40 dark:bg-amber-400/15 dark:text-amber-300"
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>👁️ View-Only Mode — You have Viewer permissions on this board</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -558,15 +587,182 @@ export function WorkspaceHeader({
             <span className="hidden md:inline">Board Menu</span>
           </button>
 
-          {/* Primary CTA: New Card */}
+          {/* Prominent Trello-Style "👤+ Share" Button */}
           <button
             type="button"
-            onClick={() => openCreateCardModal(null)}
-            className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-xs transition-all duration-150 hover:bg-zinc-800 active:scale-[0.99] dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white"
+            onClick={() => setShareModalOpen(true)}
+            title="Share Board, Invite Members & Manage Roles"
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition-all hover:bg-indigo-500/20 active:scale-[0.99] dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300 dark:hover:bg-indigo-400/20"
           >
-            <Plus className="h-3.5 w-3.5" />
-            <span>New Card</span>
+            <UserPlus className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>👤+ Share</span>
+            <span className="rounded-full bg-indigo-600/20 px-1.5 py-0.2 font-mono text-[10px] font-bold text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-200">
+              {board.members.length}
+            </span>
           </button>
+
+          {/* Current User Profile & Instant Role Switcher Pill */}
+          <div className="relative" ref={userMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="flex items-center gap-2 rounded-xl border border-zinc-200/90 bg-white p-1 pr-2.5 text-xs font-medium text-zinc-700 shadow-xs transition-all hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-700"
+            >
+              <div
+                className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white shadow-xs"
+                style={{ backgroundColor: currentUser.color || "#6366f1" }}
+              >
+                {currentUser.initials}
+              </div>
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100 hidden sm:inline">
+                {currentUser.name}
+              </span>
+              {/* Color-Coded Role Badge */}
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-bold border ${
+                  activeRole === "ADMIN"
+                    ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                    : activeRole === "EDITOR"
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                }`}
+              >
+                {activeRole === "ADMIN" && "👑 Admin"}
+                {activeRole === "EDITOR" && "✏️ Editor"}
+                {activeRole === "VIEWER" && "👁️ Viewer (Read-Only)"}
+              </span>
+            </button>
+
+            {/* User Dropdown Menu */}
+            {isUserMenuOpen && (
+              <div className="absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="border-b border-zinc-100 pb-2 mb-2 dark:border-zinc-800">
+                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                    {currentUser.name}
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                    {currentUser.email}
+                  </div>
+                </div>
+
+                {/* ⚡ 1-Click Instant Demo Account / Role Switcher */}
+                <div className="mb-2">
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                    <Zap className="h-3 w-3 text-amber-500 fill-amber-500" />
+                    ⚡ 1-Click Demo Account Switcher
+                  </div>
+                  <div className="space-y-1">
+                    {DEMO_USERS.map((demo) => {
+                      const isSelected = currentUser.email === demo.email;
+                      return (
+                        <button
+                          key={demo.id}
+                          type="button"
+                          onClick={() => {
+                            switchDemoUser(demo);
+                            setIsUserMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+                            isSelected
+                              ? "bg-indigo-50 font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
+                              : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                              style={{ backgroundColor: demo.color }}
+                            >
+                              {demo.initials}
+                            </div>
+                            <span>{demo.name}</span>
+                          </div>
+                          <span
+                            className={`rounded-full px-1.5 py-0.2 text-[9px] font-bold border ${
+                              demo.default_role === "ADMIN"
+                                ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                                : demo.default_role === "EDITOR"
+                                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                  : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            }`}
+                          >
+                            {demo.default_role === "ADMIN" && "👑 Admin"}
+                            {demo.default_role === "EDITOR" && "✏️ Editor"}
+                            {demo.default_role === "VIEWER" && "👁️ Viewer"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Direct Role Simulation Override */}
+                <div className="border-t border-zinc-100 pt-2 mb-2 dark:border-zinc-800">
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Role Simulation Override
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(["ADMIN", "EDITOR", "VIEWER"] as BoardRole[]).map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => {
+                          setActiveRole(r);
+                          setIsUserMenuOpen(false);
+                        }}
+                        className={`rounded-lg py-1 text-[10px] font-bold border transition-all ${
+                          activeRole === r
+                            ? "ring-2 ring-indigo-500 border-transparent bg-indigo-600 text-white"
+                            : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
+                        }`}
+                      >
+                        {r === "ADMIN" && "Admin"}
+                        {r === "EDITOR" && "Editor"}
+                        {r === "VIEWER" && "Viewer"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sign In / Register Account Modal Trigger */}
+                <div className="border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      setAuthModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-200 transition-colors dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>🔐 Sign In / Register Account</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Primary CTA: New Card */}
+          {activeRole !== "VIEWER" ? (
+            <button
+              type="button"
+              onClick={() => openCreateCardModal(null)}
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white shadow-xs transition-all duration-150 hover:bg-zinc-800 active:scale-[0.99] dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>New Card</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              title="You have Viewer permissions on this board (Read-Only)"
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-400 opacity-60 cursor-not-allowed dark:bg-zinc-800 dark:text-zinc-500"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>New Card</span>
+            </button>
+          )}
         </div>
       </div>
 

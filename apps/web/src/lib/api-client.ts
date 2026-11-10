@@ -4,8 +4,14 @@ import {
   AIAnalyticsReportSchema,
   AIParseAutomationResponse,
   AIParseAutomationResponseSchema,
+  AIPermissionAuditResponse,
+  AIPermissionAuditResponseSchema,
   AISummaryNotificationResponse,
   AISummaryNotificationResponseSchema,
+  AuthSessionResponse,
+  AuthSessionResponseSchema,
+  AuthUser,
+  AuthUserSchema,
   AutomationRule,
   AutomationRuleSchema,
   Board,
@@ -13,6 +19,10 @@ import {
   BoardAnalyticsSchema,
   BoardExportCsvResponse,
   BoardExportCsvResponseSchema,
+  BoardInviteLink,
+  BoardInviteLinkSchema,
+  BoardRole,
+  BoardRoleEnum,
   BoardSchema,
   BoardSummary,
   BoardSummarySchema,
@@ -33,10 +43,18 @@ import {
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateInviteLinkRequest,
   CreateWebhookRequest,
   CreateWorkspaceRequest,
+  JoinViaInviteRequest,
+  JoinViaInviteResponse,
+  JoinViaInviteResponseSchema,
+  LoginRequest,
+  Member,
+  MemberSchema,
   MoveCardRequest,
   MoveColumnRequest,
+  RegisterRequest,
   StandardErrorSchema,
   TestWebhookResponse,
   TestWebhookResponseSchema,
@@ -74,11 +92,28 @@ async function fetchJson<T>(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
 
+  const authHeaders: Record<string, string> = {};
+  if (typeof window !== "undefined") {
+    try {
+      const token = window.localStorage.getItem("kanbanify_auth_token") || "kb_sess_alex_admin_token";
+      if (token) {
+        authHeaders["Authorization"] = `Bearer ${token}`;
+      }
+      const role = window.localStorage.getItem("kanbanify_active_role") || "ADMIN";
+      if (role) {
+        authHeaders["X-Kanbanify-Role"] = role;
+      }
+    } catch {
+      // storage unavailable
+    }
+  }
+
   try {
     const res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
+        ...authHeaders,
         ...(init?.headers ?? {}),
       },
       signal: controller.signal,
@@ -1025,6 +1060,321 @@ export const apiClient = {
           : "AI Summary Notification API unreachable"
       );
       return mockApi.generateAISummaryNotification(boardTitle, activities);
+    }
+  },
+
+  // ==========================================================================
+  // PHASE 6 AUTH, RBAC, MEMBERS, SHAREABLE INVITES & PERMISSION AUDIT
+  // ==========================================================================
+
+  async login(
+    payload: LoginRequest,
+    opts: ApiClientOptions
+  ): Promise<AuthSessionResponse> {
+    if (opts.useMock) {
+      return mockApi.login(payload);
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => AuthSessionResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Auth login API unreachable"
+      );
+      return mockApi.login(payload);
+    }
+  },
+
+  async register(
+    payload: RegisterRequest,
+    opts: ApiClientOptions
+  ): Promise<AuthSessionResponse> {
+    if (opts.useMock) {
+      return mockApi.register(payload);
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/auth/register",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => AuthSessionResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Auth register API unreachable"
+      );
+      return mockApi.register(payload);
+    }
+  },
+
+  async getMe(opts: ApiClientOptions): Promise<AuthUser> {
+    if (opts.useMock) {
+      return mockApi.getMe();
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/auth/me",
+        { method: "GET" },
+        (raw) => AuthUserSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Auth me API unreachable"
+      );
+      return mockApi.getMe();
+    }
+  },
+
+  async getDemoUsers(opts: ApiClientOptions): Promise<AuthUser[]> {
+    if (opts.useMock) {
+      return mockApi.getDemoUsers();
+    }
+    try {
+      return await fetchJson(
+        "/api/v1/auth/demo-users",
+        { method: "GET" },
+        (raw) => z.array(AuthUserSchema).parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Demo users API unreachable"
+      );
+      return mockApi.getDemoUsers();
+    }
+  },
+
+  async addMember(
+    boardId: string,
+    payload: { name: string; email: string; role: BoardRole },
+    opts: ApiClientOptions
+  ): Promise<Member> {
+    if (opts.useMock) {
+      return mockApi.addMember(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/members`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => MemberSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Add member API unreachable"
+      );
+      return mockApi.addMember(boardId, payload);
+    }
+  },
+
+  async updateMemberRole(
+    boardId: string,
+    memberId: string,
+    role: BoardRole,
+    opts: ApiClientOptions
+  ): Promise<Member> {
+    if (opts.useMock) {
+      return mockApi.updateMemberRole(boardId, memberId, role);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/members/${memberId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ role }),
+        },
+        (raw) => MemberSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Update member role API unreachable"
+      );
+      return mockApi.updateMemberRole(boardId, memberId, role);
+    }
+  },
+
+  async removeMember(
+    boardId: string,
+    memberId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; removed: boolean }> {
+    if (opts.useMock) {
+      return mockApi.removeMember(boardId, memberId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/members/${memberId}`,
+        { method: "DELETE" },
+        () => ({ id: memberId, removed: true })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Remove member API unreachable"
+      );
+      return mockApi.removeMember(boardId, memberId);
+    }
+  },
+
+  async getInviteLinks(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<BoardInviteLink[]> {
+    if (opts.useMock) {
+      return mockApi.getInviteLinks(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/invites`,
+        { method: "GET" },
+        (raw) => z.array(BoardInviteLinkSchema).parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Get invite links API unreachable"
+      );
+      return mockApi.getInviteLinks(boardId);
+    }
+  },
+
+  async createInviteLink(
+    boardId: string,
+    payload: CreateInviteLinkRequest,
+    opts: ApiClientOptions
+  ): Promise<BoardInviteLink> {
+    if (opts.useMock) {
+      return mockApi.createInviteLink(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/invites`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => BoardInviteLinkSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Create invite link API unreachable"
+      );
+      return mockApi.createInviteLink(boardId, payload);
+    }
+  },
+
+  async revokeInviteLink(
+    inviteId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; revoked: boolean }> {
+    if (opts.useMock) {
+      return mockApi.revokeInviteLink(inviteId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/invites/${inviteId}`,
+        { method: "DELETE" },
+        () => ({ id: inviteId, revoked: true })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Revoke invite link API unreachable"
+      );
+      return mockApi.revokeInviteLink(inviteId);
+    }
+  },
+
+  async previewInvite(
+    token: string,
+    opts: ApiClientOptions
+  ): Promise<{
+    board_id: string;
+    board_title: string;
+    inviter_name: string;
+    granted_role: BoardRole;
+    is_valid: boolean;
+  }> {
+    if (opts.useMock) {
+      return mockApi.previewInvite(token);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/invites/${token}`,
+        { method: "GET" },
+        (raw) => {
+          const schema = z.object({
+            board_id: z.string(),
+            board_title: z.string(),
+            inviter_name: z.string(),
+            granted_role: BoardRoleEnum,
+            is_valid: z.boolean(),
+          });
+          return schema.parse(raw);
+        }
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Preview invite API unreachable"
+      );
+      return mockApi.previewInvite(token);
+    }
+  },
+
+  async joinViaInvite(
+    token: string,
+    payload: JoinViaInviteRequest | undefined,
+    opts: ApiClientOptions
+  ): Promise<JoinViaInviteResponse> {
+    if (opts.useMock) {
+      return mockApi.joinViaInvite(token, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/invites/${token}/join`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload ?? {}),
+        },
+        (raw) => JoinViaInviteResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Join via invite API unreachable"
+      );
+      return mockApi.joinViaInvite(token, payload);
+    }
+  },
+
+  async auditPermissions(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<AIPermissionAuditResponse> {
+    if (opts.useMock) {
+      return mockApi.auditPermissions(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/security-audit`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        (raw) => AIPermissionAuditResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error
+          ? err.message
+          : "AI Security Audit API unreachable"
+      );
+      return mockApi.auditPermissions(boardId);
     }
   },
 };
