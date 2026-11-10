@@ -11,12 +11,14 @@ Kanbanify is a polyglot monorepo combining an optimistic real-time Multi-Board K
 ```mermaid
 flowchart LR
     subgraph Client ["apps/web (Next.js 16 — Port 3000)"]
-        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics + Import/Export + Cmd+K"]
-        Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer & Butler Engine"]
+        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics + 1-Click Role Switcher + Share Modal"]
+        Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer & Auth/RBAC Store"]
     end
 
     subgraph CoreAPI ["apps/api (Fastify v5 — Port 8000)"]
-        REST["REST API (/api/v1/*)\nZod Contract Validation"]
+        REST["REST API (/api/v1/*)\nZod Contract Validation & RBAC Guard"]
+        Auth["Auth Service & JWT\nRegister, Login, Demo Users & Token Verification"]
+        Invites["Shareable Invites Service\nCreate, Preview & Join Board Links"]
         Butler["Butler Automation Engine\nRuntime Trigger & Action Executor"]
         Analytics["Analytics & Data Portability\nBurndown + Trello JSON Import + CSV/JSON Export"]
         Presence["Presence & Typing Hub\nGET/POST /presence & WS sync"]
@@ -29,6 +31,7 @@ flowchart LR
         Decomposer["POST /internal/v1/decompose-task\nPOST /internal/v1/enrich-card"]
         RuleParser["POST /internal/v1/parse-automation\nBilingual ID/EN Butler Rule Compiler"]
         BoardAnalyzer["POST /internal/v1/analyze-board\nAI Executive Sprint Health & Bottleneck Analyzer"]
+        Auditor["POST /internal/v1/audit-permissions\nAI Workspace Access & Permission Auditor"]
         Formatter["POST /internal/v1/format-notification\nAI ChatOps Digest & Notification Formatter"]
     end
 
@@ -38,12 +41,16 @@ flowchart LR
     end
 
     UI <--> Store
-    Store -- "REST JSON (HTTP :8000)" --> REST
+    Store -- "REST JSON + JWT/Role (HTTP :8000)" --> REST
     Store <-- "Live Events (WS :8000)" --> WS
+    REST --> Auth
+    REST --> Invites
     REST --> Butler
     REST --> Analytics
     REST --> Presence
     REST --> Webhook
+    Auth --> Repo
+    Invites --> Repo
     Butler --> Repo
     Analytics --> Repo
     Presence --> WS
@@ -54,6 +61,7 @@ flowchart LR
     REST -- "X-Internal-Token (:8001)" --> Decomposer
     REST -- "X-Internal-Token (:8001)" --> RuleParser
     REST -- "X-Internal-Token (:8001)" --> BoardAnalyzer
+    REST -- "X-Internal-Token (:8001)" --> Auditor
     Webhook -- "X-Internal-Token (:8001)" --> Formatter
 ```
 
@@ -61,10 +69,10 @@ flowchart LR
 
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
-| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
-| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator (`GET /api/v1/boards/:boardId/analytics`), Native Trello JSON Importer (`POST /api/v1/boards/import`), CSV/JSON Exporter (`GET /api/v1/boards/:boardId/export`), Real-Time Co-Presence Service & Live Typing Coordinator (`GET/POST /api/v1/boards/:boardId/presence`), Outbound Webhook Dispatcher with HMAC-SHA256 signatures (`/api/v1/boards/:boardId/webhooks`), WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
-| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads with deterministic zero-config fallback |
-| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
+| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | 1-Click Demo Role Switcher (`ADMIN`, `EDITOR`, `VIEWER`), Read-Only Enforcement Mode for Viewers, Shareable Board Invite Modal & Member Access Management, AI Security & Permission Audit Modal, Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
+| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Enterprise JWT Authentication (HS256 tokens, register, login, `/auth/me`), Pre-Seeded Demo User Profiles, Strict RBAC Guard Middleware (`403 FORBIDDEN` enforcement matching `StandardErrorSchema`), Shareable Invite Links Service (`POST /invites`, preview, and join redemption), AI Permission Audit Proxy (`POST /api/v1/boards/:boardId/security-audit`), Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator, Native Trello JSON Importer, CSV/JSON Exporter, Real-Time Co-Presence Service & Live Typing Coordinator, Outbound Webhook Dispatcher with HMAC-SHA256 signatures, WebSocket real-time room fan-out, PostgreSQL & Redis persistence with automatic in-memory fallback |
+| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | AI Workspace Access & Permission Security Auditor (`POST /internal/v1/audit-permissions`) analyzing least-privilege role distribution and invite link exposure with zero-config deterministic fallback, Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads |
+| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for Auth, JWT Sessions, RBAC Roles (`ADMIN`, `EDITOR`, `VIEWER`), Shareable Invite Links, AI Permission Audit, REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
 | **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 
 ---
@@ -166,7 +174,11 @@ Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2
 13. **Native Trello JSON Import & CSV/JSON Export (Phase 4):** Calls `POST /api/v1/boards/import` with a mock raw Trello JSON payload (`name`, `lists`, `cards`, `checklists`) and asserts successful board creation (`imported_lists_count > 0`) with valid O(1) fractional index positions (`"a0"`, `"a1"`, `"a2"`), then calls `GET /api/v1/boards/:boardId/export?format=csv` (and `format=json`) and asserts `200 OK` with `content_type: "text/csv"` and valid CSV data rows.
 14. **Real-Time Co-Presence & Typing Indicators (Phase 5):** Updates presence state (`status: "EDITING"`, `active_card_id`, `event: "START_TYPING"`) via `POST /api/v1/boards/:boardId/presence`, verifies presence list on `GET /api/v1/boards/:boardId/presence`, and asserts proper status reset to `"ACTIVE"` upon `"STOP_TYPING"`.
 15. **Slack & Discord Webhook Lifecycle & AI Notification Formatting (Phase 5):** Registers outbound Slack and Discord webhooks subscribed to `["CARD_MOVED", "AUTOMATION_TRIGGERED"]` via `POST /api/v1/boards/:boardId/webhooks`, verifies listing via `GET /api/v1/boards/:boardId/webhooks`, dispatches test pings via `POST /api/v1/webhooks/:webhookId/test` with verified `delivered: true` and formatted Slack Block Kit / Discord Rich Embed payloads, verifies AI Standup Digest formatting via `POST /internal/v1/format-notification`, and verifies cleanup via `DELETE /api/v1/webhooks/:webhookId`.
-16. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`).
+16. **Enterprise Authentication & Demo User Profiles (Phase 6):** Calls `GET /api/v1/auth/demo-users` and asserts pre-seeded `ADMIN` ("Alex Rivera"), `EDITOR` ("Maya Lin"), and `VIEWER` ("Elena Rostova") accounts with active JWT tokens; registers a new user via `POST /api/v1/auth/register` and logs in via `POST /api/v1/auth/login`; verifies `GET /api/v1/auth/me` with Bearer token and confirms graceful fallback to default `ADMIN` when headers are omitted.
+17. **Strict RBAC Enforcement (`403 FORBIDDEN` vs `200/201`, Phase 6):** Asserts that card, column, and comment mutations sent with `X-Kanbanify-Role: VIEWER` are strictly rejected with HTTP `403 FORBIDDEN` matching `StandardErrorSchema`; asserts that admin-only invite creation is rejected with `403 FORBIDDEN` for `EDITOR` and `VIEWER`; asserts that `EDITOR` is permitted to create and move cards (`200/201`).
+18. **Shareable Invite Links Lifecycle (Phase 6):** Creates a shareable invite link (`POST /api/v1/boards/:boardId/invites`) with role `EDITOR` and `max_uses: 5`, inspects the public preview (`GET /api/v1/invites/:token`), redeems the token (`POST /api/v1/invites/:token/join`) for a new collaborator ("Rina QA"), and verifies membership on the board with `granted_role === "EDITOR"` and incremented `uses_count: 1`.
+19. **✨ AI Workspace Access & Permission Security Audit (`API -> AI Engine`, Phase 6):** Calls `POST /api/v1/boards/:boardId/security-audit` ($\rightarrow$ `POST /internal/v1/audit-permissions` with `X-Internal-Token`) and asserts `200 OK` returning a `security_score` (`0–100`), `risk_level` (`LOW`, `MEDIUM`, `HIGH`), `findings`, and `recommendations`.
+20. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`).
 
 Run the E2E smoke test with a single command:
 
@@ -175,6 +187,43 @@ node scripts/e2e_test.mjs
 # or via root package.json:
 npm run test:e2e
 ```
+
+---
+
+## Phase 6 Enterprise Auth, Role-Based Access Control (RBAC) & Shareable Invite Links
+
+- **Enterprise JWT Authentication & Pre-Seeded Demo Profiles (`apps/api` & `apps/web`):**
+  - **Pre-Seeded Demo Accounts (`GET /api/v1/auth/demo-users`):**
+    - 👑 **Alex Rivera** (`ADMIN`): Full board and workspace mutation privileges, member management, and invite creation.
+    - ✏️ **Maya Lin** (`EDITOR`): Standard contributor permissions (create/move/update cards, checklists, and comments).
+    - 👁️ **Elena Rostova** (`VIEWER`): Strict read-only viewer permissions across boards, cards, and activity feeds.
+  - **Full Registration & Login Flows:** Supports `POST /api/v1/auth/register` and `POST /api/v1/auth/login` issuing HMAC-SHA256 JWT tokens with 7-day expiration and password hashing using secure Node.js `scrypt` derivation.
+  - **Current Session Endpoint (`GET /api/v1/auth/me`):** Resolves the active user profile from incoming `Authorization: Bearer <token>` or defaults gracefully to `ADMIN` for backward-compatibility.
+- **1-Click Demo Role Switcher & Read-Only UI Enforcement (`apps/web`):**
+  - **Top Navigation Switcher:** Instant role switcher dropdown located in `WorkspaceHeader` allowing testers and stakeholders to toggle between `ADMIN`, `EDITOR`, and `VIEWER` roles in a single click.
+  - **Immediate Header Propagation:** Switching roles immediately updates `Authorization: Bearer <token>` and `X-Kanbanify-Role` on all outgoing API requests.
+  - **Viewer Read-Only Enforcement Mode:** When `VIEWER` is active, board drag-and-drop handles are locked (`disabled: isViewer`), card and column creation/editing controls are disabled, and a prominent **👁️ Viewer Mode (Read-Only)** pill and warning banners are displayed.
+- **Strict Backend RBAC Guard Middleware (`apps/api`):**
+  - **Granular Role Matrix:**
+    | Operation | ADMIN | EDITOR | VIEWER |
+    | :--- | :---: | :---: | :---: |
+    | View Boards, Cards, Activity, Analytics | ✅ | ✅ | ✅ |
+    | Create / Move / Update / Archive Cards | ✅ | ✅ | ❌ (`403 FORBIDDEN`) |
+    | Add Checklists & Post Comments | ✅ | ✅ | ❌ (`403 FORBIDDEN`) |
+    | Create Shareable Board Invites | ✅ | ❌ (`403 FORBIDDEN`) | ❌ (`403 FORBIDDEN`) |
+    | Modify Board Members & Roles | ✅ | ❌ (`403 FORBIDDEN`) | ❌ (`403 FORBIDDEN`) |
+    | Delete Board | ✅ | ❌ (`403 FORBIDDEN`) | ❌ (`403 FORBIDDEN`) |
+  - **Standardized Error Envelope:** All unauthorized mutations return HTTP `403 FORBIDDEN` strictly compliant with `StandardErrorSchema` (`error.code: "FORBIDDEN"`).
+  - **100% Backward Compatibility:** Requests omitting auth headers default to `ADMIN`, preserving unhindered functionality across all Phase 1–5 workflows.
+- **Shareable Board Invite Links (`ShareBoardModal`):**
+  - **Invite Link Creation (`POST /api/v1/boards/:boardId/invites`):** Administrators can generate cryptographic invite tokens (`kb_inv_*`) with customizable target roles (`EDITOR` or `VIEWER`), expiration hours (e.g., 24h, 7 days, or never), and maximum usage caps.
+  - **Public Preview & Verification (`GET /api/v1/invites/:token`):** Inspects link validity, target board title, inviter name, and granted role without requiring prior authentication.
+  - **Invite Redemption Flow (`POST /api/v1/invites/:token/join`):** New users join the board with the granted role, automatically adding them to `board.members`, incrementing `uses_count`, and broadcasting `BOARD_UPDATED` over WebSocket.
+- **✨ AI Workspace Access & Permission Security Auditor (`POST /api/v1/boards/:boardId/security-audit` $\rightarrow$ `services/ai-engine`):**
+  - Accessible via the **Share Board** modal by clicking **"Run AI Security & Permission Audit"**.
+  - Forwards the board's membership roster and active invite links to `services/ai-engine` (`POST /internal/v1/audit-permissions` with `X-Internal-Token`).
+  - Evaluates role distribution under the **Principle of Least Privilege (PoLP)** and flags security risks (e.g., excessive admins, public editor invite links without expiration or usage limits).
+  - Returns a numeric **Security Score (`0–100`)**, **Risk Level Badge (`LOW`, `MEDIUM`, `HIGH`)**, bulleted **Findings**, and **Actionable Hardening Recommendations**.
 
 ---
 
