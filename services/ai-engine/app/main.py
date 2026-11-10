@@ -21,6 +21,8 @@ from app.contracts import (
     AIDecomposeResponseSchema,
     AIParseAutomationRequestSchema,
     AIParseAutomationResponseSchema,
+    AIPermissionAuditRequestSchema,
+    AIPermissionAuditResponseSchema,
     AISuggestCardEnrichmentRequestSchema,
     AISuggestCardEnrichmentResponseSchema,
     AISummaryNotificationRequestSchema,
@@ -32,6 +34,7 @@ from app.contracts import (
 )
 from app.decomposer import decompose_task, enrich_card
 from app.notification_formatter import format_notification
+from app.permission_auditor import audit_permissions
 from app.rule_parser import parse_automation
 
 
@@ -204,6 +207,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AISummaryNotificationResponseSchema:
         return await format_notification(payload)
+
+    @application.post(
+        "/internal/v1/audit-permissions",
+        response_model=AIPermissionAuditResponseSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="AI Workspace Access & Permission Auditor (Least-Privilege & RBAC Security Analyzer)",
+    )
+    async def post_audit_permissions(
+        payload: AIPermissionAuditRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AIPermissionAuditResponseSchema:
+        return await audit_permissions(payload)
 
     return application
 

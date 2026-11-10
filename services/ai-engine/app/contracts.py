@@ -399,6 +399,73 @@ class StandardErrorSchema(BaseModel):
     error: ErrorBodySchema
 
 
+# Phase 6 RBAC & Board Visibility Enums
+class BoardRoleEnum(str, Enum):
+    ADMIN = "ADMIN"
+    EDITOR = "EDITOR"
+    VIEWER = "VIEWER"
+
+
+class BoardVisibilityEnum(str, Enum):
+    PRIVATE = "PRIVATE"
+    WORKSPACE = "WORKSPACE"
+    PUBLIC_READ = "PUBLIC_READ"
+
+
+class AIPermissionRiskLevelEnum(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class MemberSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=120)
+    email: str = Field(..., min_length=3)
+    avatar_url: str | None = None
+    initials: str = Field(..., min_length=1, max_length=4)
+    color: str = "#3b82f6"
+    role: BoardRoleEnum = BoardRoleEnum.EDITOR
+    joined_at: str | None = None
+
+
+class BoardInviteLinkSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    token: str = Field(..., min_length=1)
+    role: BoardRoleEnum
+    created_by_id: str = Field(..., min_length=1)
+    created_by_name: str = Field(..., min_length=1)
+    max_uses: int | None = Field(default=None, ge=1)
+    uses_count: int = Field(default=0, ge=0)
+    expires_at: datetime | str | None = None
+    is_active: bool = True
+    created_at: datetime | str
+
+
+class AIPermissionAuditRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1)
+    visibility: str = Field(..., min_length=1)
+    members: list[MemberSchema] = Field(default_factory=list)
+    invite_links: list[BoardInviteLinkSchema] = Field(default_factory=list)
+
+
+class AIPermissionAuditResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    security_score: float = Field(..., ge=0, le=100)
+    risk_level: AIPermissionRiskLevelEnum
+    summary: str = Field(..., min_length=1)
+    findings: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
 # Bind directly to `packages/contracts/schemas.py` when present in the monorepo
 _SHARED_SCHEMAS_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent
@@ -456,6 +523,13 @@ if _SHARED_SCHEMAS_PATH.is_file():
         _BaseActivitySchema = _module.ActivitySchema  # type: ignore[misc]
         _BaseAISummaryNotificationRequestSchema = _module.AISummaryNotificationRequestSchema  # type: ignore[misc]
         AISummaryNotificationResponseSchema = _module.AISummaryNotificationResponseSchema  # type: ignore[misc]
+        BoardRoleEnum = _module.BoardRoleEnum  # type: ignore[misc]
+        BoardVisibilityEnum = _module.BoardVisibilityEnum  # type: ignore[misc]
+        AIPermissionRiskLevelEnum = _module.AIPermissionRiskLevelEnum  # type: ignore[misc]
+        MemberSchema = _module.MemberSchema  # type: ignore[misc]
+        BoardInviteLinkSchema = _module.BoardInviteLinkSchema  # type: ignore[misc]
+        AIPermissionAuditRequestSchema = _module.AIPermissionAuditRequestSchema  # type: ignore[misc]
+        AIPermissionAuditResponseSchema = _module.AIPermissionAuditResponseSchema  # type: ignore[misc]
 
 
 _DEFAULT_COLOR_NAMES: dict[str, str] = {
@@ -685,6 +759,8 @@ AIAnalyticsReportSchema.model_rebuild()
 ActivitySchema.model_rebuild()
 AISummaryNotificationRequestSchema.model_rebuild()
 AISummaryNotificationResponseSchema.model_rebuild()
+AIPermissionAuditRequestSchema.model_rebuild()
+AIPermissionAuditResponseSchema.model_rebuild()
 
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
@@ -715,6 +791,14 @@ ActivityActionType = ActivityActionTypeEnum
 AISummaryNotificationRequest = AISummaryNotificationRequestSchema
 AISummaryNotificationResponse = AISummaryNotificationResponseSchema
 
+BoardRole = BoardRoleEnum
+BoardVisibility = BoardVisibilityEnum
+AIPermissionRiskLevel = AIPermissionRiskLevelEnum
+Member = MemberSchema
+BoardInviteLink = BoardInviteLinkSchema
+AIPermissionAuditRequest = AIPermissionAuditRequestSchema
+AIPermissionAuditResponse = AIPermissionAuditResponseSchema
+
 __all__ = [
     "AIAnalyticsReport",
     "AIAnalyticsReportSchema",
@@ -734,6 +818,12 @@ __all__ = [
     "AIParseAutomationRequestSchema",
     "AIParseAutomationResponse",
     "AIParseAutomationResponseSchema",
+    "AIPermissionAuditRequest",
+    "AIPermissionAuditRequestSchema",
+    "AIPermissionAuditResponse",
+    "AIPermissionAuditResponseSchema",
+    "AIPermissionRiskLevel",
+    "AIPermissionRiskLevelEnum",
     "AISuggestCardEnrichmentRequest",
     "AISuggestCardEnrichmentRequestSchema",
     "AISuggestCardEnrichmentResponse",
@@ -756,6 +846,12 @@ __all__ = [
     "AutomationTriggerTypeEnum",
     "BoardAnalytics",
     "BoardAnalyticsSchema",
+    "BoardInviteLink",
+    "BoardInviteLinkSchema",
+    "BoardRole",
+    "BoardRoleEnum",
+    "BoardVisibility",
+    "BoardVisibilityEnum",
     "BurndownDataPoint",
     "BurndownDataPointSchema",
     "ChecklistItemSchema",
@@ -769,6 +865,8 @@ __all__ = [
     "LabelMetric",
     "LabelMetricSchema",
     "LabelSchema",
+    "Member",
+    "MemberSchema",
     "MemberWorkload",
     "MemberWorkloadSchema",
     "PriorityEnum",
