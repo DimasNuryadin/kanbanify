@@ -103,6 +103,16 @@ export const ClientPresenceEventEnum = z.enum([
 ]);
 export type ClientPresenceEvent = z.infer<typeof ClientPresenceEventEnum>;
 
+// Phase 6 RBAC & Board Visibility Enums
+export const BoardRoleEnum = z.enum(["ADMIN", "EDITOR", "VIEWER"]);
+export type BoardRole = z.infer<typeof BoardRoleEnum>;
+
+export const BoardVisibilityEnum = z.enum(["PRIVATE", "WORKSPACE", "PUBLIC_READ"]);
+export type BoardVisibility = z.infer<typeof BoardVisibilityEnum>;
+
+export const AIPermissionRiskLevelEnum = z.enum(["LOW", "MEDIUM", "HIGH"]);
+export type AIPermissionRiskLevel = z.infer<typeof AIPermissionRiskLevelEnum>;
+
 /**
  * Lexicographical fractional index string (e.g., "a0", "a1", "a0V")
  * enabling O(1) single-row updates during drag-and-drop reordering.
@@ -134,6 +144,8 @@ export const DEFAULT_BOARD_MEMBERS = [
     avatar_url: null,
     initials: "AR",
     color: "#3b82f6",
+    role: "ADMIN" as const,
+    joined_at: "2026-11-08T00:00:00.000Z",
   },
   {
     id: "88888888-8888-4888-8888-888888888882",
@@ -142,6 +154,8 @@ export const DEFAULT_BOARD_MEMBERS = [
     avatar_url: null,
     initials: "ML",
     color: "#8b5cf6",
+    role: "EDITOR" as const,
+    joined_at: "2026-11-08T00:00:00.000Z",
   },
   {
     id: "88888888-8888-4888-8888-888888888883",
@@ -150,6 +164,8 @@ export const DEFAULT_BOARD_MEMBERS = [
     avatar_url: null,
     initials: "SP",
     color: "#10b981",
+    role: "EDITOR" as const,
+    joined_at: "2026-11-08T00:00:00.000Z",
   },
   {
     id: "88888888-8888-4888-8888-888888888884",
@@ -158,6 +174,8 @@ export const DEFAULT_BOARD_MEMBERS = [
     avatar_url: null,
     initials: "ER",
     color: "#f59e0b",
+    role: "VIEWER" as const,
+    joined_at: "2026-11-08T00:00:00.000Z",
   },
 ] as const;
 
@@ -339,8 +357,79 @@ export const MemberSchema = z.object({
   avatar_url: z.string().nullable().default(null),
   initials: z.string().min(1).max(4),
   color: z.string().min(1).default("#3b82f6"),
+  role: BoardRoleEnum.default("EDITOR"),
+  joined_at: z.string().optional(),
 });
 export type Member = z.infer<typeof MemberSchema>;
+
+// Phase 6 Auth Schemas
+export const AuthUserSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  avatar_url: z.string().nullable().default(null),
+  initials: z.string().min(1).max(4),
+  color: z.string().min(1).default("#3b82f6"),
+  default_role: BoardRoleEnum.default("EDITOR"),
+});
+export type AuthUser = z.infer<typeof AuthUserSchema>;
+
+export const RegisterRequestSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  password: z.string().min(6).max(100),
+});
+export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
+
+export const LoginRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+
+export const AuthSessionResponseSchema = z.object({
+  token: z.string().min(1),
+  user: AuthUserSchema,
+  expires_at: z.string().datetime(),
+});
+export type AuthSessionResponse = z.infer<typeof AuthSessionResponseSchema>;
+
+// Phase 6 Shareable Board Invite Link Schemas
+export const BoardInviteLinkSchema = z.object({
+  id: z.string().min(1),
+  board_id: z.string().min(1),
+  token: z.string().min(1),
+  role: BoardRoleEnum,
+  created_by_id: z.string().min(1),
+  created_by_name: z.string().min(1),
+  max_uses: z.number().int().min(1).nullable().default(null),
+  uses_count: z.number().int().min(0).default(0),
+  expires_at: z.string().datetime().nullable().default(null),
+  is_active: z.boolean().default(true),
+  created_at: z.string().datetime(),
+});
+export type BoardInviteLink = z.infer<typeof BoardInviteLinkSchema>;
+
+export const CreateInviteLinkRequestSchema = z.object({
+  role: BoardRoleEnum.default("EDITOR"),
+  max_uses: z.number().int().min(1).nullable().optional(),
+  expires_in_hours: z.number().min(0.1).nullable().optional(),
+});
+export type CreateInviteLinkRequest = z.infer<typeof CreateInviteLinkRequestSchema>;
+
+export const JoinViaInviteRequestSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  email: z.string().email().optional(),
+});
+export type JoinViaInviteRequest = z.infer<typeof JoinViaInviteRequestSchema>;
+
+export const JoinViaInviteResponseSchema = z.object({
+  board_id: z.string().min(1),
+  board_title: z.string().min(1),
+  granted_role: BoardRoleEnum,
+  member: MemberSchema,
+});
+export type JoinViaInviteResponse = z.infer<typeof JoinViaInviteResponseSchema>;
 
 export const LabelSchema = z.object({
   id: z.string().min(1),
@@ -533,6 +622,9 @@ export const BoardSchema = z.object({
   automation_rules: z.array(AutomationRuleSchema).default([]),
   // Phase 5 Outbound Webhooks
   webhooks: z.array(WebhookConfigSchema).default([]),
+  // Phase 6 RBAC & Shareable Invites
+  invite_links: z.array(BoardInviteLinkSchema).default([]),
+  visibility: BoardVisibilityEnum.default("WORKSPACE"),
 });
 export type Board = z.infer<typeof BoardSchema>;
 
@@ -605,6 +697,7 @@ export const CreateBoardRequestSchema = z.object({
   is_starred: z.boolean().optional().default(false),
   background: BoardBackgroundSchema.optional(),
   template_id: z.string().optional(),
+  visibility: BoardVisibilityEnum.optional().default("WORKSPACE"),
 });
 export type CreateBoardRequest = z.infer<typeof CreateBoardRequestSchema>;
 
@@ -615,6 +708,7 @@ export const UpdateBoardRequestSchema = z.object({
   background: BoardBackgroundSchema.optional(),
   labels: z.array(LabelSchema).optional(),
   members: z.array(MemberSchema).optional(),
+  visibility: BoardVisibilityEnum.optional(),
 });
 export type UpdateBoardRequest = z.infer<typeof UpdateBoardRequestSchema>;
 
@@ -1134,6 +1228,31 @@ export type OutboundWebhookPayload = z.infer<
 >;
 
 // ============================================================================
+// 5.6 PHASE 6 AI WORKSPACE ACCESS & PERMISSION AUDITOR SCHEMAS
+// ============================================================================
+
+export const AIPermissionAuditRequestSchema = z.object({
+  board_title: z.string().min(1),
+  visibility: z.string().min(1),
+  members: z.array(MemberSchema),
+  invite_links: z.array(BoardInviteLinkSchema),
+});
+export type AIPermissionAuditRequest = z.infer<
+  typeof AIPermissionAuditRequestSchema
+>;
+
+export const AIPermissionAuditResponseSchema = z.object({
+  security_score: z.number().min(0).max(100),
+  risk_level: AIPermissionRiskLevelEnum,
+  summary: z.string().min(1),
+  findings: z.array(z.string()).default([]),
+  recommendations: z.array(z.string()).default([]),
+});
+export type AIPermissionAuditResponse = z.infer<
+  typeof AIPermissionAuditResponseSchema
+>;
+
+// ============================================================================
 // 6. STANDARD ERROR ENVELOPE
 // ============================================================================
 
@@ -1141,6 +1260,7 @@ export const ErrorCodeEnum = z.enum([
   "RESOURCE_NOT_FOUND",
   "VALIDATION_ERROR",
   "UNAUTHORIZED",
+  "FORBIDDEN",
   "INTERNAL_ERROR",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCodeEnum>;

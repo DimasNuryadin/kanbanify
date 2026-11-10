@@ -168,7 +168,27 @@ class ErrorCodeEnum(str, Enum):
     RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND"
     VALIDATION_ERROR = "VALIDATION_ERROR"
     UNAUTHORIZED = "UNAUTHORIZED"
+    FORBIDDEN = "FORBIDDEN"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+
+
+# Phase 6 RBAC & Board Visibility Enums
+class BoardRoleEnum(str, Enum):
+    ADMIN = "ADMIN"
+    EDITOR = "EDITOR"
+    VIEWER = "VIEWER"
+
+
+class BoardVisibilityEnum(str, Enum):
+    PRIVATE = "PRIVATE"
+    WORKSPACE = "WORKSPACE"
+    PUBLIC_READ = "PUBLIC_READ"
+
+
+class AIPermissionRiskLevelEnum(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
 
 
 # ============================================================================
@@ -185,6 +205,85 @@ class MemberSchema(BaseModel):
     avatar_url: str | None = None
     initials: str = Field(..., min_length=1, max_length=4)
     color: str = "#3b82f6"
+    role: BoardRoleEnum = BoardRoleEnum.EDITOR
+    joined_at: str | None = None
+
+
+# Phase 6 Auth Schemas
+class AuthUserSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=120)
+    email: str = Field(..., min_length=3)
+    avatar_url: str | None = None
+    initials: str = Field(..., min_length=1, max_length=4)
+    color: str = "#3b82f6"
+    default_role: BoardRoleEnum = BoardRoleEnum.EDITOR
+
+
+class RegisterRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=120)
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=6, max_length=100)
+
+
+class LoginRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=1)
+
+
+class AuthSessionResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    token: str = Field(..., min_length=1)
+    user: AuthUserSchema
+    expires_at: datetime | str
+
+
+# Phase 6 Shareable Board Invite Link Schemas
+class BoardInviteLinkSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    token: str = Field(..., min_length=1)
+    role: BoardRoleEnum
+    created_by_id: str = Field(..., min_length=1)
+    created_by_name: str = Field(..., min_length=1)
+    max_uses: int | None = Field(default=None, ge=1)
+    uses_count: int = Field(default=0, ge=0)
+    expires_at: datetime | str | None = None
+    is_active: bool = True
+    created_at: datetime | str
+
+
+class CreateInviteLinkRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    role: BoardRoleEnum = BoardRoleEnum.EDITOR
+    max_uses: int | None = Field(default=None, ge=1)
+    expires_in_hours: float | None = Field(default=None, gt=0)
+
+
+class JoinViaInviteRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: str | None = Field(default=None, min_length=3)
+
+
+class JoinViaInviteResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_id: str = Field(..., min_length=1)
+    board_title: str = Field(..., min_length=1)
+    granted_role: BoardRoleEnum
+    member: MemberSchema
 
 
 class LabelSchema(BaseModel):
@@ -392,6 +491,9 @@ class BoardSchema(BaseModel):
     automation_rules: list[AutomationRuleSchema] = Field(default_factory=list)
     # Phase 5 Outbound Webhooks
     webhooks: list[WebhookConfigSchema] = Field(default_factory=list)
+    # Phase 6 RBAC & Shareable Invites
+    invite_links: list[BoardInviteLinkSchema] = Field(default_factory=list)
+    visibility: BoardVisibilityEnum = BoardVisibilityEnum.WORKSPACE
 
 
 # Phase 3 Workspace & Board Summary Schemas
@@ -467,6 +569,7 @@ class CreateBoardRequestSchema(BaseModel):
     is_starred: bool = False
     background: BoardBackgroundSchema | None = None
     template_id: str | None = None
+    visibility: BoardVisibilityEnum = BoardVisibilityEnum.WORKSPACE
 
 
 class UpdateBoardRequestSchema(BaseModel):
@@ -478,6 +581,7 @@ class UpdateBoardRequestSchema(BaseModel):
     background: BoardBackgroundSchema | None = None
     labels: list[LabelSchema] | None = None
     members: list[MemberSchema] | None = None
+    visibility: BoardVisibilityEnum | None = None
 
 
 class CreateColumnRequestSchema(BaseModel):
@@ -959,6 +1063,30 @@ class OutboundWebhookPayloadSchema(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+# ============================================================================
+# 5.6 PHASE 6 AI WORKSPACE ACCESS & PERMISSION AUDITOR SCHEMAS
+# ============================================================================
+
+
+class AIPermissionAuditRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1)
+    visibility: str = Field(..., min_length=1)
+    members: list[MemberSchema] = Field(default_factory=list)
+    invite_links: list[BoardInviteLinkSchema] = Field(default_factory=list)
+
+
+class AIPermissionAuditResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    security_score: float = Field(..., ge=0, le=100)
+    risk_level: AIPermissionRiskLevelEnum
+    summary: str = Field(..., min_length=1)
+    findings: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+
 # Aliases for direct import without Schema suffix
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
@@ -1013,6 +1141,21 @@ ClientPresenceMessage = ClientPresenceMessageSchema
 AISummaryNotificationRequest = AISummaryNotificationRequestSchema
 AISummaryNotificationResponse = AISummaryNotificationResponseSchema
 OutboundWebhookPayload = OutboundWebhookPayloadSchema
+
+BoardRole = BoardRoleEnum
+BoardVisibility = BoardVisibilityEnum
+AIPermissionRiskLevel = AIPermissionRiskLevelEnum
+Member = MemberSchema
+AuthUser = AuthUserSchema
+RegisterRequest = RegisterRequestSchema
+LoginRequest = LoginRequestSchema
+AuthSessionResponse = AuthSessionResponseSchema
+BoardInviteLink = BoardInviteLinkSchema
+CreateInviteLinkRequest = CreateInviteLinkRequestSchema
+JoinViaInviteRequest = JoinViaInviteRequestSchema
+JoinViaInviteResponse = JoinViaInviteResponseSchema
+AIPermissionAuditRequest = AIPermissionAuditRequestSchema
+AIPermissionAuditResponse = AIPermissionAuditResponseSchema
 
 
 # ============================================================================
