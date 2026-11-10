@@ -60,6 +60,7 @@ export function CreateBoardModal({
         is_starred: false,
         background: selectedBackground,
         template_id: selectedTemplateId ?? undefined,
+        visibility: "WORKSPACE",
       });
       setTitle("");
       setSelectedTemplateId(null);

@@ -58,6 +58,9 @@ import { BoardTemplatesModal } from "./board-templates-modal";
 import { ButlerAutomationModal } from "./butler-automation-modal";
 import { WebhooksModal } from "./webhooks-modal";
 import { ButlerToastContainer } from "./butler-toast";
+import { AuthModal } from "./auth-modal";
+import { ShareBoardModal } from "./share-board-modal";
+import { InviteBanner } from "./invite-banner";
 
 export function KinetixWorkspace() {
   const queryClient = useQueryClient();
@@ -1244,6 +1247,8 @@ export function KinetixWorkspace() {
         onUpdateBoard={handleUpdateBoard}
       />
 
+      <InviteBanner />
+
       <div className="flex min-h-[calc(100vh-65px)]">
         {/* Collapsible Trello Multi-Board Sidebar */}
         <WorkspaceSidebar
@@ -1358,6 +1363,9 @@ export function KinetixWorkspace() {
           });
         }}
       />
+
+      <AuthModal />
+      <ShareBoardModal />
 
       <ButlerToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>

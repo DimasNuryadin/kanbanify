@@ -3,7 +3,10 @@ import {
   AIAnalyticsReport,
   AIAnalyticsReportSchema,
   AIParseAutomationResponse,
+  AIPermissionAuditResponse,
   AISummaryNotificationResponse,
+  AuthSessionResponse,
+  AuthUser,
   AutomationAction,
   AutomationRule,
   AutomationTrigger,
@@ -12,6 +15,8 @@ import {
   BoardAnalyticsSchema,
   BoardExportCsvResponse,
   BoardExportCsvResponseSchema,
+  BoardInviteLink,
+  BoardRole,
   BoardSchema,
   BoardSummary,
   BoardTemplate,
@@ -32,6 +37,7 @@ import {
   CreateCardRequest,
   CreateColumnRequest,
   CreateCommentRequest,
+  CreateInviteLinkRequest,
   CreateWebhookRequest,
   CreateWorkspaceRequest,
   DEFAULT_BOARD_AUTOMATION_RULES,
@@ -40,15 +46,20 @@ import {
   DEFAULT_BOARD_MEMBERS,
   DEFAULT_BOARD_TEMPLATES,
   DEFAULT_WORKSPACE,
+  JoinViaInviteRequest,
+  JoinViaInviteResponse,
   Label,
   LabelColor,
   LabelColorEnum,
   LabelMetric,
+  LoginRequest,
+  Member,
   MemberWorkload,
   MoveCardRequest,
   MoveColumnRequest,
   Priority,
   PriorityMetric,
+  RegisterRequest,
   SprintHealthStatus,
   Subtask,
   TestWebhookResponse,
@@ -98,6 +109,36 @@ const MEMBER_ALEX = DEFAULT_BOARD_MEMBERS[0].id;
 const MEMBER_MAYA = DEFAULT_BOARD_MEMBERS[1].id;
 const MEMBER_SAMIR = DEFAULT_BOARD_MEMBERS[2].id;
 const MEMBER_ELENA = DEFAULT_BOARD_MEMBERS[3].id;
+
+export const DEMO_USERS: AuthUser[] = [
+  {
+    id: "88888888-8888-4888-8888-888888888881",
+    name: "Alex Rivera",
+    email: "alex@kinetix.dev",
+    avatar_url: null,
+    initials: "AR",
+    color: "#6366f1",
+    default_role: "ADMIN",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888882",
+    name: "Sarah Connor",
+    email: "sarah@kinetix.dev",
+    avatar_url: null,
+    initials: "SC",
+    color: "#10b981",
+    default_role: "EDITOR",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888884",
+    name: "Budi Santoso",
+    email: "budi@kinetix.dev",
+    avatar_url: null,
+    initials: "BS",
+    color: "#f59e0b",
+    default_role: "VIEWER",
+  },
+];
 
 export function createDeterministicUuid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -956,6 +997,22 @@ export const INITIAL_SEED_BOARD: Board = {
   ],
   automation_rules: cloneDefaultAutomationRules(SEED_BOARD_ID),
   webhooks: DEFAULT_BOARD_WEBHOOKS.map((w) => ({ ...w })),
+  invite_links: [
+    {
+      id: "inv-001",
+      board_id: SEED_BOARD_ID,
+      token: "kb_inv_8f92a1bc3d4e",
+      role: "EDITOR",
+      created_by_id: MEMBER_ALEX,
+      created_by_name: "Alex Rivera",
+      max_uses: 10,
+      uses_count: 3,
+      expires_at: "2026-11-17T10:00:00.000Z",
+      is_active: true,
+      created_at: "2026-11-10T10:00:00.000Z",
+    },
+  ],
+  visibility: "WORKSPACE",
 };
 
 export const INITIAL_SPRINT_BOARD: Board = {
@@ -1185,6 +1242,8 @@ export const INITIAL_SPRINT_BOARD: Board = {
   ],
   automation_rules: cloneDefaultAutomationRules(SEED_BOARD_SPRINT_ID),
   webhooks: [],
+  invite_links: [],
+  visibility: "WORKSPACE",
 };
 
 export const INITIAL_MARKETING_BOARD: Board = {
@@ -1397,6 +1456,8 @@ export const INITIAL_MARKETING_BOARD: Board = {
   ],
   automation_rules: cloneDefaultAutomationRules(SEED_BOARD_MARKETING_ID).slice(0, 1),
   webhooks: [],
+  invite_links: [],
+  visibility: "WORKSPACE",
 };
 
 export const INITIAL_SEED_BOARDS = [
@@ -1405,9 +1466,9 @@ export const INITIAL_SEED_BOARDS = [
   INITIAL_MARKETING_BOARD,
 ];
 
-const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v5";
-const STORAGE_KEY_WORKSPACES = "kanbanify_mock_workspaces_v5";
-const STORAGE_KEY = "kanbanify_mock_board_v5";
+const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v6";
+const STORAGE_KEY_WORKSPACES = "kanbanify_mock_workspaces_v6";
+const STORAGE_KEY = "kanbanify_mock_board_v6";
 
 export function syncSubtasksAndChecklists(
   subtasks?: Subtask[],
@@ -2194,6 +2255,8 @@ export class MockApiService {
       cards: [],
       automation_rules: cloneDefaultAutomationRules(boardId),
       webhooks: [],
+      invite_links: [],
+      visibility: payload.visibility ?? "WORKSPACE",
     };
 
     this.saveState(nextBoard);
@@ -2980,6 +3043,352 @@ export class MockApiService {
         ],
       },
       summary_text: `Kanbanify Standup Digest for ${boardTitle}: Sprint on track with high team velocity and 0 critical blockers.`,
+    };
+  }
+
+  // ==========================================================================
+  // PHASE 6 AUTH, RBAC, BOARD MEMBERS & SHAREABLE INVITES
+  // ==========================================================================
+
+  async login(payload: LoginRequest): Promise<AuthSessionResponse> {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const user =
+      DEMO_USERS.find(
+        (u) => u.email.toLowerCase() === payload.email.toLowerCase()
+      ) ?? {
+        id: createDeterministicUuid(),
+        name: payload.email.split("@")[0],
+        email: payload.email,
+        avatar_url: null,
+        initials: payload.email.slice(0, 2).toUpperCase(),
+        color: "#6366f1",
+        default_role: "EDITOR" as const,
+      };
+    return {
+      token: `kb_sess_${user.id}_token`,
+      user,
+      expires_at: new Date(Date.now() + 7 * 86400 * 1000).toISOString(),
+    };
+  }
+
+  async register(payload: RegisterRequest): Promise<AuthSessionResponse> {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const user: AuthUser = {
+      id: createDeterministicUuid(),
+      name: payload.name,
+      email: payload.email,
+      avatar_url: null,
+      initials:
+        payload.name
+          .split(" ")
+          .map((p) => p[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase() || "KB",
+      color: "#10b981",
+      default_role: "EDITOR",
+    };
+    return {
+      token: `kb_sess_${user.id}_token`,
+      user,
+      expires_at: new Date(Date.now() + 7 * 86400 * 1000).toISOString(),
+    };
+  }
+
+  async getMe(): Promise<AuthUser> {
+    return DEMO_USERS[0];
+  }
+
+  async getDemoUsers(): Promise<AuthUser[]> {
+    return DEMO_USERS;
+  }
+
+  async addMember(
+    boardId: string,
+    payload: { name: string; email: string; role: BoardRole }
+  ): Promise<Member> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const newMember: Member = {
+      id: createDeterministicUuid(),
+      name: payload.name,
+      email: payload.email,
+      avatar_url: null,
+      initials:
+        payload.name
+          .split(" ")
+          .map((p) => p[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase() || "MB",
+      color: payload.role === "ADMIN" ? "#6366f1" : payload.role === "EDITOR" ? "#10b981" : "#f59e0b",
+      role: payload.role,
+      joined_at: new Date().toISOString(),
+    };
+    const nextMembers = [
+      ...board.members.filter((m) => m.email.toLowerCase() !== payload.email.toLowerCase()),
+      newMember,
+    ];
+    const activity = this.createActivity(
+      board,
+      "MEMBER_ASSIGNED",
+      `invited ${newMember.name} as ${newMember.role}`
+    );
+    const updatedBoard: Board = {
+      ...board,
+      members: nextMembers,
+      activities: [activity, ...board.activities],
+    };
+    this.saveState(updatedBoard);
+    return newMember;
+  }
+
+  async updateMemberRole(
+    boardId: string,
+    memberId: string,
+    role: BoardRole
+  ): Promise<Member> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const member = board.members.find((m) => m.id === memberId);
+    if (!member) {
+      throw new Error("Member not found on this board");
+    }
+    const updatedMember: Member = { ...member, role };
+    const nextMembers = board.members.map((m) =>
+      m.id === memberId ? updatedMember : m
+    );
+    const activity = this.createActivity(
+      board,
+      "MEMBER_ASSIGNED",
+      `changed role of ${member.name} to ${role}`
+    );
+    const updatedBoard: Board = {
+      ...board,
+      members: nextMembers,
+      activities: [activity, ...board.activities],
+    };
+    this.saveState(updatedBoard);
+    return updatedMember;
+  }
+
+  async removeMember(
+    boardId: string,
+    memberId: string
+  ): Promise<{ id: string; removed: boolean }> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const nextMembers = board.members.filter((m) => m.id !== memberId);
+    const updatedBoard: Board = {
+      ...board,
+      members: nextMembers,
+    };
+    this.saveState(updatedBoard);
+    return { id: memberId, removed: true };
+  }
+
+  async getInviteLinks(boardId: string): Promise<BoardInviteLink[]> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    return board.invite_links ?? [];
+  }
+
+  async createInviteLink(
+    boardId: string,
+    payload: CreateInviteLinkRequest
+  ): Promise<BoardInviteLink> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const expiresAt =
+      payload.expires_in_hours && payload.expires_in_hours > 0
+        ? new Date(Date.now() + payload.expires_in_hours * 3600 * 1000).toISOString()
+        : null;
+    const token = `kb_inv_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+    const newLink: BoardInviteLink = {
+      id: `inv-${createDeterministicUuid().slice(0, 8)}`,
+      board_id: boardId,
+      token,
+      role: payload.role,
+      created_by_id: MEMBER_ALEX,
+      created_by_name: "Alex Rivera",
+      max_uses: payload.max_uses ?? null,
+      uses_count: 0,
+      expires_at: expiresAt,
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+    const updatedBoard: Board = {
+      ...board,
+      invite_links: [newLink, ...(board.invite_links ?? [])],
+    };
+    this.saveState(updatedBoard);
+    return newLink;
+  }
+
+  async revokeInviteLink(inviteId: string): Promise<{ id: string; revoked: boolean }> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.invite_links ?? [];
+      if (existing.some((l) => l.id === inviteId)) {
+        const updatedBoard: Board = {
+          ...board,
+          invite_links: existing.filter((l) => l.id !== inviteId),
+        };
+        this.saveState(updatedBoard);
+        return { id: inviteId, revoked: true };
+      }
+    }
+    return { id: inviteId, revoked: true };
+  }
+
+  async previewInvite(token: string): Promise<{
+    board_id: string;
+    board_title: string;
+    inviter_name: string;
+    granted_role: BoardRole;
+    is_valid: boolean;
+  }> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const link = (board.invite_links ?? []).find((l) => l.token === token);
+      if (link) {
+        return {
+          board_id: board.id,
+          board_title: board.title,
+          inviter_name: link.created_by_name,
+          granted_role: link.role,
+          is_valid: link.is_active,
+        };
+      }
+    }
+    const fallbackBoard = this.boards.get(SEED_BOARD_ID) ?? INITIAL_SEED_BOARD;
+    return {
+      board_id: fallbackBoard.id,
+      board_title: fallbackBoard.title,
+      inviter_name: "Alex Rivera",
+      granted_role: "EDITOR",
+      is_valid: true,
+    };
+  }
+
+  async joinViaInvite(
+    token: string,
+    payload?: JoinViaInviteRequest
+  ): Promise<JoinViaInviteResponse> {
+    this.loadState();
+    let targetBoard: Board | undefined;
+    let targetLink: BoardInviteLink | undefined;
+
+    for (const board of this.boards.values()) {
+      const link = (board.invite_links ?? []).find((l) => l.token === token);
+      if (link) {
+        targetBoard = board;
+        targetLink = link;
+        break;
+      }
+    }
+
+    if (!targetBoard) {
+      targetBoard = this.boards.get(SEED_BOARD_ID) ?? INITIAL_SEED_BOARD;
+      targetLink = targetBoard.invite_links?.[0] ?? {
+        id: "inv-001",
+        board_id: targetBoard.id,
+        token,
+        role: "EDITOR",
+        created_by_id: MEMBER_ALEX,
+        created_by_name: "Alex Rivera",
+        max_uses: 10,
+        uses_count: 0,
+        expires_at: null,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+    }
+
+    const grantedRole = targetLink?.role ?? "EDITOR";
+    const guestName = payload?.name || "Sarah Connor";
+    const guestEmail = payload?.email || `guest_${Date.now()}@kinetix.dev`;
+
+    const newMember: Member = {
+      id: createDeterministicUuid(),
+      name: guestName,
+      email: guestEmail,
+      avatar_url: null,
+      initials: guestName.slice(0, 2).toUpperCase(),
+      color: "#ec4899",
+      role: grantedRole,
+      joined_at: new Date().toISOString(),
+    };
+
+    const updatedLinks = (targetBoard.invite_links ?? []).map((l) =>
+      l.token === token ? { ...l, uses_count: l.uses_count + 1 } : l
+    );
+
+    const activity = this.createActivity(
+      targetBoard,
+      "MEMBER_ASSIGNED",
+      `${guestName} joined board via invite link (${grantedRole})`
+    );
+
+    const updatedBoard: Board = {
+      ...targetBoard,
+      members: [
+        ...targetBoard.members.filter((m) => m.email.toLowerCase() !== guestEmail.toLowerCase()),
+        newMember,
+      ],
+      invite_links: updatedLinks,
+      activities: [activity, ...targetBoard.activities],
+    };
+    this.saveState(updatedBoard);
+
+    return {
+      board_id: targetBoard.id,
+      board_title: targetBoard.title,
+      granted_role: grantedRole,
+      member: newMember,
+    };
+  }
+
+  async auditPermissions(boardId: string): Promise<AIPermissionAuditResponse> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const members = board.members ?? [];
+    const invites = board.invite_links ?? [];
+
+    const adminCount = members.filter((m) => m.role === "ADMIN").length;
+    const editorCount = members.filter((m) => m.role === "EDITOR").length;
+    const viewerCount = members.filter((m) => m.role === "VIEWER").length;
+    const nonExpiringInvites = invites.filter((l) => !l.expires_at).length;
+
+    let score = 92;
+    if (nonExpiringInvites > 0) score -= 14;
+    if (editorCount > 3) score -= 5;
+    if (adminCount > 2) score -= 8;
+    score = Math.max(45, Math.min(100, score));
+
+    const risk_level = score >= 80 ? "LOW" : score >= 60 ? "MEDIUM" : "HIGH";
+
+    const findings: string[] = [
+      `Board has ${adminCount} Admin, ${editorCount} Editors, and ${viewerCount} Viewers.`,
+      nonExpiringInvites > 0
+        ? `Detected ${nonExpiringInvites} active invite link(s) without expiration timestamps.`
+        : "All active invite links have strict expiration boundaries configured.",
+      "Least-privilege permission matrix verified for Viewer read-only observer boundaries.",
+      "Butler automation configuration and outbound webhook dispatch locked to Admin role.",
+    ];
+
+    const recommendations: string[] = [
+      "Configure TTL / expiration timestamps on any newly issued shareable invite links.",
+      "Review Editor permissions periodically and downgrade inactive contributors to Viewer.",
+      "Restrict Board Settings and Butler Automation rules to trusted Board Admins.",
+    ];
+
+    return {
+      security_score: score,
+      risk_level,
+      summary: `Automated least-privilege security audit completed with score ${score}/100 (${risk_level} risk).`,
+      findings,
+      recommendations,
     };
   }
 }
@@ -3816,6 +4225,8 @@ export function parseTrelloOrKinetixImport(
       ],
       automation_rules: cloneDefaultAutomationRules(newBoardId),
       webhooks: [],
+      invite_links: [],
+      visibility: "WORKSPACE",
       created_at: nowIso,
     })
   );

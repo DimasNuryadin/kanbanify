@@ -152,6 +152,8 @@ export function CardDetailDrawer({
   const board = useWorkspaceStore((s) => s.board);
   const selectedCardId = useWorkspaceStore((s) => s.selectedCardId);
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const isViewer = activeRole === "VIEWER";
 
   const card: Card | null =
     board.cards.find((c) => c.id === selectedCardId) ?? null;
@@ -538,24 +540,36 @@ export function CardDetailDrawer({
               <Archive className="h-4 w-4 text-amber-600 dark:text-amber-400" />
               <span>This card is archived.</span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onUpdateCard(card.id, { is_archived: false })}
-                className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-zinc-800 shadow-2xs hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-100"
-              >
-                <ArchiveRestore className="h-3.5 w-3.5 text-emerald-500" />
-                Restore to Board
-              </button>
-              <button
-                type="button"
-                onClick={() => onDeleteCard(card.id)}
-                className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete Permanently
-              </button>
-            </div>
+            {!isViewer && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onUpdateCard(card.id, { is_archived: false })}
+                  className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-zinc-800 shadow-2xs hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-100"
+                >
+                  <ArchiveRestore className="h-3.5 w-3.5 text-emerald-500" />
+                  Restore to Board
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteCard(card.id)}
+                  className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-500"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete Permanently
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* View-Only Mode Banner */}
+        {isViewer && (
+          <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-6 py-2.5 text-xs font-semibold text-amber-800 dark:border-amber-500/20 dark:text-amber-300">
+            <Eye className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>
+              <strong>👁️ Viewer Mode (Read-Only):</strong> You can inspect card details, checklists, and activity feed, but cannot edit fields.
+            </span>
           </div>
         )}
 
@@ -573,16 +587,18 @@ export function CardDetailDrawer({
                   }
             }
           >
-            <button
-              type="button"
-              onClick={() =>
-                setActivePopover(activePopover === "cover" ? null : "cover")
-              }
-              className="inline-flex items-center gap-1.5 rounded-lg bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-xs transition-colors hover:bg-black/65"
-            >
-              <Palette className="h-3.5 w-3.5" />
-              Cover
-            </button>
+            {!isViewer && (
+              <button
+                type="button"
+                onClick={() =>
+                  setActivePopover(activePopover === "cover" ? null : "cover")
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg bg-black/45 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-xs transition-colors hover:bg-black/65"
+              >
+                <Palette className="h-3.5 w-3.5" />
+                Cover
+              </button>
+            )}
 
             <button
               type="button"
@@ -597,23 +613,30 @@ export function CardDetailDrawer({
         {/* Top Modal Title & Subtitle Header */}
         <div className="flex items-start justify-between gap-4 border-b border-zinc-200/80 px-6 pt-5 pb-4 dark:border-zinc-800/80">
           <div className="min-w-0 flex-1">
-            <input
-              type="text"
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={handleSaveTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSaveTitle();
-              }}
-              className="w-full rounded-lg bg-transparent px-1.5 py-0.5 -mx-1.5 text-lg font-bold tracking-tight text-zinc-900 focus:bg-zinc-100 focus:outline-none sm:text-xl dark:text-zinc-100 dark:focus:bg-zinc-900"
-            />
+            {isViewer ? (
+              <h3 className="px-1.5 py-0.5 -mx-1.5 text-lg font-bold tracking-tight text-zinc-900 sm:text-xl dark:text-zinc-100">
+                {card.title}
+              </h3>
+            ) : (
+              <input
+                type="text"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onBlur={handleSaveTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveTitle();
+                }}
+                className="w-full rounded-lg bg-transparent px-1.5 py-0.5 -mx-1.5 text-lg font-bold tracking-tight text-zinc-900 focus:bg-zinc-100 focus:outline-none sm:text-xl dark:text-zinc-100 dark:focus:bg-zinc-900"
+              />
+            )}
 
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
               <span>in list</span>
               <select
+                disabled={isViewer}
                 value={card.column_id}
                 onChange={(e) => handleMoveCardToColumn(e.target.value)}
-                className="rounded-md border border-zinc-200/80 bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-200/70 focus:outline-none dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
+                className="rounded-md border border-zinc-200/80 bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-200/70 focus:outline-none disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
               >
                 {board.columns
                   .filter((col) => !col.is_archived)
@@ -689,26 +712,29 @@ export function CardDetailDrawer({
                     <button
                       key={m.id}
                       type="button"
-                      onClick={() => handleToggleMember(m.id)}
-                      title={`${m.name} (Click to remove)`}
-                      className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-xs transition-transform hover:scale-105"
+                      disabled={isViewer}
+                      onClick={() => !isViewer && handleToggleMember(m.id)}
+                      title={`${m.name}${isViewer ? "" : " (Click to remove)"}`}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white shadow-xs transition-transform hover:scale-105 disabled:hover:scale-100 disabled:cursor-default"
                       style={{ backgroundColor: m.color }}
                     >
                       {m.initials}
                     </button>
                   ))}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActivePopover(
-                        activePopover === "members" ? null : "members"
-                      )
-                    }
-                    title="Assign member"
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-zinc-300 bg-zinc-50 text-zinc-500 hover:border-indigo-500 hover:text-indigo-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                  {!isViewer && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePopover(
+                          activePopover === "members" ? null : "members"
+                        )
+                      }
+                      title="Assign member"
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-zinc-300 bg-zinc-50 text-zinc-500 hover:border-indigo-500 hover:text-indigo-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -724,12 +750,14 @@ export function CardDetailDrawer({
                       <button
                         key={lbl.id}
                         type="button"
+                        disabled={isViewer}
                         onClick={() =>
+                          !isViewer &&
                           setActivePopover(
                             activePopover === "labels" ? null : "labels"
                           )
                         }
-                        className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold ${style.pillBg} ${style.pillText}`}
+                        className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold ${style.pillBg} ${style.pillText} disabled:cursor-default`}
                       >
                         <span
                           className={`h-2 w-2 rounded-full ${style.dot}`}
@@ -738,18 +766,20 @@ export function CardDetailDrawer({
                       </button>
                     );
                   })}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActivePopover(
-                        activePopover === "labels" ? null : "labels"
-                      )
-                    }
-                    title="Add label"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-zinc-300 bg-zinc-50 text-zinc-500 hover:border-indigo-500 hover:text-indigo-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                  {!isViewer && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePopover(
+                          activePopover === "labels" ? null : "labels"
+                        )
+                      }
+                      title="Add label"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-dashed border-zinc-300 bg-zinc-50 text-zinc-500 hover:border-indigo-500 hover:text-indigo-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -762,22 +792,25 @@ export function CardDetailDrawer({
                   <div className="flex items-center gap-2 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2.5 py-1.5 dark:border-zinc-800 dark:bg-zinc-900">
                     <input
                       type="checkbox"
+                      disabled={isViewer}
                       checked={card.is_due_complete}
                       onChange={(e) =>
                         onUpdateCard(card.id, {
                           is_due_complete: e.target.checked,
                         })
                       }
-                      className="h-4 w-4 cursor-pointer rounded accent-emerald-600"
+                      className="h-4 w-4 cursor-pointer rounded accent-emerald-600 disabled:cursor-not-allowed"
                     />
                     <button
                       type="button"
+                      disabled={isViewer}
                       onClick={() =>
+                        !isViewer &&
                         setActivePopover(
                           activePopover === "dates" ? null : "dates"
                         )
                       }
-                      className="flex items-center gap-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200"
+                      className="flex items-center gap-1.5 text-xs font-medium text-zinc-800 disabled:cursor-default dark:text-zinc-200"
                     >
                       <span>
                         {card.start_date
@@ -819,13 +852,14 @@ export function CardDetailDrawer({
                 </span>
                 <div className="flex items-center gap-1.5">
                   <select
+                    disabled={isViewer}
                     value={card.priority}
                     onChange={(e) =>
                       onUpdateCard(card.id, {
                         priority: e.target.value as Priority,
                       })
                     }
-                    className="h-8 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2 text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+                    className="h-8 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2 text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:opacity-70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
                   >
                     {(Object.keys(PRIORITY_STYLES) as Priority[]).map((p) => (
                       <option key={p} value={p}>
@@ -835,6 +869,7 @@ export function CardDetailDrawer({
                   </select>
 
                   <select
+                    disabled={isViewer}
                     value={card.story_points ?? ""}
                     onChange={(e) =>
                       onUpdateCard(card.id, {
@@ -842,7 +877,7 @@ export function CardDetailDrawer({
                           e.target.value === "" ? null : Number(e.target.value),
                       })
                     }
-                    className="h-8 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2 font-mono text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+                    className="h-8 rounded-lg border border-zinc-200/80 bg-zinc-50 px-2 font-mono text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:opacity-70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
                   >
                     <option value="">— pts</option>
                     {STORY_POINT_OPTIONS.map((pts) => (
@@ -884,7 +919,7 @@ export function CardDetailDrawer({
                   <AlignLeft className="h-4 w-4 text-zinc-400" />
                   Description
                 </h4>
-                {!isEditingDesc && (
+                {!isViewer && !isEditingDesc && (
                   <button
                     type="button"
                     onClick={() => setIsEditingDesc(true)}
@@ -895,7 +930,7 @@ export function CardDetailDrawer({
                 )}
               </div>
 
-              {isEditingDesc ? (
+              {isEditingDesc && !isViewer ? (
                 <div className="rounded-xl border border-indigo-500 bg-zinc-50/80 p-3 dark:bg-zinc-900/90">
                   {/* Formatting Toolbar Helper */}
                   <div className="mb-2 flex flex-wrap items-center gap-1 border-b border-zinc-200/80 pb-2 dark:border-zinc-800">
@@ -974,14 +1009,16 @@ export function CardDetailDrawer({
                 </div>
               ) : (
                 <div
-                  onClick={() => setIsEditingDesc(true)}
-                  className="min-h-[68px] cursor-pointer rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5 transition-colors hover:bg-zinc-100/70 dark:border-zinc-800/80 dark:bg-zinc-900/50 dark:hover:bg-zinc-900"
+                  onClick={() => !isViewer && setIsEditingDesc(true)}
+                  className={`min-h-[68px] rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5 transition-colors dark:border-zinc-800/80 dark:bg-zinc-900/50 ${
+                    isViewer ? "cursor-default" : "cursor-pointer hover:bg-zinc-100/70 dark:hover:bg-zinc-900"
+                  }`}
                 >
                   {card.description ? (
                     <FormattedMarkdownPreview content={card.description} />
                   ) : (
                     <p className="text-xs text-zinc-400">
-                      Add a more detailed description...
+                      {isViewer ? "No description provided." : "Add a more detailed description..."}
                     </p>
                   )}
                 </div>
@@ -1028,13 +1065,15 @@ export function CardDetailDrawer({
                             : "Hide completed items"}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteChecklist(cl.id)}
-                        className="rounded-lg border border-zinc-200/80 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 hover:bg-rose-500/10 hover:text-rose-600 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
-                      >
-                        Delete
-                      </button>
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteChecklist(cl.id)}
+                          className="rounded-lg border border-zinc-200/80 bg-white px-2 py-1 text-[11px] font-medium text-zinc-600 hover:bg-rose-500/10 hover:text-rose-600 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1066,10 +1105,13 @@ export function CardDetailDrawer({
                         >
                           <button
                             type="button"
+                            disabled={isViewer}
                             onClick={() =>
-                              handleToggleChecklistItem(cl.id, item.id)
+                              !isViewer && handleToggleChecklistItem(cl.id, item.id)
                             }
-                            className="flex flex-1 items-center gap-2.5 text-left"
+                            className={`flex flex-1 items-center gap-2.5 text-left ${
+                              isViewer ? "cursor-default" : ""
+                            }`}
                           >
                             {item.is_completed ? (
                               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
@@ -1097,15 +1139,17 @@ export function CardDetailDrawer({
                                 {assignee.initials}
                               </span>
                             )}
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleDeleteChecklistItem(cl.id, item.id)
-                              }
-                              className="rounded p-1 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-rose-500/10 hover:text-rose-500"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            {!isViewer && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDeleteChecklistItem(cl.id, item.id)
+                                }
+                                className="rounded p-1 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-rose-500/10 hover:text-rose-500"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
@@ -1113,50 +1157,52 @@ export function CardDetailDrawer({
                   </div>
 
                   {/* Add Item Inline */}
-                  {addingItemChecklistId === cl.id ? (
-                    <form
-                      onSubmit={(e) => handleAddChecklistItem(e, cl.id)}
-                      className="mt-2.5 space-y-2"
-                    >
-                      <input
-                        type="text"
-                        autoFocus
-                        value={newItemTitle}
-                        onChange={(e) => setNewItemTitle(e.target.value)}
-                        placeholder="Add an item..."
-                        className="w-full rounded-lg border border-indigo-500 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100"
-                      />
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="submit"
-                          className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500"
-                        >
-                          Add
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAddingItemChecklistId(null);
-                            setNewItemTitle("");
-                          }}
-                          className="rounded-lg px-2.5 py-1 text-xs text-zinc-500 hover:bg-zinc-200/60 dark:hover:bg-zinc-800"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddingItemChecklistId(cl.id);
-                        setNewItemTitle("");
-                      }}
-                      className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/80 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Add an item
-                    </button>
+                  {!isViewer && (
+                    addingItemChecklistId === cl.id ? (
+                      <form
+                        onSubmit={(e) => handleAddChecklistItem(e, cl.id)}
+                        className="mt-2.5 space-y-2"
+                      >
+                        <input
+                          type="text"
+                          autoFocus
+                          value={newItemTitle}
+                          onChange={(e) => setNewItemTitle(e.target.value)}
+                          placeholder="Add an item..."
+                          className="w-full rounded-lg border border-indigo-500 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500"
+                          >
+                            Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddingItemChecklistId(null);
+                              setNewItemTitle("");
+                            }}
+                            className="rounded-lg px-2.5 py-1 text-xs text-zinc-500 hover:bg-zinc-200/60 dark:hover:bg-zinc-800"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAddingItemChecklistId(cl.id);
+                          setNewItemTitle("");
+                        }}
+                        className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/80 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-200"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add an item
+                      </button>
+                    )
                   )}
                 </div>
               );
@@ -1202,14 +1248,16 @@ export function CardDetailDrawer({
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveAttachment(att.id)}
-                        className="rounded-lg p-1.5 text-zinc-400 hover:bg-rose-500/10 hover:text-rose-500"
-                        title="Remove attachment"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {!isViewer && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAttachment(att.id)}
+                          className="rounded-lg p-1.5 text-zinc-400 hover:bg-rose-500/10 hover:text-rose-500"
+                          title="Remove attachment"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1233,36 +1281,42 @@ export function CardDetailDrawer({
               </div>
 
               {/* Write Comment Form */}
-              <form onSubmit={handleSubmitComment} className="mb-4 flex gap-2.5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-                  AR
-                </span>
-                <div className="flex-1 rounded-xl border border-zinc-200/80 bg-zinc-50 p-2.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:bg-zinc-950">
-                  <textarea
-                    rows={2}
-                    value={commentInput}
-                    onChange={(e) => setCommentInput(e.target.value)}
-                    onFocus={() =>
-                      boardWsClient.sendClientPresence("START_TYPING", card.id)
-                    }
-                    onBlur={() =>
-                      boardWsClient.sendClientPresence("STOP_TYPING", card.id)
-                    }
-                    placeholder="Write a comment..."
-                    className="w-full resize-none bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
-                  />
-                  <div className="mt-1.5 flex justify-end">
-                    <button
-                      type="submit"
-                      disabled={!commentInput.trim()}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
-                    >
-                      <Send className="h-3 w-3" />
-                      Comment
-                    </button>
+              {!isViewer ? (
+                <form onSubmit={handleSubmitComment} className="mb-4 flex gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                    AR
+                  </span>
+                  <div className="flex-1 rounded-xl border border-zinc-200/80 bg-zinc-50 p-2.5 focus-within:border-indigo-500 focus-within:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:bg-zinc-950">
+                    <textarea
+                      rows={2}
+                      value={commentInput}
+                      onChange={(e) => setCommentInput(e.target.value)}
+                      onFocus={() =>
+                        boardWsClient.sendClientPresence("START_TYPING", card.id)
+                      }
+                      onBlur={() =>
+                        boardWsClient.sendClientPresence("STOP_TYPING", card.id)
+                      }
+                      placeholder="Write a comment..."
+                      className="w-full resize-none bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100"
+                    />
+                    <div className="mt-1.5 flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={!commentInput.trim()}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-40"
+                      >
+                        <Send className="h-3 w-3" />
+                        Comment
+                      </button>
+                    </div>
                   </div>
+                </form>
+              ) : (
+                <div className="mb-4 rounded-xl border border-zinc-200/60 bg-zinc-50/50 p-2.5 text-center text-xs text-zinc-500 dark:border-zinc-800/60 dark:bg-zinc-900/40 dark:text-zinc-400">
+                  Comments are read-only in Viewer Mode.
                 </div>
-              </form>
+              )}
 
               {/* Comments List */}
               <div className="space-y-3">
@@ -1286,14 +1340,16 @@ export function CardDetailDrawer({
                             })}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteComment(card.id, cm.id)}
-                          title="Delete comment"
-                          className="text-zinc-400 hover:text-rose-500"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {!isViewer && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteComment(card.id, cm.id)}
+                            title="Delete comment"
+                            className="text-zinc-400 hover:text-rose-500"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                       <p className="mt-1.5 text-xs leading-relaxed text-zinc-700 dark:text-zinc-300">
                         {cm.content}
@@ -1340,135 +1396,139 @@ export function CardDetailDrawer({
           {/* RIGHT ACTION SIDEBAR ("Add to card" & "Actions") (4 cols) */}
           <div className="space-y-5 md:col-span-4">
             {/* ✨ AI Smart Enrich / Decompose Button */}
-            <div className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-500/15 via-violet-500/10 to-transparent p-3.5">
-              <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                <Sparkles className="h-4 w-4 text-indigo-500" />
-                <span>Kanbanify AI Smart Enrich</span>
+            {!isViewer && (
+              <div className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-500/15 via-violet-500/10 to-transparent p-3.5">
+                <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                  <Sparkles className="h-4 w-4 text-indigo-500" />
+                  <span>Kanbanify AI Smart Enrich</span>
+                </div>
+                <p className="mb-3 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  Auto-generate structured spec, suggested color labels, and
+                  categorized checklists.
+                </p>
+                <button
+                  type="button"
+                  disabled={isDecomposing}
+                  onClick={handleTriggerAiDecompose}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-500 hover:to-violet-500 disabled:opacity-60"
+                >
+                  <Sparkles
+                    className={`h-3.5 w-3.5 ${
+                      isDecomposing ? "animate-spin" : ""
+                    }`}
+                  />
+                  <span>
+                    {isDecomposing
+                      ? "Enriching Card..."
+                      : "✨ AI Smart Enrich"}
+                  </span>
+                </button>
               </div>
-              <p className="mb-3 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-                Auto-generate structured spec, suggested color labels, and
-                categorized checklists.
-              </p>
-              <button
-                type="button"
-                disabled={isDecomposing}
-                onClick={handleTriggerAiDecompose}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:from-indigo-500 hover:to-violet-500 disabled:opacity-60"
-              >
-                <Sparkles
-                  className={`h-3.5 w-3.5 ${
-                    isDecomposing ? "animate-spin" : ""
-                  }`}
-                />
-                <span>
-                  {isDecomposing
-                    ? "Enriching Card..."
-                    : "✨ AI Smart Enrich"}
-                </span>
-              </button>
-            </div>
+            )}
 
             {/* "Add to card" Buttons */}
-            <div>
-              <h5 className="mb-2 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
-                Add to card
-              </h5>
-              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-1">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "members" ? null : "members"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <Users className="h-3.5 w-3.5 text-indigo-500" />
-                  <span>Members</span>
-                </button>
+            {!isViewer && (
+              <div>
+                <h5 className="mb-2 text-[10px] font-bold tracking-wider text-zinc-400 uppercase">
+                  Add to card
+                </h5>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "members" ? null : "members"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <Users className="h-3.5 w-3.5 text-indigo-500" />
+                    <span>Members</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "labels" ? null : "labels"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <Tag className="h-3.5 w-3.5 text-emerald-500" />
-                  <span>Labels</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "labels" ? null : "labels"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <Tag className="h-3.5 w-3.5 text-emerald-500" />
+                    <span>Labels</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "checklist" ? null : "checklist"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <CheckSquare className="h-3.5 w-3.5 text-sky-500" />
-                  <span>Checklist</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "checklist" ? null : "checklist"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <CheckSquare className="h-3.5 w-3.5 text-sky-500" />
+                    <span>Checklist</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "dates" ? null : "dates"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <Calendar className="h-3.5 w-3.5 text-amber-500" />
-                  <span>Dates</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "dates" ? null : "dates"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <Calendar className="h-3.5 w-3.5 text-amber-500" />
+                    <span>Dates</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "attachment" ? null : "attachment"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <Paperclip className="h-3.5 w-3.5 text-violet-500" />
-                  <span>Attachment</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "attachment" ? null : "attachment"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <Paperclip className="h-3.5 w-3.5 text-violet-500" />
+                    <span>Attachment</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "cover" ? null : "cover"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <Palette className="h-3.5 w-3.5 text-pink-500" />
-                  <span>Cover</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "cover" ? null : "cover"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <Palette className="h-3.5 w-3.5 text-pink-500" />
+                    <span>Cover</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(
-                      activePopover === "blockers" ? null : "blockers"
-                    )
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <AlertOctagon className="h-3.5 w-3.5 text-rose-500" />
-                  <span>Blockers ({card.blocked_by_card_ids.length})</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActivePopover(
+                        activePopover === "blockers" ? null : "blockers"
+                      )
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <AlertOctagon className="h-3.5 w-3.5 text-rose-500" />
+                    <span>Blockers ({card.blocked_by_card_ids.length})</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Active Popover Panel inside Sidebar */}
-            {activePopover && (
+            {activePopover && !isViewer && (
               <div className="rounded-2xl border border-indigo-500/40 bg-zinc-50 p-3.5 shadow-lg dark:bg-zinc-900">
                 <div className="mb-2.5 flex items-center justify-between border-b border-zinc-200/80 pb-2 dark:border-zinc-800">
                   <span className="text-xs font-bold capitalize text-zinc-900 dark:text-zinc-100">
@@ -1979,27 +2039,31 @@ export function CardDetailDrawer({
                 Actions
               </h5>
               <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-1">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(activePopover === "move" ? null : "move")
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <ArrowRight className="h-3.5 w-3.5 text-zinc-400" />
-                  <span>Move ({currentColumn?.title ?? "List"})</span>
-                </button>
+                {!isViewer && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePopover(activePopover === "move" ? null : "move")
+                      }
+                      className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <ArrowRight className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>Move ({currentColumn?.title ?? "List"})</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActivePopover(activePopover === "copy" ? null : "copy")
-                  }
-                  className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                >
-                  <Copy className="h-3.5 w-3.5 text-zinc-400" />
-                  <span>Copy Card</span>
-                </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePopover(activePopover === "copy" ? null : "copy")
+                      }
+                      className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <Copy className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>Copy Card</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -2023,7 +2087,7 @@ export function CardDetailDrawer({
                   )}
                 </button>
 
-                {!card.is_archived ? (
+                {!isViewer && (!card.is_archived ? (
                   <button
                     type="button"
                     onClick={() =>
@@ -2043,7 +2107,7 @@ export function CardDetailDrawer({
                     <Trash2 className="h-3.5 w-3.5" />
                     <span>Delete Permanently</span>
                   </button>
-                )}
+                ))}
               </div>
             </div>
           </div>

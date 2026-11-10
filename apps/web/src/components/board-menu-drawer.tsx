@@ -38,6 +38,9 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
   const board = useWorkspaceStore((s) => s.board);
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
   const setWebhooksModalOpen = useWorkspaceStore((s) => s.setWebhooksModalOpen);
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const isViewer = activeRole === "VIEWER";
+  const isAdmin = activeRole === "ADMIN";
 
   const [section, setSection] = useState<
     "background" | "labels" | "about" | "activity"
@@ -191,14 +194,15 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                       <button
                         key={opt.id}
                         type="button"
+                        disabled={isViewer}
                         onClick={() =>
-                          onUpdateBoard({ background: opt.background })
+                          !isViewer && onUpdateBoard({ background: opt.background })
                         }
                         className={`group relative flex h-20 flex-col justify-end overflow-hidden rounded-xl border p-2.5 text-left transition-all ${
                           isSelected
                             ? "border-indigo-500 ring-2 ring-indigo-500/30"
                             : "border-zinc-200/80 hover:border-zinc-400 dark:border-zinc-800"
-                        }`}
+                        } ${isViewer ? "cursor-not-allowed opacity-70" : ""}`}
                         style={{ background: opt.previewStyle }}
                       >
                         <div className="flex items-center justify-between">
@@ -237,14 +241,15 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                       <button
                         key={opt.id}
                         type="button"
+                        disabled={isViewer}
                         onClick={() =>
-                          onUpdateBoard({ background: opt.background })
+                          !isViewer && onUpdateBoard({ background: opt.background })
                         }
                         className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
                           isSelected
                             ? "border-indigo-500 bg-indigo-500/5 ring-2 ring-indigo-500/20 dark:bg-indigo-500/10"
                             : "border-zinc-200/80 bg-zinc-50/70 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/60"
-                        }`}
+                        } ${isViewer ? "cursor-not-allowed opacity-70" : ""}`}
                       >
                         <div className="flex items-center gap-2.5">
                           <span
@@ -286,69 +291,74 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                         />
                         <input
                           type="text"
+                          disabled={isViewer}
                           value={lbl.name}
                           onChange={(e) =>
                             handleRenameLabel(lbl.id, e.target.value)
                           }
                           placeholder={style.name}
-                          className="flex-1 rounded-lg bg-transparent px-2 py-1 text-xs font-medium text-zinc-800 focus:bg-white focus:outline-none dark:text-zinc-100 dark:focus:bg-zinc-800"
+                          className="flex-1 rounded-lg bg-transparent px-2 py-1 text-xs font-medium text-zinc-800 focus:bg-white focus:outline-none disabled:opacity-70 dark:text-zinc-100 dark:focus:bg-zinc-800"
                         />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLabel(lbl.id)}
-                          title="Delete label"
-                          className="rounded p-1 text-zinc-400 hover:bg-rose-500/10 hover:text-rose-500"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        {!isViewer && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLabel(lbl.id)}
+                            title="Delete label"
+                            className="rounded p-1 text-zinc-400 hover:bg-rose-500/10 hover:text-rose-500"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              <form
-                onSubmit={handleCreateLabel}
-                className="space-y-3 rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/50"
-              >
-                <h5 className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                  Create New Label
-                </h5>
-                <input
-                  type="text"
-                  value={newLabelName}
-                  onChange={(e) => setNewLabelName(e.target.value)}
-                  placeholder="Label name (e.g. Design Review)..."
-                  className="w-full rounded-lg border border-zinc-200/80 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:border-indigo-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                />
-                <div className="flex flex-wrap gap-1.5">
-                  {ALL_LABEL_COLORS.map((color) => {
-                    const style = LABEL_COLOR_MAP[color];
-                    const active = newLabelColor === color;
-                    return (
-                      <button
-                        key={color}
-                        type="button"
-                        onClick={() => setNewLabelColor(color)}
-                        className={`flex h-6 w-8 items-center justify-center rounded-md transition-transform ${
-                          active ? "scale-110 ring-2 ring-indigo-500" : ""
-                        }`}
-                        style={{ backgroundColor: style.swatch }}
-                        title={style.name}
-                      >
-                        {active && <Check className="h-3 w-3 text-white" />}
-                      </button>
-                    );
-                  })}
-                </div>
-                <button
-                  type="submit"
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950"
+              {!isViewer && (
+                <form
+                  onSubmit={handleCreateLabel}
+                  className="space-y-3 rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/50"
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  Create Label
-                </button>
-              </form>
+                  <h5 className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                    Create New Label
+                  </h5>
+                  <input
+                    type="text"
+                    value={newLabelName}
+                    onChange={(e) => setNewLabelName(e.target.value)}
+                    placeholder="Label name (e.g. Design Review)..."
+                    className="w-full rounded-lg border border-zinc-200/80 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:border-indigo-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {ALL_LABEL_COLORS.map((color) => {
+                      const style = LABEL_COLOR_MAP[color];
+                      const active = newLabelColor === color;
+                      return (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setNewLabelColor(color)}
+                          className={`flex h-6 w-8 items-center justify-center rounded-md transition-transform ${
+                            active ? "scale-110 ring-2 ring-indigo-500" : ""
+                          }`}
+                          style={{ backgroundColor: style.swatch }}
+                          title={style.name}
+                        >
+                          {active && <Check className="h-3 w-3 text-white" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="submit"
+                    className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-zinc-900 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Create Label
+                  </button>
+                </form>
+              )}
             </div>
           )}
 
@@ -360,18 +370,21 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                 </label>
                 <textarea
                   rows={4}
+                  disabled={isViewer}
                   value={descDraft}
                   onChange={(e) => setDescDraft(e.target.value)}
                   placeholder="Describe what this board is for and team conventions..."
-                  className="w-full rounded-xl border border-zinc-200/80 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-800 focus:border-indigo-500 focus:bg-white focus:outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+                  className="w-full rounded-xl border border-zinc-200/80 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-800 focus:border-indigo-500 focus:bg-white focus:outline-none disabled:opacity-70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
                 />
-                <button
-                  type="button"
-                  onClick={() => onUpdateBoard({ description: descDraft })}
-                  className="mt-2 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
-                >
-                  Save Description
-                </button>
+                {!isViewer && (
+                  <button
+                    type="button"
+                    onClick={() => onUpdateBoard({ description: descDraft })}
+                    className="mt-2 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
+                  >
+                    Save Description
+                  </button>
+                )}
               </div>
 
               <div className="border-t border-zinc-200/80 pt-4 dark:border-zinc-800">
@@ -409,11 +422,19 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                 </h4>
                 <button
                   type="button"
+                  disabled={!isAdmin}
                   onClick={() => {
-                    setWebhooksModalOpen(true);
-                    setOpen(false);
+                    if (isAdmin) {
+                      setWebhooksModalOpen(true);
+                      setOpen(false);
+                    }
                   }}
-                  className="flex w-full items-center justify-between rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3 text-left transition hover:border-indigo-400 dark:border-zinc-800 dark:bg-zinc-900/60"
+                  title={!isAdmin ? "Requires Board Admin permission" : undefined}
+                  className={`flex w-full items-center justify-between rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3 text-left transition dark:border-zinc-800 dark:bg-zinc-900/60 ${
+                    isAdmin
+                      ? "hover:border-indigo-400"
+                      : "cursor-not-allowed opacity-60"
+                  }`}
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
@@ -425,11 +446,12 @@ export function BoardMenuDrawer({ onUpdateBoard }: BoardMenuDrawerProps) {
                       </p>
                       <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                         Live board activity notifications & AI digest
+                        {!isAdmin && " (Requires Board Admin permission)"}
                       </p>
                     </div>
                   </div>
                   <span className="text-xs font-semibold text-indigo-500">
-                    Open →
+                    {isAdmin ? "Open →" : "🔒 Admin"}
                   </span>
                 </button>
               </div>

@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import {
+  AuthUser,
   AutomationRule,
   Board,
+  BoardInviteLink,
+  BoardRole,
   BoardSummary,
   Card,
   CardMovedEventData,
@@ -9,6 +12,7 @@ import {
   ColumnMovedEventData,
   Comment,
   DEFAULT_WORKSPACE,
+  Member,
   Priority,
   UserPresence,
   WebhookConfig,
@@ -37,6 +41,61 @@ export interface LastMoveMetrics {
   timestamp: string;
 }
 
+export const DEMO_USERS: AuthUser[] = [
+  {
+    id: "88888888-8888-4888-8888-888888888881",
+    name: "Alex Rivera",
+    email: "alex@kinetix.dev",
+    avatar_url: null,
+    initials: "AR",
+    color: "#6366f1",
+    default_role: "ADMIN",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888882",
+    name: "Sarah Connor",
+    email: "sarah@kinetix.dev",
+    avatar_url: null,
+    initials: "SC",
+    color: "#10b981",
+    default_role: "EDITOR",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888884",
+    name: "Budi Santoso",
+    email: "budi@kinetix.dev",
+    avatar_url: null,
+    initials: "BS",
+    color: "#f59e0b",
+    default_role: "VIEWER",
+  },
+];
+
+const STORAGE_KEY_AUTH_TOKEN = "kanbanify_auth_token";
+const STORAGE_KEY_AUTH_USER = "kanbanify_auth_user";
+const STORAGE_KEY_ACTIVE_ROLE = "kanbanify_active_role";
+
+export function getStoredAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) ?? "kb_sess_alex_admin_token";
+}
+
+export function getStoredActiveRole(): BoardRole | null {
+  if (typeof window === "undefined") return "ADMIN";
+  return (window.localStorage.getItem(STORAGE_KEY_ACTIVE_ROLE) as BoardRole) ?? "ADMIN";
+}
+
+export function getStoredAuthUser(): AuthUser {
+  if (typeof window === "undefined") return DEMO_USERS[0];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY_AUTH_USER);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // fallback
+  }
+  return DEMO_USERS[0];
+}
+
 interface WorkspaceState {
   // Active Board & Canvas
   board: Board;
@@ -46,6 +105,20 @@ interface WorkspaceState {
   useMockMode: boolean;
   wsStatus: WSConnectionStatus;
   fallbackNotice: string | null;
+
+  // Authentication & RBAC (Phase 6)
+  currentUser: AuthUser;
+  activeRole: BoardRole;
+  authToken: string | null;
+  isAuthModalOpen: boolean;
+  isShareModalOpen: boolean;
+  pendingInviteToken: string | null;
+  inviteBannerData: {
+    boardId: string;
+    boardTitle: string;
+    inviterName: string;
+    grantedRole: BoardRole;
+  } | null;
 
   // Workspace Navigation & Summaries
   workspaces: WorkspaceWithBoards[];
@@ -97,6 +170,29 @@ interface WorkspaceState {
   setUseMockMode: (useMock: boolean, fallbackNotice?: string | null) => void;
   setWsStatus: (status: WSConnectionStatus) => void;
   setFallbackNotice: (notice: string | null) => void;
+
+  // Authentication & RBAC Actions
+  setCurrentUser: (user: AuthUser, token?: string) => void;
+  setActiveRole: (role: BoardRole) => void;
+  switchDemoUser: (user: AuthUser) => void;
+  setAuthModalOpen: (open: boolean) => void;
+  setShareModalOpen: (open: boolean) => void;
+  setPendingInviteToken: (token: string | null) => void;
+  setInviteBannerData: (
+    data: {
+      boardId: string;
+      boardTitle: string;
+      inviterName: string;
+      grantedRole: BoardRole;
+    } | null
+  ) => void;
+
+  // Board Member & Invite Link State Sync
+  addBoardMember: (member: Member) => void;
+  updateBoardMemberRole: (memberId: string, role: BoardRole) => void;
+  removeBoardMember: (memberId: string) => void;
+  addBoardInviteLink: (link: BoardInviteLink) => void;
+  removeBoardInviteLink: (inviteId: string) => void;
 
   // Sidebar & Workspaces
   toggleSidebar: () => void;
@@ -195,10 +291,12 @@ function sortBoard(board: Board): Board {
       }))
       .sort((a, b) => comparePositions(a.position, b.position)),
     webhooks: board.webhooks ?? [],
+    invite_links: board.invite_links ?? [],
+    visibility: board.visibility ?? "WORKSPACE",
   };
 }
 
-export const useWorkspaceStore = create<WorkspaceState>((set) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   board: sortBoard(INITIAL_SEED_BOARD),
   activeBoardId: SEED_BOARD_ID,
   viewMode: "kanban",
@@ -206,6 +304,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   useMockMode: DEFAULT_USE_MOCK,
   wsStatus: DEFAULT_USE_MOCK ? "mock" : "connecting",
   fallbackNotice: null,
+
+  // Authentication & RBAC Initial State
+  currentUser: DEMO_USERS[0],
+  activeRole: "ADMIN",
+  authToken: "kb_sess_alex_admin_token",
+  isAuthModalOpen: false,
+  isShareModalOpen: false,
+  pendingInviteToken: null,
+  inviteBannerData: null,
 
   workspaces: [
     {
@@ -278,79 +385,128 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   lastMoveMetrics: {
     cardTitle: "Real-Time WebSocket Broadcast",
-    prevPos: "a0",
-    nextPos: "a1",
     computedPos: "a0V",
-    timestamp: "Ready",
+    timestamp: new Date().toLocaleTimeString(),
   },
 
   setBoard: (board) =>
-    set((state) => {
-      const exists = state.boardSummaries.some((s) => s.id === board.id);
-      const updatedSummaries = exists
-        ? state.boardSummaries.map((s) =>
-            s.id === board.id
-              ? {
-                  ...s,
-                  title: board.title,
-                  is_starred: board.is_starred,
-                  background: board.background,
-                  card_count: board.cards.filter((c) => !c.is_archived).length,
-                }
-              : s
-          )
-        : [
-            ...state.boardSummaries,
-            {
-              id: board.id,
-              workspace_id: board.workspace_id,
-              title: board.title,
-              is_starred: board.is_starred,
-              background: board.background,
-              card_count: board.cards.filter((c) => !c.is_archived).length,
-              updated_at: new Date().toISOString(),
-              created_at: board.created_at,
-              description: board.description,
-            },
-          ];
-
-      const updatedWorkspaces = state.workspaces.map((ws) =>
-        ws.id === board.workspace_id
-          ? {
-              ...ws,
-              boards: updatedSummaries.filter(
-                (s) => s.workspace_id === ws.id
-              ),
-            }
-          : ws
-      );
-
-      return {
-        board: sortBoard(board),
-        activeBoardId: board.id,
-        automationRules: board.automation_rules ?? [],
-        boardSummaries: updatedSummaries,
-        workspaces: updatedWorkspaces,
-      };
+    set({
+      board: sortBoard(board),
+      activeBoardId: board.id,
+      automationRules: [...(board.automation_rules ?? [])],
     }),
-  setActiveBoardId: (activeBoardId) => set({ activeBoardId }),
+
+  setActiveBoardId: (id) => set({ activeBoardId: id }),
   setViewMode: (viewMode) => set({ viewMode }),
   setThemeMode: (themeMode) => set({ themeMode }),
   setUseMockMode: (useMockMode, fallbackNotice = null) =>
     set({
       useMockMode,
-      wsStatus: useMockMode ? "mock" : "connecting",
       fallbackNotice,
+      wsStatus: useMockMode ? "mock" : "connecting",
     }),
   setWsStatus: (wsStatus) => set({ wsStatus }),
   setFallbackNotice: (fallbackNotice) => set({ fallbackNotice }),
 
-  toggleSidebar: () =>
-    set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+  // Authentication & RBAC Actions
+  setCurrentUser: (user, token) => {
+    const nextToken = token ?? `kb_sess_${user.id}`;
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(user));
+        window.localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, nextToken);
+        window.localStorage.setItem(STORAGE_KEY_ACTIVE_ROLE, user.default_role);
+      } catch {
+        // ignore
+      }
+    }
+    set({
+      currentUser: user,
+      activeRole: user.default_role,
+      authToken: nextToken,
+    });
+  },
+
+  setActiveRole: (role) => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(STORAGE_KEY_ACTIVE_ROLE, role);
+      } catch {
+        // ignore
+      }
+    }
+    set({ activeRole: role });
+  },
+
+  switchDemoUser: (user) => {
+    const token = `kb_sess_${user.id}`;
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(STORAGE_KEY_AUTH_USER, JSON.stringify(user));
+        window.localStorage.setItem(STORAGE_KEY_AUTH_TOKEN, token);
+        window.localStorage.setItem(STORAGE_KEY_ACTIVE_ROLE, user.default_role);
+      } catch {
+        // ignore
+      }
+    }
+    set({
+      currentUser: user,
+      activeRole: user.default_role,
+      authToken: token,
+    });
+  },
+
+  setAuthModalOpen: (isAuthModalOpen) => set({ isAuthModalOpen }),
+  setShareModalOpen: (isShareModalOpen) => set({ isShareModalOpen }),
+  setPendingInviteToken: (pendingInviteToken) => set({ pendingInviteToken }),
+  setInviteBannerData: (inviteBannerData) => set({ inviteBannerData }),
+
+  addBoardMember: (member) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        members: [...state.board.members.filter((m) => m.id !== member.id), member],
+      }),
+    })),
+
+  updateBoardMemberRole: (memberId, role) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        members: state.board.members.map((m) =>
+          m.id === memberId ? { ...m, role } : m
+        ),
+      }),
+    })),
+
+  removeBoardMember: (memberId) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        members: state.board.members.filter((m) => m.id !== memberId),
+      }),
+    })),
+
+  addBoardInviteLink: (link) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        invite_links: [link, ...(state.board.invite_links ?? []).filter((l) => l.id !== link.id)],
+      }),
+    })),
+
+  removeBoardInviteLink: (inviteId) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        invite_links: (state.board.invite_links ?? []).filter((l) => l.id !== inviteId),
+      }),
+    })),
+
+  toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
   setSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
   setWorkspaces: (workspaces) => set({ workspaces }),
-  setCurrentWorkspaceId: (currentWorkspaceId) =>
-    set({ currentWorkspaceId }),
+  setCurrentWorkspaceId: (currentWorkspaceId) => set({ currentWorkspaceId }),
   setBoardSummaries: (boardSummaries) => set({ boardSummaries }),
 
   toggleLabelsExpanded: () =>
@@ -361,11 +517,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setOnlyBlockedFilter: (onlyBlockedFilter) => set({ onlyBlockedFilter }),
   setMemberFilterId: (memberFilterId) => set({ memberFilterId }),
   toggleLabelFilterId: (labelId) =>
-    set((state) => ({
-      labelFilterIds: state.labelFilterIds.includes(labelId)
-        ? state.labelFilterIds.filter((id) => id !== labelId)
-        : [...state.labelFilterIds, labelId],
-    })),
+    set((state) => {
+      const exists = state.labelFilterIds.includes(labelId);
+      return {
+        labelFilterIds: exists
+          ? state.labelFilterIds.filter((id) => id !== labelId)
+          : [...state.labelFilterIds, labelId],
+      };
+    }),
   setDueFilter: (dueFilter) => set({ dueFilter }),
   clearAllFilters: () =>
     set({
@@ -381,15 +540,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setCommandPaletteOpen: (isCommandPaletteOpen) =>
     set({ isCommandPaletteOpen }),
   openCreateCardModal: (columnId = null) =>
-    set({
-      isCreateCardModalOpen: true,
-      createCardDefaultColumnId: columnId,
-    }),
+    set({ isCreateCardModalOpen: true, createCardDefaultColumnId: columnId }),
   closeCreateCardModal: () =>
-    set({
-      isCreateCardModalOpen: false,
-      createCardDefaultColumnId: null,
-    }),
+    set({ isCreateCardModalOpen: false, createCardDefaultColumnId: null }),
   setArchivedDrawerOpen: (isArchivedDrawerOpen) =>
     set({ isArchivedDrawerOpen }),
   setBoardMenuOpen: (isBoardMenuOpen) => set({ isBoardMenuOpen }),
@@ -408,13 +561,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   setPresences: (presences) => set({ presences }),
   upsertPresence: (presence) =>
     set((state) => {
-      const idx = state.presences.findIndex((p) => p.user_id === presence.user_id);
-      if (idx !== -1) {
-        const next = [...state.presences];
-        next[idx] = presence;
-        return { presences: next };
+      const index = state.presences.findIndex(
+        (p) => p.user_id === presence.user_id
+      );
+      if (index === -1) {
+        return { presences: [...state.presences, presence] };
       }
-      return { presences: [...state.presences, presence] };
+      const updated = [...state.presences];
+      updated[index] = presence;
+      return { presences: updated };
     }),
   removePresence: (userId) =>
     set((state) => ({
@@ -425,68 +580,80 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   setWebhooks: (webhooks) =>
     set((state) => ({
-      board: {
+      board: sortBoard({
         ...state.board,
         webhooks,
-      },
+      }),
     })),
+
   upsertWebhook: (webhook) =>
     set((state) => {
       const existing = state.board.webhooks ?? [];
-      const idx = existing.findIndex((w) => w.id === webhook.id);
-      const nextWebhooks =
-        idx !== -1
-          ? existing.map((w) => (w.id === webhook.id ? webhook : w))
-          : [...existing, webhook];
+      const index = existing.findIndex((w) => w.id === webhook.id);
+      const next =
+        index === -1
+          ? [webhook, ...existing]
+          : existing.map((w) => (w.id === webhook.id ? webhook : w));
       return {
-        board: {
+        board: sortBoard({
           ...state.board,
-          webhooks: nextWebhooks,
-        },
-      };
-    }),
-  removeWebhook: (webhookId) =>
-    set((state) => {
-      const existing = state.board.webhooks ?? [];
-      return {
-        board: {
-          ...state.board,
-          webhooks: existing.filter((w) => w.id !== webhookId),
-        },
+          webhooks: next,
+        }),
       };
     }),
 
-  setAutomationRules: (automationRules) => set({ automationRules }),
+  removeWebhook: (webhookId) =>
+    set((state) => ({
+      board: sortBoard({
+        ...state.board,
+        webhooks: (state.board.webhooks ?? []).filter((w) => w.id !== webhookId),
+      }),
+    })),
+
+  setAutomationRules: (rules) =>
+    set((state) => ({
+      automationRules: rules,
+      board: sortBoard({
+        ...state.board,
+        automation_rules: rules,
+      }),
+    })),
+
   upsertAutomationRule: (rule) =>
     set((state) => {
-      const exists = state.automationRules.some((r) => r.id === rule.id);
-      const nextRules = exists
-        ? state.automationRules.map((r) => (r.id === rule.id ? rule : r))
-        : [...state.automationRules, rule];
+      const nextRules = [...state.automationRules];
+      const index = nextRules.findIndex((r) => r.id === rule.id);
+      if (index === -1) {
+        nextRules.push(rule);
+      } else {
+        nextRules[index] = rule;
+      }
       return {
         automationRules: nextRules,
-        board: {
+        board: sortBoard({
           ...state.board,
           automation_rules: nextRules,
-        },
+        }),
       };
     }),
+
   removeAutomationRule: (ruleId) =>
     set((state) => {
       const nextRules = state.automationRules.filter((r) => r.id !== ruleId);
       return {
         automationRules: nextRules,
-        board: {
+        board: sortBoard({
           ...state.board,
           automation_rules: nextRules,
-        },
+        }),
       };
     }),
 
   addToast: (toast) =>
     set((state) => ({
-      toasts: [toast, ...state.toasts.slice(0, 4)],
+      toasts: [toast, ...state.toasts].slice(0, 5),
     })),
+
   removeToast: (id) =>
     set((state) => ({
       toasts: state.toasts.filter((t) => t.id !== id),
@@ -501,72 +668,96 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   ) =>
     set((state) => {
       const targetCard = state.board.cards.find((c) => c.id === cardId);
-      const updatedCards = state.board.cards.map((card) =>
-        card.id === cardId
+      const targetCol = state.board.columns.find(
+        (c) => c.id === targetColumnId
+      );
+      const metrics: LastMoveMetrics = {
+        cardTitle: targetCard?.title ?? "Card",
+        prevPos,
+        nextPos,
+        computedPos: newPosition,
+        timestamp: new Date().toLocaleTimeString(),
+      };
+
+      const updatedCards = state.board.cards.map((c) =>
+        c.id === cardId
           ? {
-              ...card,
+              ...c,
               column_id: targetColumnId,
               position: newPosition,
               updated_at: new Date().toISOString(),
             }
-          : card
+          : c
       );
+
+      const isCrossColumn = targetCard && targetCard.column_id !== targetColumnId;
+      const activityDescription = isCrossColumn
+        ? `moved ${targetCard.title} to ${targetCol?.title ?? "another list"}`
+        : `reordered ${targetCard?.title ?? "card"}`;
+
+      const newActivity = {
+        id: `act-${cardId}-${Date.now()}`,
+        board_id: state.board.id,
+        card_id: cardId,
+        actor_name: state.currentUser.name,
+        action_type: "CARD_MOVED" as const,
+        description: activityDescription,
+        created_at: new Date().toISOString(),
+        is_automated: false,
+      };
+
       return {
+        lastMoveMetrics: metrics,
         board: sortBoard({
           ...state.board,
           cards: updatedCards,
+          activities: [newActivity, ...state.board.activities],
         }),
-        lastMoveMetrics: {
-          cardTitle: targetCard?.title ?? "Card",
-          prevPos,
-          nextPos,
-          computedPos: newPosition,
-          timestamp: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-        },
       };
     }),
 
   optimisticMoveColumn: (columnId, newPosition, prevPos, nextPos) =>
     set((state) => {
-      const targetCol = state.board.columns.find((col) => col.id === columnId);
+      const targetCol = state.board.columns.find((c) => c.id === columnId);
+      const metrics: LastMoveMetrics = {
+        cardTitle: `List: ${targetCol?.title ?? ""}`,
+        prevPos,
+        nextPos,
+        computedPos: newPosition,
+        timestamp: new Date().toLocaleTimeString(),
+      };
+
       const updatedColumns = state.board.columns.map((col) =>
-        col.id === columnId ? { ...col, position: newPosition } : col
+        col.id === columnId
+          ? { ...col, position: newPosition }
+          : col
       );
+
       return {
+        lastMoveMetrics: metrics,
         board: sortBoard({
           ...state.board,
           columns: updatedColumns,
         }),
-        lastMoveMetrics: {
-          cardTitle: `List: ${targetCol?.title ?? "List"}`,
-          prevPos,
-          nextPos,
-          computedPos: newPosition,
-          timestamp: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-        },
       };
     }),
 
   applyRemoteCardMove: (data) =>
     set((state) => {
-      const updatedCards = state.board.cards.map((card) =>
-        card.id === data.card_id
+      const cardExists = state.board.cards.some((c) => c.id === data.card_id);
+      if (!cardExists) return state;
+
+      const updatedCards = state.board.cards.map((c) =>
+        c.id === data.card_id
           ? {
-              ...card,
+              ...c,
               column_id: data.target_column_id,
               position: data.new_position,
               updated_at: data.updated_at,
             }
-          : card
+          : c
       );
+
       return {
         board: sortBoard({
           ...state.board,
@@ -577,11 +768,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   applyRemoteColumnMove: (data) =>
     set((state) => {
-      const updatedColumns = state.board.columns.map((col) =>
-        col.id === data.column_id
-          ? { ...col, position: data.new_position }
-          : col
+      const colExists = state.board.columns.some((c) => c.id === data.column_id);
+      if (!colExists) return state;
+
+      const updatedColumns = state.board.columns.map((c) =>
+        c.id === data.column_id
+          ? { ...c, position: data.new_position }
+          : c
       );
+
       return {
         board: sortBoard({
           ...state.board,
@@ -592,10 +787,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   upsertCard: (card) =>
     set((state) => {
-      const exists = state.board.cards.some((c) => c.id === card.id);
-      const nextCards = exists
-        ? state.board.cards.map((c) => (c.id === card.id ? card : c))
-        : [...state.board.cards, card];
+      const existing = state.board.cards.findIndex((c) => c.id === card.id);
+      const nextCards =
+        existing === -1
+          ? [...state.board.cards, card]
+          : state.board.cards.map((c) => (c.id === card.id ? card : c));
+
       return {
         board: sortBoard({
           ...state.board,
@@ -606,26 +803,30 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   removeCard: (cardId) =>
     set((state) => ({
-      selectedCardId:
-        state.selectedCardId === cardId ? null : state.selectedCardId,
       board: sortBoard({
         ...state.board,
         cards: state.board.cards.filter((c) => c.id !== cardId),
       }),
+      selectedCardId:
+        state.selectedCardId === cardId ? null : state.selectedCardId,
     })),
 
   upsertColumn: (column) =>
     set((state) => {
-      const exists = state.board.columns.some((col) => col.id === column.id);
-      const nextColumns = exists
-        ? state.board.columns.map((col) =>
-            col.id === column.id ? column : col
-          )
-        : [...state.board.columns, column];
+      const existing = state.board.columns.findIndex(
+        (c) => c.id === column.id
+      );
+      const nextCols =
+        existing === -1
+          ? [...state.board.columns, column]
+          : state.board.columns.map((c) =>
+              c.id === column.id ? column : c
+            );
+
       return {
         board: sortBoard({
           ...state.board,
-          columns: nextColumns,
+          columns: nextCols,
         }),
       };
     }),
@@ -634,7 +835,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     set((state) => ({
       board: sortBoard({
         ...state.board,
-        columns: state.board.columns.filter((col) => col.id !== columnId),
+        columns: state.board.columns.filter((c) => c.id !== columnId),
       }),
     })),
 
