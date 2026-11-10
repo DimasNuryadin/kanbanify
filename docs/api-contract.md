@@ -1,4 +1,4 @@
-# Kanbanify — REST, WebSocket & Internal AI Service Contract (Phase 5: Live Co-presence, Typing Indicators & Outbound Webhook Integrations)
+# Kanbanify — REST, WebSocket & Internal AI Service Contract (Phase 6: Authentication, Role-Based Access Control & Shareable Board Links)
 
 All payloads MUST strictly validate against `packages/contracts/index.ts` (Zod) and `packages/contracts/schemas.py` (Pydantic v2).
 
@@ -11,7 +11,7 @@ All error responses across `apps/api` (`8000`) and `services/ai-engine` (`8001`)
 ```json
 {
   "error": {
-    "code": "RESOURCE_NOT_FOUND | VALIDATION_ERROR | UNAUTHORIZED | INTERNAL_ERROR",
+    "code": "RESOURCE_NOT_FOUND | VALIDATION_ERROR | UNAUTHORIZED | FORBIDDEN | INTERNAL_ERROR",
     "message": "Human-readable explanation",
     "details": {}
   }
@@ -1437,5 +1437,370 @@ Invoked by `apps/api` to generate rich, visually compelling notification payload
     "target_column_title": "In Progress",
     "new_position": "a0V"
   }
+}
+```
+
+---
+
+## 8. Authentication, Role-Based Access Control (RBAC) & Shareable Invite Links (Phase 6)
+
+### 8.1 RBAC Enforcement Matrix
+
+Every endpoint supports identity and role resolution via the following headers:
+- `Authorization: Bearer <token>` (Session or JWT bearer token)
+- `X-Kanbanify-Role: ADMIN | EDITOR | VIEWER` (Direct role override for testing / rapid development)
+
+#### Backward Compatibility Rule:
+If neither `Authorization` nor `X-Kanbanify-Role` header is provided, the API defaults the actor to a seeded `ADMIN` session (`Alex Rivera`, `id: 88888888-8888-4888-8888-888888888881`). All Phase 1 through Phase 5 integration scripts, test suites, and automated flows continue functioning without breaking changes.
+
+#### Permission Matrix:
+| Resource / Action | `ADMIN` | `EDITOR` | `VIEWER` | Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| **Read Board, Cards, Columns, Activities, Analytics** | Allowed | Allowed | Allowed | `GET` requests accessible to all authenticated/guest roles |
+| **Mutate Cards (Create, Move, Update, Archive, Delete)** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | `VIEWER` cannot alter card state |
+| **Mutate Columns (Create, Move, Update, Archive)** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | `VIEWER` cannot modify board layout |
+| **Add / Edit Comments & Checklists** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | `VIEWER` is read-only |
+| **Trigger AI Card Decomposition / Enrichment** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | AI mutations persist new subtasks/points |
+| **Configure Automations (Butler Rules)** | Allowed | **Blocked (403 FORBIDDEN)** | **Blocked (403 FORBIDDEN)** | Only `ADMIN` manages Butler rules |
+| **Configure Outbound Webhooks** | Allowed | **Blocked (403 FORBIDDEN)** | **Blocked (403 FORBIDDEN)** | Only `ADMIN` manages integrations |
+| **Manage Board Members & Roles** | Allowed | **Blocked (403 FORBIDDEN)** | **Blocked (403 FORBIDDEN)** | Only `ADMIN` invites/removes members or changes roles |
+| **Create / Revoke Shareable Invite Links** | Allowed | **Blocked (403 FORBIDDEN)** | **Blocked (403 FORBIDDEN)** | Only `ADMIN` issues invite tokens |
+| **Delete Board** | Allowed | **Blocked (403 FORBIDDEN)** | **Blocked (403 FORBIDDEN)** | Only `ADMIN` can delete workspace boards |
+| **Join Board via Invite Link** | Allowed | Allowed | Allowed | Public invite redemption adds user with granted role |
+| **Run AI Workspace Permission & Security Audit** | Allowed | Allowed | Allowed | Generates least-privilege audit report |
+
+---
+
+### 8.2 Authentication Endpoints (`apps/api` — Port 8000)
+
+#### `POST /api/v1/auth/register` — Register User
+Registers a new user account and returns an authenticated session.
+- **Request Body (`RegisterRequestSchema`)**:
+```json
+{
+  "name": "Jordan Lee",
+  "email": "jordan@kinetix.dev",
+  "password": "Password123!"
+}
+```
+- **Response `201 Created` (`AuthSessionResponseSchema`)**:
+```json
+{
+  "token": "kb_sess_9a8b7c6d5e4f3a2b1c0d",
+  "user": {
+    "id": "88888888-8888-4888-8888-888888888885",
+    "name": "Jordan Lee",
+    "email": "jordan@kinetix.dev",
+    "avatar_url": null,
+    "initials": "JL",
+    "color": "#3b82f6",
+    "default_role": "EDITOR"
+  },
+  "expires_at": "2026-11-17T10:00:00.000Z"
+}
+```
+
+#### `POST /api/v1/auth/login` — Authenticate User
+Authenticates an existing user account or pre-seeded demo account.
+- **Request Body (`LoginRequestSchema`)**:
+```json
+{
+  "email": "alex@kinetix.dev",
+  "password": "Password123!"
+}
+```
+- **Response `200 OK` (`AuthSessionResponseSchema`)**:
+```json
+{
+  "token": "kb_sess_alex_admin_token",
+  "user": {
+    "id": "88888888-8888-4888-8888-888888888881",
+    "name": "Alex Rivera",
+    "email": "alex@kinetix.dev",
+    "avatar_url": null,
+    "initials": "AR",
+    "color": "#3b82f6",
+    "default_role": "ADMIN"
+  },
+  "expires_at": "2026-11-17T10:00:00.000Z"
+}
+```
+
+#### `GET /api/v1/auth/me` — Current Authenticated Profile
+- **Response `200 OK` (`AuthUserSchema`)**:
+```json
+{
+  "id": "88888888-8888-4888-8888-888888888881",
+  "name": "Alex Rivera",
+  "email": "alex@kinetix.dev",
+  "avatar_url": null,
+  "initials": "AR",
+  "color": "#3b82f6",
+  "default_role": "ADMIN"
+}
+```
+
+#### `GET /api/v1/auth/demo-users` — Pre-seeded Demo Accounts
+Returns pre-seeded demo accounts representing `ADMIN`, `EDITOR`, and `VIEWER` for 1-click role simulation in development and demo environments.
+- **Response `200 OK` (`AuthUserSchema[]`)**:
+```json
+[
+  {
+    "id": "88888888-8888-4888-8888-888888888881",
+    "name": "Alex Rivera",
+    "email": "alex@kinetix.dev",
+    "avatar_url": null,
+    "initials": "AR",
+    "color": "#3b82f6",
+    "default_role": "ADMIN"
+  },
+  {
+    "id": "88888888-8888-4888-8888-888888888882",
+    "name": "Maya Lin",
+    "email": "maya@kinetix.dev",
+    "avatar_url": null,
+    "initials": "ML",
+    "color": "#8b5cf6",
+    "default_role": "EDITOR"
+  },
+  {
+    "id": "88888888-8888-4888-8888-888888888884",
+    "name": "Elena Rostova",
+    "email": "elena@kinetix.dev",
+    "avatar_url": null,
+    "initials": "ER",
+    "color": "#f59e0b",
+    "default_role": "VIEWER"
+  }
+]
+```
+
+---
+
+### 8.3 Member Role & Shareable Invite Link Endpoints (`apps/api` — Port 8000)
+
+#### `POST /api/v1/boards/:boardId/members` — Add Board Member (`ADMIN` only)
+Invites/adds a member directly to a board with a designated role.
+- **Request Body**:
+```json
+{
+  "name": "Marcus Vance",
+  "email": "marcus@kinetix.dev",
+  "role": "EDITOR"
+}
+```
+- **Response `201 Created` (`MemberSchema`)**:
+```json
+{
+  "id": "88888888-8888-4888-8888-888888888886",
+  "name": "Marcus Vance",
+  "email": "marcus@kinetix.dev",
+  "avatar_url": null,
+  "initials": "MV",
+  "color": "#10b981",
+  "role": "EDITOR",
+  "joined_at": "2026-11-10T10:00:00.000Z"
+}
+```
+
+#### `PATCH /api/v1/boards/:boardId/members/:memberId` — Update Member Role (`ADMIN` only)
+- **Request Body**:
+```json
+{
+  "role": "VIEWER"
+}
+```
+- **Response `200 OK` (`MemberSchema`)**:
+```json
+{
+  "id": "88888888-8888-4888-8888-888888888882",
+  "name": "Maya Lin",
+  "email": "maya@kinetix.dev",
+  "avatar_url": null,
+  "initials": "ML",
+  "color": "#8b5cf6",
+  "role": "VIEWER",
+  "joined_at": "2026-11-08T00:00:00.000Z"
+}
+```
+
+#### `DELETE /api/v1/boards/:boardId/members/:memberId` — Remove Board Member (`ADMIN` only)
+- **Response `200 OK`**:
+```json
+{
+  "id": "88888888-8888-4888-8888-888888888882",
+  "removed": true
+}
+```
+
+#### `GET /api/v1/boards/:boardId/invites` — List Active Invite Links
+- **Response `200 OK` (`BoardInviteLinkSchema[]`)**:
+```json
+[
+  {
+    "id": "inv-001",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "token": "kb_inv_8f92a1bc3d4e",
+    "role": "EDITOR",
+    "created_by_id": "88888888-8888-4888-8888-888888888881",
+    "created_by_name": "Alex Rivera",
+    "max_uses": 10,
+    "uses_count": 3,
+    "expires_at": "2026-11-17T10:00:00.000Z",
+    "is_active": true,
+    "created_at": "2026-11-10T10:00:00.000Z"
+  }
+]
+```
+
+#### `POST /api/v1/boards/:boardId/invites` — Generate Invite Link (`ADMIN` only)
+- **Request Body (`CreateInviteLinkRequestSchema`)**:
+```json
+{
+  "role": "EDITOR",
+  "max_uses": 5,
+  "expires_in_hours": 48
+}
+```
+- **Response `201 Created` (`BoardInviteLinkSchema`)**:
+```json
+{
+  "id": "inv-002",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "token": "kb_inv_92a3f81e2b5c",
+  "role": "EDITOR",
+  "created_by_id": "88888888-8888-4888-8888-888888888881",
+  "created_by_name": "Alex Rivera",
+  "max_uses": 5,
+  "uses_count": 0,
+  "expires_at": "2026-11-12T10:00:00.000Z",
+  "is_active": true,
+  "created_at": "2026-11-10T10:00:00.000Z"
+}
+```
+
+#### `DELETE /api/v1/invites/:inviteId` — Revoke Invite Link (`ADMIN` only)
+- **Response `200 OK`**:
+```json
+{
+  "id": "inv-001",
+  "revoked": true
+}
+```
+
+#### `GET /api/v1/invites/:token` — Preview Invite Link (Public)
+Public link preview before redemption.
+- **Response `200 OK`**:
+```json
+{
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "board_title": "Kinetix Platform Launch",
+  "inviter_name": "Alex Rivera",
+  "granted_role": "EDITOR",
+  "is_valid": true
+}
+```
+
+#### `POST /api/v1/invites/:token/join` — Redeem Invite Link & Join Board
+Redeems a shareable invite link, adds user to `board.members` with `invite.role`, and increments `uses_count`.
+- **Request Body (`JoinViaInviteRequestSchema`)** (optional if already authenticated):
+```json
+{
+  "name": "Sarah Connor",
+  "email": "sarah@resistance.dev"
+}
+```
+- **Response `200 OK` (`JoinViaInviteResponseSchema`)**:
+```json
+{
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "board_title": "Kinetix Platform Launch",
+  "granted_role": "EDITOR",
+  "member": {
+    "id": "88888888-8888-4888-8888-888888888887",
+    "name": "Sarah Connor",
+    "email": "sarah@resistance.dev",
+    "avatar_url": null,
+    "initials": "SC",
+    "color": "#ec4899",
+    "role": "EDITOR",
+    "joined_at": "2026-11-10T10:15:00.000Z"
+  }
+}
+```
+
+#### `POST /api/v1/boards/:boardId/security-audit` — Board Permission Security Audit
+Proxies board members & invite links to AI Engine (`POST /internal/v1/audit-permissions`) and returns an actionable least-privilege security report.
+- **Response `200 OK` (`AIPermissionAuditResponseSchema`)**:
+```json
+{
+  "security_score": 78,
+  "risk_level": "MEDIUM",
+  "summary": "Board has 1 admin and multiple editors with active non-expiring public invite links.",
+  "findings": [
+    "Invite link 'kb_inv_8f92a1bc3d4e' grants EDITOR role with unlimited expiration.",
+    "3 members hold EDITOR privileges on public workspace board."
+  ],
+  "recommendations": [
+    "Configure expiration timestamps on all active EDITOR invite links.",
+    "Downgrade inactive collaborators to VIEWER role."
+  ]
+}
+```
+
+---
+
+### 8.4 Internal AI Engine Permission Auditor (`services/ai-engine` — Port 8001)
+
+#### `POST /internal/v1/audit-permissions` — Internal Security Audit Endpoint
+Protected by `X-Internal-Token`.
+- **Request Body (`AIPermissionAuditRequestSchema`)**:
+```json
+{
+  "board_title": "Kinetix Platform Launch",
+  "visibility": "WORKSPACE",
+  "members": [
+    {
+      "id": "88888888-8888-4888-8888-888888888881",
+      "name": "Alex Rivera",
+      "email": "alex@kinetix.dev",
+      "avatar_url": null,
+      "initials": "AR",
+      "color": "#3b82f6",
+      "role": "ADMIN",
+      "joined_at": "2026-11-08T00:00:00.000Z"
+    }
+  ],
+  "invite_links": [
+    {
+      "id": "inv-001",
+      "board_id": "11111111-1111-4111-8111-111111111111",
+      "token": "kb_inv_8f92a1bc3d4e",
+      "role": "EDITOR",
+      "created_by_id": "88888888-8888-4888-8888-888888888881",
+      "created_by_name": "Alex Rivera",
+      "max_uses": 10,
+      "uses_count": 3,
+      "expires_at": null,
+      "is_active": true,
+      "created_at": "2026-11-10T10:00:00.000Z"
+    }
+  ]
+}
+```
+- **Response `200 OK` (`AIPermissionAuditResponseSchema`)**:
+```json
+{
+  "security_score": 78,
+  "risk_level": "MEDIUM",
+  "summary": "Board has 1 admin and multiple editors with active non-expiring public invite links.",
+  "findings": [
+    "Invite link 'kb_inv_8f92a1bc3d4e' grants EDITOR role with unlimited expiration.",
+    "3 members hold EDITOR privileges on public workspace board."
+  ],
+  "recommendations": [
+    "Configure expiration timestamps on all active EDITOR invite links.",
+    "Downgrade inactive collaborators to VIEWER role."
+  ]
 }
 ```

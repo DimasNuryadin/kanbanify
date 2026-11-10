@@ -26,6 +26,97 @@ paths:
                 $ref: "#/components/schemas/HealthCheckResponse"
 
   # ============================================================================
+  # AUTHENTICATION & DEMO USERS (Phase 6)
+  # ============================================================================
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user
+      operationId: registerUser
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        "400":
+          description: Validation error or email already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/auth/login:
+    post:
+      summary: Authenticate user or demo user
+      operationId: loginUser
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: User authenticated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionResponse"
+        "401":
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/auth/me:
+    get:
+      summary: Return currently authenticated user and active role
+      operationId: getAuthMe
+      tags:
+        - Auth
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/auth/demo-users:
+    get:
+      summary: Return pre-seeded demo accounts (ADMIN, EDITOR, VIEWER) for 1-click role switching
+      operationId: getDemoUsers
+      tags:
+        - Auth
+      responses:
+        "200":
+          description: Pre-seeded demo user accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuthUser"
+
+  # ============================================================================
   # WORKSPACE ENDPOINTS (Phase 3)
   # ============================================================================
   /api/v1/workspaces:
@@ -215,6 +306,349 @@ paths:
                     format: uuid
                   deleted:
                     type: boolean
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # MEMBER ROLE & SHAREABLE INVITE LINK ENDPOINTS (Phase 6)
+  # ============================================================================
+  /api/v1/boards/{boardId}/members:
+    post:
+      summary: Invite or add a member to the board with a specified role (ADMIN only)
+      operationId: addBoardMember
+      tags:
+        - Board Members
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                role:
+                  $ref: "#/components/schemas/BoardRoleEnum"
+                  default: EDITOR
+      responses:
+        "201":
+          description: Member added to board
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "403":
+          description: Forbidden (ADMIN only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/members/{memberId}:
+    patch:
+      summary: Update a member's role (ADMIN, EDITOR, VIEWER) (ADMIN only)
+      operationId: updateBoardMemberRole
+      tags:
+        - Board Members
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  $ref: "#/components/schemas/BoardRoleEnum"
+      responses:
+        "200":
+          description: Member role updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "403":
+          description: Forbidden (ADMIN only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Member or Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    delete:
+      summary: Remove member from board (ADMIN only)
+      operationId: removeBoardMember
+      tags:
+        - Board Members
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, removed]
+                properties:
+                  id:
+                    type: string
+                  removed:
+                    type: boolean
+        "403":
+          description: Forbidden (ADMIN only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Member or Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/invites:
+    get:
+      summary: List active invite links for the board
+      operationId: listBoardInvites
+      tags:
+        - Board Invites
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Array of invite links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BoardInviteLink"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    post:
+      summary: Generate a new shareable invite link (ADMIN only)
+      operationId: createBoardInvite
+      tags:
+        - Board Invites
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInviteLinkRequest"
+      responses:
+        "201":
+          description: Created invite link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardInviteLink"
+        "403":
+          description: Forbidden (ADMIN only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/invites/{inviteId}:
+    delete:
+      summary: Revoke or disable an invite link (ADMIN only)
+      operationId: revokeInviteLink
+      tags:
+        - Board Invites
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite link revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, revoked]
+                properties:
+                  id:
+                    type: string
+                  revoked:
+                    type: boolean
+        "403":
+          description: Forbidden (ADMIN only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Invite not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/invites/{token}:
+    get:
+      summary: Public preview of an invite link
+      operationId: previewInviteLink
+      tags:
+        - Board Invites
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Invite link preview information
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [board_title, inviter_name, granted_role, is_valid]
+                properties:
+                  board_id:
+                    type: string
+                  board_title:
+                    type: string
+                  inviter_name:
+                    type: string
+                  granted_role:
+                    $ref: "#/components/schemas/BoardRoleEnum"
+                  is_valid:
+                    type: boolean
+        "404":
+          description: Invite not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/invites/{token}/join:
+    post:
+      summary: Redeem a shareable invite link and join board
+      operationId: joinViaInvite
+      tags:
+        - Board Invites
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinViaInviteRequest"
+      responses:
+        "200":
+          description: Joined board successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinViaInviteResponse"
+        "400":
+          description: Invite expired or max uses exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Invite not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/security-audit:
+    post:
+      summary: Proxies board members & invite links to AI Engine for permission and security audit
+      operationId: auditBoardPermissions
+      tags:
+        - Security Audit
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: AI Permission Audit report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIPermissionAuditResponse"
         "404":
           description: Board not found
           content:
@@ -1084,6 +1518,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/StandardError"
 
+  /internal/v1/audit-permissions:
+    post:
+      summary: Internal AI Engine workspace access & permission auditor endpoint (Port 8001)
+      operationId: internalAuditPermissions
+      tags:
+        - AI Engine Internal
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIPermissionAuditRequest"
+      responses:
+        "200":
+          description: Permission audit report with risk level, score, findings, and recommendations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIPermissionAuditResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
 components:
   schemas:
     PriorityEnum:
@@ -1145,6 +1611,144 @@ components:
           type: string
         color:
           type: string
+        role:
+          $ref: "#/components/schemas/BoardRoleEnum"
+          default: EDITOR
+        joined_at:
+          type: string
+
+    AuthUser:
+      type: object
+      required: [id, name, email, avatar_url, initials, color, default_role]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        avatar_url:
+          type: [string, "null"]
+        initials:
+          type: string
+        color:
+          type: string
+        default_role:
+          $ref: "#/components/schemas/BoardRoleEnum"
+          default: EDITOR
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 6
+          maxLength: 100
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+
+    AuthSessionResponse:
+      type: object
+      required: [token, user, expires_at]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        expires_at:
+          type: string
+          format: date-time
+
+    BoardInviteLink:
+      type: object
+      required:
+        - id
+        - board_id
+        - token
+        - role
+        - created_by_id
+        - created_by_name
+        - uses_count
+        - is_active
+        - created_at
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        token:
+          type: string
+        role:
+          $ref: "#/components/schemas/BoardRoleEnum"
+        created_by_id:
+          type: string
+        created_by_name:
+          type: string
+        max_uses:
+          type: [integer, "null"]
+        uses_count:
+          type: integer
+          default: 0
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        is_active:
+          type: boolean
+          default: true
+        created_at:
+          type: string
+          format: date-time
+
+    CreateInviteLinkRequest:
+      type: object
+      properties:
+        role:
+          $ref: "#/components/schemas/BoardRoleEnum"
+          default: EDITOR
+        max_uses:
+          type: [integer, "null"]
+        expires_in_hours:
+          type: [number, "null"]
+
+    JoinViaInviteRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        email:
+          type: string
+          format: email
+
+    JoinViaInviteResponse:
+      type: object
+      required: [board_id, board_title, granted_role, member]
+      properties:
+        board_id:
+          type: string
+        board_title:
+          type: string
+        granted_role:
+          $ref: "#/components/schemas/BoardRoleEnum"
+        member:
+          $ref: "#/components/schemas/Member"
 
     Label:
       type: object
@@ -1646,6 +2250,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WebhookConfig"
+        invite_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/BoardInviteLink"
+        visibility:
+          $ref: "#/components/schemas/BoardVisibilityEnum"
+          default: WORKSPACE
 
     HealthCheckResponse:
       type: object
@@ -1693,6 +2304,9 @@ components:
           $ref: "#/components/schemas/BoardBackground"
         template_id:
           type: string
+        visibility:
+          $ref: "#/components/schemas/BoardVisibilityEnum"
+          default: WORKSPACE
 
     UpdateBoardRequest:
       type: object
@@ -1713,6 +2327,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Member"
+        visibility:
+          $ref: "#/components/schemas/BoardVisibilityEnum"
 
     CreateColumnRequest:
       type: object
@@ -2628,6 +3244,56 @@ components:
           type: object
           additionalProperties: true
 
+    BoardRoleEnum:
+      type: string
+      enum: [ADMIN, EDITOR, VIEWER]
+
+    BoardVisibilityEnum:
+      type: string
+      enum: [PRIVATE, WORKSPACE, PUBLIC_READ]
+
+    AIPermissionRiskLevelEnum:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+
+    AIPermissionAuditRequest:
+      type: object
+      required: [board_title, visibility, members, invite_links]
+      properties:
+        board_title:
+          type: string
+        visibility:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+        invite_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/BoardInviteLink"
+
+    AIPermissionAuditResponse:
+      type: object
+      required: [security_score, risk_level, summary, findings, recommendations]
+      properties:
+        security_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        risk_level:
+          $ref: "#/components/schemas/AIPermissionRiskLevelEnum"
+        summary:
+          type: string
+        findings:
+          type: array
+          items:
+            type: string
+        recommendations:
+          type: array
+          items:
+            type: string
+
     StandardError:
       type: object
       required: [error]
@@ -2642,6 +3308,7 @@ components:
                 - RESOURCE_NOT_FOUND
                 - VALIDATION_ERROR
                 - UNAUTHORIZED
+                - FORBIDDEN
                 - INTERNAL_ERROR
             message:
               type: string
