@@ -1,4 +1,4 @@
-# Kinetix — REST, WebSocket & Internal AI Service Contract (Phase 5: Live Co-presence, Typing Indicators & Outbound Webhook Integrations)
+# Kanbanify — REST, WebSocket & Internal AI Service Contract (Phase 5: Live Co-presence, Typing Indicators & Outbound Webhook Integrations)
 
 All payloads MUST strictly validate against `packages/contracts/index.ts` (Zod) and `packages/contracts/schemas.py` (Pydantic v2).
 
@@ -702,8 +702,8 @@ Computes `BoardAnalyticsSchema` for the board, forwards `AIAnalyticsRequestSchem
 
 ### 3.8 Native Trello JSON Import & Board Export Endpoints (Phase 4)
 
-#### `POST /api/v1/boards/import` — Import Board from Trello JSON or Kinetix JSON
-Accepts `TrelloImportRequestSchema` containing either a raw Trello board JSON export (`lists`, `cards`, `checklists`, `labels`) or a complete Kinetix `BoardSchema` JSON. Maps Trello `lists` -> `columns` (generating lexicographical fractional index `position`), `cards` -> `cards` (mapping `idList`, `labels`, `due`, `dueComplete`, `idMembers`, and matching `checklists`), persists the new board into the target workspace, broadcasts `BOARD_IMPORTED` via WebSocket, and returns `TrelloImportResultSchema`.
+#### `POST /api/v1/boards/import` — Import Board from Trello JSON or Kanbanify JSON
+Accepts `TrelloImportRequestSchema` containing either a raw Trello board JSON export (`lists`, `cards`, `checklists`, `labels`) or a complete Kanbanify `BoardSchema` JSON. Maps Trello `lists` -> `columns` (generating lexicographical fractional index `position`), `cards` -> `cards` (mapping `idList`, `labels`, `due`, `dueComplete`, `idMembers`, and matching `checklists`), persists the new board into the target workspace, broadcasts `BOARD_IMPORTED` via WebSocket, and returns `TrelloImportResultSchema`.
 - **Request Body (`TrelloImportRequestSchema`)**:
 ```json
 {
@@ -1408,15 +1408,15 @@ Invoked by `apps/api` to generate rich, visually compelling notification payload
    - For `platform = "CUSTOM"`: The standard `OutboundWebhookPayloadSchema` JSON payload is delivered.
 4. **HMAC Signature Generation**:
    - `apps/api` computes an HMAC-SHA256 signature of the serialized JSON payload using the webhook's secret key (or workspace signing key).
-   - The hex digest is attached in the `X-Kinetix-Signature` HTTP header (`sha256=<hex_digest>`).
+   - The hex digest is attached in the `X-Kanbanify-Signature` / `X-Kinetix-Signature` HTTP header (`sha256=<hex_digest>`).
 5. **HTTP Dispatch**:
    - Dispatched asynchronously with a 5-second connection/read timeout.
    - Headers included:
      - `Content-Type: application/json`
-     - `X-Kinetix-Event: <EVENT_TYPE>`
+     - `X-Kanbanify-Event: <EVENT_TYPE>` (along with backward-compatible `X-Kinetix-Event`)
      - `X-Kinetix-Delivery-Id: <UUID>`
      - `X-Kinetix-Signature: sha256=<HMAC_SHA256_HEX>`
-     - `User-Agent: Kinetix-Webhook-Dispatcher/1.0`
+     - `User-Agent: Kanbanify-Webhook-Dispatcher/1.0`
 6. **Error Handling**: Non-blocking; failures or non-2xx status codes are logged with error metrics without rolling back the board transaction.
 
 ### 7.2 Outbound Webhook Payload Envelope (`OutboundWebhookPayloadSchema`)

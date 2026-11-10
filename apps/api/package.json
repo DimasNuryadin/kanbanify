@@ -2,6 +2,7 @@
   "name": "@kinetix/api",
   "version": "0.1.0",
   "private": true,
+  "description": "Kanbanify Core API & WebSocket Coordination Server",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",

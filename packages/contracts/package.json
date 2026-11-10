@@ -2,6 +2,7 @@
   "name": "@kinetix/contracts",
   "version": "0.1.0",
   "private": true,
+  "description": "Kanbanify Shared Physical Contracts (Zod, Pydantic, OpenAPI)",
   "type": "module",
   "main": "./index.ts",
   "types": "./index.ts",
