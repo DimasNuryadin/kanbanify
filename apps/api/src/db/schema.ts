@@ -14,6 +14,7 @@ import type {
   Attachment,
   AutomationRule,
   BoardBackground,
+  BoardInviteLink,
   CardCover,
   Checklist,
   Comment,
@@ -29,6 +30,32 @@ export const priorityEnum = pgEnum("priority", [
   "HIGH",
   "URGENT",
 ]);
+
+export const boardRoleEnum = pgEnum("board_role", [
+  "ADMIN",
+  "EDITOR",
+  "VIEWER",
+]);
+
+export const boardVisibilityEnum = pgEnum("board_visibility", [
+  "PRIVATE",
+  "WORKSPACE",
+  "PUBLIC_READ",
+]);
+
+export const users = pgTable("users", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  password_hash: varchar("password_hash", { length: 255 }),
+  avatar_url: varchar("avatar_url", { length: 500 }),
+  initials: varchar("initials", { length: 8 }).notNull(),
+  color: varchar("color", { length: 32 }).default("#3b82f6").notNull(),
+  default_role: varchar("default_role", { length: 32 }).default("EDITOR").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
 
 export const workspaces = pgTable("workspaces", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -59,6 +86,8 @@ export const boards = pgTable("boards", {
   activities: jsonb("activities").$type<Activity[]>().default([]).notNull(),
   automation_rules: jsonb("automation_rules").$type<AutomationRule[]>().default([]).notNull(),
   webhooks: jsonb("webhooks").$type<WebhookConfig[]>().default([]).notNull(),
+  invite_links: jsonb("invite_links").$type<BoardInviteLink[]>().default([]).notNull(),
+  visibility: varchar("visibility", { length: 32 }).default("WORKSPACE").notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
