@@ -35,11 +35,14 @@ export class WebhookDispatcher {
   constructor(private readonly repository: StorageRepository) {
     this.signingSecret =
       process.env.WEBHOOK_SIGNING_SECRET ?? "kanbanify-webhook-signing-secret";
-    this.aiEngineUrl =
-      process.env.AI_ENGINE_URL ?? "http://localhost:8001";
+    this.aiEngineUrl = (
+      process.env.INTERNAL_AI_ENGINE_URL ??
+      process.env.AI_ENGINE_URL ??
+      "http://localhost:8001"
+    ).replace(/\/+$/, "");
     this.internalToken =
       process.env.INTERNAL_SERVICE_TOKEN ??
-      "kinetix_internal_secret_token_change_in_production";
+      "orca_internal_sync_token_2026";
   }
 
   public isPlaceholderUrl(url: string): boolean {
@@ -368,7 +371,7 @@ export class WebhookDispatcher {
             board_title: boardTitle,
             recent_activities: board?.activities?.slice(-3) ?? [],
           }),
-          signal: AbortSignal.timeout(1000),
+          signal: AbortSignal.timeout(5000),
         }
       );
       if (aiRes.ok) {

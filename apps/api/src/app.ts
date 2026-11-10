@@ -11,6 +11,8 @@ import {
   AIParseAutomationResponseSchema,
   AISuggestCardEnrichmentRequestSchema,
   AISuggestCardEnrichmentResponseSchema,
+  AISummaryNotificationRequestSchema,
+  AISummaryNotificationResponseSchema,
   AutomationRuleSchema,
   BoardAnalyticsSchema,
   BoardExportCsvResponseSchema,
@@ -1579,6 +1581,60 @@ export async function buildApp(
       const result = await webhookDispatcher.testWebhook(webhookId);
       TestWebhookResponseSchema.parse(result);
       return reply.status(200).send(result);
+    }
+  );
+
+  app.post(
+    "/internal/v1/format-notification",
+    async (req, reply) => {
+      const body = AISummaryNotificationRequestSchema.parse(req.body);
+      const aiEngineBaseUrl = (
+        process.env.INTERNAL_AI_ENGINE_URL ??
+        process.env.AI_ENGINE_URL ??
+        "http://localhost:8001"
+      ).replace(/\/+$/, "");
+      const internalToken =
+        process.env.INTERNAL_SERVICE_TOKEN ?? "orca_internal_sync_token_2026";
+
+      try {
+        const response = await fetch(
+          `${aiEngineBaseUrl}/internal/v1/format-notification`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Internal-Token": internalToken,
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(8000),
+          }
+        );
+        if (!response.ok) {
+          throw new Error(`AI Engine error: ${response.status}`);
+        }
+        const json = await response.json();
+        const validated = AISummaryNotificationResponseSchema.parse(json);
+        return reply.status(200).send(validated);
+      } catch {
+        const fallback = {
+          slack_block_kit_payload: webhookDispatcher.formatSlackPayload(
+            body.board_title,
+            "AUTOMATION_TRIGGERED",
+            "Kanbanify Bot",
+            { title: "Digest Summary", priority: "MEDIUM" },
+            new Date().toISOString()
+          ),
+          discord_embed_payload: webhookDispatcher.formatDiscordPayload(
+            body.board_title,
+            "AUTOMATION_TRIGGERED",
+            "Kanbanify Bot",
+            { title: "Digest Summary", priority: "MEDIUM" },
+            new Date().toISOString()
+          ),
+          summary_text: `🚀 Kanbanify Daily Digest for ${body.board_title}: Active collaboration and automation running smoothly.`,
+        };
+        return reply.status(200).send(fallback);
+      }
     }
   );
 

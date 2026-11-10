@@ -765,8 +765,11 @@ export type UpdateWebhookRequest = z.infer<typeof UpdateWebhookRequestSchema>;
 export const TestWebhookResponseSchema = z.object({
   success: z.boolean(),
   status_code: z.number().int().optional(),
+  delivered: z.boolean().optional(),
+  platform: WebhookPlatformEnum.optional(),
   message: z.string(),
   delivered_at: z.string().datetime().optional(),
+  preview_payload: z.record(z.string(), z.unknown()).optional(),
 });
 export type TestWebhookResponse = z.infer<typeof TestWebhookResponseSchema>;
 

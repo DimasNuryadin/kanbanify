@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 /**
- * Kinetix Gate 4 — Automated Cross-Service End-to-End Smoke Test
+ * Kanbanify Phase 5 — Automated Cross-Service End-to-End Smoke Test
  * Verifies:
  *  1. Process orchestration / connection to AI Engine (Port 8001) & Core API (Port 8000)
  *  2. Health check endpoints (GET :8001/health & GET :8000/health)
  *  3. Board creation & 4 default columns with fractional indices ("a0", "a1", "a2", "a3")
  *  4. Card creation in Backlog & O(1) fractional index move to In Progress ("a0V")
  *  5. Live WebSocket real-time event broadcast (/ws/boards/:boardId)
- *  6. Cross-service AI Task Decomposition (API -> AI Engine -> Persistence)
+ *  6. Cross-service AI Task Decomposition & Enrichment (API -> AI Engine -> Persistence)
+ *  7. Multi-Board Workspaces & Board Templates provisioning
+ *  8. Runtime Butler Automation Engine execution on move to "Done"
+ *  9. Real-Time Team Productivity Analytics & Burndown Aggregator
+ * 10. AI Executive Sprint Health & Bottleneck Analyzer
+ * 11. Native Trello JSON Import & CSV/JSON Export
+ * 12. Real-Time Co-Presence & Live Typing Indicators (Phase 5)
+ * 13. Slack & Discord Webhooks Lifecycle & AI Notification Formatter (Phase 5)
  */
 
 import assert from "node:assert/strict";
@@ -191,7 +198,7 @@ async function cleanup() {
 
 async function runSmokeTests() {
   console.log("==================================================================");
-  console.log(" KINETIX GATE 4 — AUTOMATED END-TO-END INTEGRATION SMOKE TEST");
+  console.log(" KANBANIFY PHASE 5 — LIVE PRESENCE, WEBHOOKS & E2E SMOKE TEST");
   console.log("==================================================================");
 
   await ensureServicesRunning();
@@ -1193,6 +1200,299 @@ async function runSmokeTests() {
     `GET /api/v1/boards/${importResult.board.id}/export?format=csv -> 200 OK (content_type="${exportCsvBody.content_type}", filename="${exportCsvBody.filename}", ${exportCsvBody.csv_data.split("\n").length} CSV rows)`
   );
 
+  // ---------------------------------------------------------------------------
+  // STEP 13: Real-Time Presence & Typing Verification (Phase 5)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "PRESENCE_TYPING",
+    `Updating user presence to 'EDITING' on card '${createdCard.id}' via POST /api/v1/boards/${board.id}/presence...`
+  );
+
+  const testUser = {
+    user_id: "88888888-8888-4888-8888-888888888882",
+    user_name: "Maya Lin",
+    initials: "ML",
+    color: "#ec4899",
+    status: "EDITING",
+    active_card_id: createdCard.id,
+    event: "START_TYPING",
+  };
+
+  const updatePresenceRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/presence`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(testUser),
+    }
+  );
+  assert.equal(
+    updatePresenceRes.status,
+    200,
+    `Expected 200 from POST /api/v1/boards/:boardId/presence, got ${updatePresenceRes.status}`
+  );
+  const updatePresenceBody = await updatePresenceRes.json();
+  assert.equal(updatePresenceBody.success, true);
+  assert.equal(updatePresenceBody.presence.status, "EDITING");
+  assert.equal(updatePresenceBody.presence.active_card_id, createdCard.id);
+
+  logStep(
+    "PRESENCE_GET",
+    `Fetching active presences via GET /api/v1/boards/${board.id}/presence...`
+  );
+  const getPresenceRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/presence`
+  );
+  assert.equal(
+    getPresenceRes.status,
+    200,
+    `Expected 200 from GET /api/v1/boards/:boardId/presence, got ${getPresenceRes.status}`
+  );
+  const presenceListBody = await getPresenceRes.json();
+  assert.equal(presenceListBody.board_id, board.id);
+  assert.ok(
+    Array.isArray(presenceListBody.presences) &&
+      presenceListBody.presences.length >= 1,
+    "Expected non-empty presences array"
+  );
+  const matchedPresence = presenceListBody.presences.find(
+    (p) => p.user_id === testUser.user_id
+  );
+  assert.ok(matchedPresence, "Expected test user in active presences");
+  assert.equal(matchedPresence.status, "EDITING");
+  assert.equal(matchedPresence.active_card_id, createdCard.id);
+  logPass(
+    `GET /api/v1/boards/${board.id}/presence -> 200 OK (user='${matchedPresence.user_name}', status='${matchedPresence.status}', active_card_id='${matchedPresence.active_card_id}')`
+  );
+
+  // Stop typing to verify reset
+  const stopTypingRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/presence`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: testUser.user_id,
+        status: "ACTIVE",
+        active_card_id: null,
+        event: "STOP_TYPING",
+      }),
+    }
+  );
+  assert.equal(stopTypingRes.status, 200);
+  const stopTypingBody = await stopTypingRes.json();
+  assert.equal(stopTypingBody.presence.status, "ACTIVE");
+  assert.equal(stopTypingBody.presence.active_card_id, null);
+  logPass(
+    `POST /api/v1/boards/${board.id}/presence (STOP_TYPING) -> status reset to ACTIVE, active_card_id=null`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 14: Slack & Discord Webhook Lifecycle & AI Notification Formatting (Phase 5)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "WEBHOOK_CREATE",
+    `Registering outbound Slack and Discord webhooks via POST /api/v1/boards/${board.id}/webhooks...`
+  );
+
+  const slackPayload = {
+    name: "E2E Slack Engineering Channel",
+    platform: "SLACK",
+    url: "https://hooks.slack.com/services/T000/B000/MOCK_SLACK_HOOK",
+    subscribed_events: ["CARD_MOVED", "AUTOMATION_TRIGGERED"],
+    is_enabled: true,
+  };
+  const createSlackRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/webhooks`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(slackPayload),
+    }
+  );
+  assert.ok(
+    createSlackRes.status === 200 || createSlackRes.status === 201,
+    `Expected 200/201 creating Slack webhook, got ${createSlackRes.status}`
+  );
+  const slackWebhook = await createSlackRes.json();
+  assert.ok(slackWebhook.id, "Slack webhook must have an id");
+  assert.equal(slackWebhook.platform, "SLACK");
+  assert.deepEqual(slackWebhook.subscribed_events, [
+    "CARD_MOVED",
+    "AUTOMATION_TRIGGERED",
+  ]);
+
+  const discordPayload = {
+    name: "E2E Discord Announcements Feed",
+    platform: "DISCORD",
+    url: "https://discord.com/api/webhooks/mock/MOCK_DISCORD_HOOK",
+    subscribed_events: ["CARD_MOVED", "AUTOMATION_TRIGGERED"],
+    is_enabled: true,
+  };
+  const createDiscordRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/webhooks`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(discordPayload),
+    }
+  );
+  assert.ok(
+    createDiscordRes.status === 200 || createDiscordRes.status === 201,
+    `Expected 200/201 creating Discord webhook, got ${createDiscordRes.status}`
+  );
+  const discordWebhook = await createDiscordRes.json();
+  assert.ok(discordWebhook.id, "Discord webhook must have an id");
+  assert.equal(discordWebhook.platform, "DISCORD");
+
+  logStep(
+    "WEBHOOK_LIST",
+    `Verifying GET /api/v1/boards/${board.id}/webhooks includes created webhooks...`
+  );
+  const listWebhooksRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/webhooks`
+  );
+  assert.equal(
+    listWebhooksRes.status,
+    200,
+    `Expected 200 from GET /api/v1/boards/:boardId/webhooks, got ${listWebhooksRes.status}`
+  );
+  const webhooksList = await listWebhooksRes.json();
+  assert.ok(
+    Array.isArray(webhooksList) && webhooksList.length >= 2,
+    `Expected at least 2 webhooks on board, got ${webhooksList.length}`
+  );
+  assert.ok(
+    webhooksList.some((w) => w.id === slackWebhook.id),
+    "Expected created Slack webhook in webhooks list"
+  );
+  assert.ok(
+    webhooksList.some((w) => w.id === discordWebhook.id),
+    "Expected created Discord webhook in webhooks list"
+  );
+  logPass(
+    `GET /api/v1/boards/${board.id}/webhooks -> 200 OK (${webhooksList.length} webhooks configured)`
+  );
+
+  logStep(
+    "WEBHOOK_TEST_DISCORD_SLACK",
+    `Testing webhook dispatches & AI-formatted payloads via POST /api/v1/webhooks/:webhookId/test...`
+  );
+  // Test Slack Webhook
+  const testSlackRes = await fetch(
+    `${API_BASE_URL}/api/v1/webhooks/${slackWebhook.id}/test`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    testSlackRes.status,
+    200,
+    `Expected 200 testing Slack webhook, got ${testSlackRes.status}`
+  );
+  const testSlackBody = await testSlackRes.json();
+  assert.equal(testSlackBody.delivered, true);
+  assert.ok(
+    testSlackBody.preview_payload,
+    "Expected preview_payload in test response"
+  );
+  assert.ok(
+    Array.isArray(testSlackBody.preview_payload.blocks) ||
+      typeof testSlackBody.preview_payload.text === "string",
+    "Expected Slack Block Kit payload with blocks or text"
+  );
+  logPass(
+    `POST /api/v1/webhooks/${slackWebhook.id}/test -> 200 OK (delivered=true, platform=SLACK, preview_payload has valid Block Kit blocks)`
+  );
+
+  // Test Discord Webhook
+  const testDiscordRes = await fetch(
+    `${API_BASE_URL}/api/v1/webhooks/${discordWebhook.id}/test`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    testDiscordRes.status,
+    200,
+    `Expected 200 testing Discord webhook, got ${testDiscordRes.status}`
+  );
+  const testDiscordBody = await testDiscordRes.json();
+  assert.equal(testDiscordBody.delivered, true);
+  assert.ok(
+    testDiscordBody.preview_payload,
+    "Expected preview_payload in test response"
+  );
+  assert.ok(
+    Array.isArray(testDiscordBody.preview_payload.embeds),
+    "Expected Discord Rich Embed payload with embeds[]"
+  );
+  logPass(
+    `POST /api/v1/webhooks/${discordWebhook.id}/test -> 200 OK (delivered=true, platform=DISCORD, preview_payload has valid Rich Embeds)`
+  );
+
+  // Test AI Notification Formatter directly (POST /internal/v1/format-notification)
+  logStep(
+    "AI_NOTIFICATION_FORMATTER",
+    "Calling POST /internal/v1/format-notification (API -> AI Engine) to verify digest formatting..."
+  );
+  const aiNotifyRes = await fetch(
+    `${API_BASE_URL}/internal/v1/format-notification`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        board_title: board.title,
+        recent_activities: verifiedBoard.activities.slice(-3),
+      }),
+    }
+  );
+  assert.equal(
+    aiNotifyRes.status,
+    200,
+    `Expected 200 from POST /internal/v1/format-notification, got ${aiNotifyRes.status}`
+  );
+  const aiNotifyBody = await aiNotifyRes.json();
+  assert.ok(
+    aiNotifyBody.slack_block_kit_payload,
+    "Expected slack_block_kit_payload in AI digest response"
+  );
+  assert.ok(
+    aiNotifyBody.discord_embed_payload,
+    "Expected discord_embed_payload in AI digest response"
+  );
+  assert.ok(
+    typeof aiNotifyBody.summary_text === "string" &&
+      aiNotifyBody.summary_text.length > 5,
+    "Expected non-empty summary_text in AI digest response"
+  );
+  logPass(
+    `POST /internal/v1/format-notification -> 200 OK (summary_text="${aiNotifyBody.summary_text.slice(
+      0,
+      60
+    )}...")`
+  );
+
+  // Clean up Discord webhook via DELETE
+  const deleteWebhookRes = await fetch(
+    `${API_BASE_URL}/api/v1/webhooks/${discordWebhook.id}`,
+    {
+      method: "DELETE",
+    }
+  );
+  assert.equal(
+    deleteWebhookRes.status,
+    204,
+    `Expected 204 from DELETE /api/v1/webhooks/:webhookId, got ${deleteWebhookRes.status}`
+  );
+  logPass(
+    `DELETE /api/v1/webhooks/${discordWebhook.id} -> 204 No Content verified`
+  );
+
   if (wsClient) {
     await new Promise((r) => setTimeout(r, 150));
     wsClient.close();
@@ -1207,7 +1507,7 @@ async function runSmokeTests() {
 
   console.log("==================================================================");
   console.log(
-    "\x1b[32m[PASS] Phase 4 Analytics & Trello Import/Export E2E Smoke Tests Succeeded!\x1b[0m"
+    "\x1b[32m[PASS] Kanbanify Phase 5 Live Presence & Webhooks E2E Smoke Tests Succeeded!\x1b[0m"
   );
   console.log("==================================================================");
 }

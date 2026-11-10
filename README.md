@@ -19,6 +19,8 @@ flowchart LR
         REST["REST API (/api/v1/*)\nZod Contract Validation"]
         Butler["Butler Automation Engine\nRuntime Trigger & Action Executor"]
         Analytics["Analytics & Data Portability\nBurndown + Trello JSON Import + CSV/JSON Export"]
+        Presence["Presence & Typing Hub\nGET/POST /presence & WS sync"]
+        Webhook["Webhook Dispatcher\nSlack Block Kit & Discord Embeds"]
         WS["WebSocket Hub (/ws/boards/:boardId)\nReal-Time Broadcast"]
         Repo["Drizzle ORM + In-Memory Fallback"]
     end
@@ -27,6 +29,7 @@ flowchart LR
         Decomposer["POST /internal/v1/decompose-task\nPOST /internal/v1/enrich-card"]
         RuleParser["POST /internal/v1/parse-automation\nBilingual ID/EN Butler Rule Compiler"]
         BoardAnalyzer["POST /internal/v1/analyze-board\nAI Executive Sprint Health & Bottleneck Analyzer"]
+        Formatter["POST /internal/v1/format-notification\nAI ChatOps Digest & Notification Formatter"]
     end
 
     subgraph Infra ["Infrastructure (Docker Compose)"]
@@ -39,24 +42,29 @@ flowchart LR
     Store <-- "Live Events (WS :8000)" --> WS
     REST --> Butler
     REST --> Analytics
+    REST --> Presence
+    REST --> Webhook
     Butler --> Repo
     Analytics --> Repo
+    Presence --> WS
+    Webhook --> Repo
     REST --> Repo
     Repo <--> PG
     WS <--> RD
     REST -- "X-Internal-Token (:8001)" --> Decomposer
     REST -- "X-Internal-Token (:8001)" --> RuleParser
     REST -- "X-Internal-Token (:8001)" --> BoardAnalyzer
+    Webhook -- "X-Internal-Token (:8001)" --> Formatter
 ```
 
 ### Tech Stack Summary
 
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
-| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
-| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator (`GET /api/v1/boards/:boardId/analytics`), Native Trello JSON Importer (`POST /api/v1/boards/import`), CSV/JSON Exporter (`GET /api/v1/boards/:boardId/export`), WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
-| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, and AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`) with deterministic zero-config fallback |
-| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, and Internal AI schemas |
+| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
+| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator (`GET /api/v1/boards/:boardId/analytics`), Native Trello JSON Importer (`POST /api/v1/boards/import`), CSV/JSON Exporter (`GET /api/v1/boards/:boardId/export`), Real-Time Co-Presence Service & Live Typing Coordinator (`GET/POST /api/v1/boards/:boardId/presence`), Outbound Webhook Dispatcher with HMAC-SHA256 signatures (`/api/v1/boards/:boardId/webhooks`), WebSocket real-time room fan-out, AI proxy, PostgreSQL & Redis persistence with automatic in-memory fallback |
+| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads with deterministic zero-config fallback |
+| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for all REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
 | **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 
 ---
@@ -139,7 +147,7 @@ Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Automated E2E Smoke Test
 
-Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 4 lifecycle:
+Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 5 lifecycle:
 1. **Health Checks:** Verifies `GET /health` on both `http://localhost:8001/health` and `http://localhost:8000/health` return `200 OK`.
 2. **Workspaces & Board Templates Verification (Phase 3):**
    - Calls `GET /api/v1/workspaces` and asserts at least 1 workspace and multiple seeded boards exist.
@@ -156,7 +164,9 @@ Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2
 11. **Real-Time Board Analytics Verification (Phase 4):** Calls `GET /api/v1/boards/:boardId/analytics` and asserts `200 OK` with valid `total_cards`, `completion_rate`, 7-day `burndown_series`, `cards_by_column`, and `workload_by_member`.
 12. **AI Executive Sprint Insights (`API -> AI Engine`, Phase 4):** Calls `POST /api/v1/boards/:boardId/analytics/ai-report` ($\rightarrow$ `POST /internal/v1/analyze-board` with `X-Internal-Token`) and asserts `200 OK` returning `health_score` (`0-100`), `health_status`, `executive_summary`, `bottlenecks`, and `actionable_recommendations`.
 13. **Native Trello JSON Import & CSV/JSON Export (Phase 4):** Calls `POST /api/v1/boards/import` with a mock raw Trello JSON payload (`name`, `lists`, `cards`, `checklists`) and asserts successful board creation (`imported_lists_count > 0`) with valid O(1) fractional index positions (`"a0"`, `"a1"`, `"a2"`), then calls `GET /api/v1/boards/:boardId/export?format=csv` (and `format=json`) and asserts `200 OK` with `content_type: "text/csv"` and valid CSV data rows.
-14. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId`.
+14. **Real-Time Co-Presence & Typing Indicators (Phase 5):** Updates presence state (`status: "EDITING"`, `active_card_id`, `event: "START_TYPING"`) via `POST /api/v1/boards/:boardId/presence`, verifies presence list on `GET /api/v1/boards/:boardId/presence`, and asserts proper status reset to `"ACTIVE"` upon `"STOP_TYPING"`.
+15. **Slack & Discord Webhook Lifecycle & AI Notification Formatting (Phase 5):** Registers outbound Slack and Discord webhooks subscribed to `["CARD_MOVED", "AUTOMATION_TRIGGERED"]` via `POST /api/v1/boards/:boardId/webhooks`, verifies listing via `GET /api/v1/boards/:boardId/webhooks`, dispatches test pings via `POST /api/v1/webhooks/:webhookId/test` with verified `delivered: true` and formatted Slack Block Kit / Discord Rich Embed payloads, verifies AI Standup Digest formatting via `POST /internal/v1/format-notification`, and verifies cleanup via `DELETE /api/v1/webhooks/:webhookId`.
+16. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`).
 
 Run the E2E smoke test with a single command:
 
@@ -165,6 +175,30 @@ node scripts/e2e_test.mjs
 # or via root package.json:
 npm run test:e2e
 ```
+
+---
+
+## Phase 5 Real-Time Co-Presence, Typing Indicators & Outbound Webhook Integrations
+
+- **Live Multi-User Co-Presence Avatar Stack (`WorkspaceHeader` & `/ws/boards/:boardId`):**
+  - Displays real-time online collaborator avatars in the board header with active status rings (`ACTIVE`, `IDLE`, `EDITING`).
+  - Automatically joins room on board switch and syncs initial presence state via `GET /api/v1/boards/:boardId/presence` or WebSocket `PRESENCE_SYNC`.
+  - Offline cleanup and `USER_LEFT` broadcast when browser tab is closed or socket disconnects.
+- **Card-Level Live Typing Indicators ("💬 [Name] is editing..."):**
+  - **Board Card Front Indicator:** Whenever a collaborator begins typing on a card, `apps/web` emits `START_TYPING` with `active_card_id`. Connected peers immediately see an animated `💬 [Name] is editing...` banner on the card front.
+  - **2-Column Card Back Modal Banner:** Opening a card being edited by a teammate displays a prominent warning banner (`⚡ [Name] is currently typing on this card`) with their avatar color and initials to prevent overwrite conflicts.
+  - Automatically resets status to `ACTIVE` and broadcasts `PRESENCE_SYNC` on `STOP_TYPING` or modal close.
+- **Outbound Webhook Integrations (`apps/api` Webhook Dispatcher):**
+  - Configure outbound webhooks per board (`GET/POST /api/v1/boards/:boardId/webhooks`, `PATCH/DELETE /api/v1/webhooks/:webhookId`) targeting **Slack**, **Discord**, or **Custom HTTP endpoints**.
+  - Event subscriptions: `CARD_CREATED`, `CARD_MOVED`, `CARD_ARCHIVED`, `COMMENT_ADDED`, and `AUTOMATION_TRIGGERED`.
+  - **Cryptographic Security:** Each outgoing webhook request includes an `X-Kanbanify-Signature` (and `X-Kinetix-Signature`) HMAC-SHA256 signature, `X-Kanbanify-Event`, and unique `X-Kinetix-Delivery-Id`.
+- **✨ AI Smart Notification Formatter (`POST /internal/v1/format-notification` $\rightarrow$ `services/ai-engine`):**
+  - Compiles raw board activities and events into native **Slack Block Kit** (`slack_block_kit_payload`) and **Discord Rich Embed** (`discord_embed_payload`) structures, complete with header blocks, field summaries, actor attributions, and color coding (green for Done, red for Urgent/Archived, blurple for In Progress).
+  - Includes a one-click **AI Daily Digest** generator summarizing recent board changes into executive ChatOps updates.
+- **Interactive Webhooks Modal & Live Message Previewer (`WebhooksModal`):**
+  - Access via `Cmd+K` -> `"Manage Board Webhooks"` or board menu.
+  - Visual 2-column layout: Left column manages active webhooks and creates new endpoints; right column features a live interactive previewer switching between **Slack**, **Discord**, and **Raw JSON** payload views.
+  - 1-Click **Test Ping** button dispatches a simulated test payload and displays live delivery status with status code and formatted payload preview.
 
 ---
 
