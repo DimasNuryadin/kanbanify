@@ -44,6 +44,10 @@ import {
   type WebhookConfig,
   type Workspace,
   type WorkspaceWithBoards,
+  type BoardInviteLink,
+  type BoardRole,
+  type BoardVisibility,
+  type AuthUser,
 } from "@kinetix/contracts";
 import * as schema from "./schema.js";
 import { AppError } from "../errors.js";
@@ -63,6 +67,94 @@ export const DEFAULT_CARD_COVER: CardCover = {
   value: null,
   size: "normal",
 };
+
+export interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  password_hash: string | null;
+  avatar_url: string | null;
+  initials: string;
+  color: string;
+  default_role: BoardRole;
+  created_at: string;
+}
+
+export const PRESEEDED_USERS: UserRecord[] = [
+  {
+    id: "88888888-8888-4888-8888-888888888881",
+    name: "Alex Rivera",
+    email: "alex@kinetix.dev",
+    password_hash: null,
+    avatar_url: null,
+    initials: "AR",
+    color: "#3b82f6",
+    default_role: "ADMIN",
+    created_at: "2026-11-08T00:00:00.000Z",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888882",
+    name: "Maya Lin",
+    email: "maya@kinetix.dev",
+    password_hash: null,
+    avatar_url: null,
+    initials: "ML",
+    color: "#8b5cf6",
+    default_role: "EDITOR",
+    created_at: "2026-11-08T00:00:00.000Z",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888883",
+    name: "Samir Patel",
+    email: "samir@kinetix.dev",
+    password_hash: null,
+    avatar_url: null,
+    initials: "SP",
+    color: "#10b981",
+    default_role: "EDITOR",
+    created_at: "2026-11-08T00:00:00.000Z",
+  },
+  {
+    id: "88888888-8888-4888-8888-888888888884",
+    name: "Elena Rostova",
+    email: "elena@kinetix.dev",
+    password_hash: null,
+    avatar_url: null,
+    initials: "ER",
+    color: "#f59e0b",
+    default_role: "VIEWER",
+    created_at: "2026-11-08T00:00:00.000Z",
+  },
+];
+
+export const DEFAULT_INVITE_LINKS: BoardInviteLink[] = [
+  {
+    id: "inv-001",
+    board_id: SEED_BOARD_ID,
+    token: "kb_inv_8f92a1bc3d4e",
+    role: "EDITOR",
+    created_by_id: "88888888-8888-4888-8888-888888888881",
+    created_by_name: "Alex Rivera",
+    max_uses: 10,
+    uses_count: 3,
+    expires_at: "2026-11-17T10:00:00.000Z",
+    is_active: true,
+    created_at: "2026-11-10T10:00:00.000Z",
+  },
+  {
+    id: "inv-002",
+    board_id: SEED_BOARD_ID,
+    token: "kb_inv_viewer_seed",
+    role: "VIEWER",
+    created_by_id: "88888888-8888-4888-8888-888888888881",
+    created_by_name: "Alex Rivera",
+    max_uses: null,
+    uses_count: 0,
+    expires_at: null,
+    is_active: true,
+    created_at: "2026-11-10T10:00:00.000Z",
+  },
+];
 
 export function compareFractionalIndex(a: string, b: string): number {
   if (a < b) return -1;
@@ -281,6 +373,8 @@ export function buildDefaultBoardMembers(): Member[] {
     avatar_url: m.avatar_url,
     initials: m.initials,
     color: m.color,
+    role: m.role,
+    joined_at: m.joined_at,
   }));
 }
 
@@ -289,6 +383,7 @@ interface InMemoryStore {
   boards: Map<string, Omit<Board, "columns" | "cards">>;
   columns: Map<string, Column>;
   cards: Map<string, Card>;
+  users: Map<string, UserRecord>;
 }
 
 function createPreseededMemoryStore(): InMemoryStore {
@@ -296,6 +391,11 @@ function createPreseededMemoryStore(): InMemoryStore {
   const boards = new Map<string, Omit<Board, "columns" | "cards">>();
   const columns = new Map<string, Column>();
   const cards = new Map<string, Card>();
+  const users = new Map<string, UserRecord>();
+
+  for (const user of PRESEEDED_USERS) {
+    users.set(user.id, { ...user });
+  }
 
   const createdAt = "2026-11-08T10:00:00.000Z";
 
@@ -486,6 +586,8 @@ function createPreseededMemoryStore(): InMemoryStore {
     activities: seedActivities,
     automation_rules: primaryButlerRules,
     webhooks: seedWebhooks,
+    invite_links: [...DEFAULT_INVITE_LINKS],
+    visibility: "WORKSPACE",
     created_at: createdAt,
   });
 
@@ -1115,6 +1217,8 @@ function createPreseededMemoryStore(): InMemoryStore {
     ],
     automation_rules: [],
     webhooks: [],
+    invite_links: [],
+    visibility: "WORKSPACE",
     created_at: createdAt,
   });
 
@@ -1233,6 +1337,8 @@ function createPreseededMemoryStore(): InMemoryStore {
     ],
     automation_rules: [],
     webhooks: [],
+    invite_links: [],
+    visibility: "WORKSPACE",
     created_at: createdAt,
   });
 
@@ -1323,7 +1429,7 @@ function createPreseededMemoryStore(): InMemoryStore {
   ];
   for (const c of b3Cards) cards.set(c.id, c);
 
-  return { workspaces, boards, columns, cards };
+  return { workspaces, boards, columns, cards, users };
 }
 
 export class StorageRepository {
@@ -1428,6 +1534,20 @@ export class StorageRepository {
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS activities JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS automation_rules JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS webhooks JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS visibility VARCHAR(32) NOT NULL DEFAULT 'WORKSPACE';
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS invite_links JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(128) PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password_hash VARCHAR(255),
+        avatar_url VARCHAR(500),
+        initials VARCHAR(8) NOT NULL,
+        color VARCHAR(32) NOT NULL DEFAULT '#3b82f6',
+        default_role VARCHAR(32) NOT NULL DEFAULT 'EDITOR',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
       CREATE TABLE IF NOT EXISTS columns (
         id UUID PRIMARY KEY,
@@ -1511,6 +1631,23 @@ export class StorageRepository {
         .onConflictDoNothing();
     }
 
+    for (const u of seedMem.users.values()) {
+      await this.db
+        .insert(schema.users)
+        .values({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          password_hash: u.password_hash,
+          avatar_url: u.avatar_url,
+          initials: u.initials,
+          color: u.color,
+          default_role: u.default_role,
+          created_at: u.created_at,
+        })
+        .onConflictDoNothing();
+    }
+
     const missingSeedBoards = Array.from(seedMem.boards.values()).filter(
       (b) => !existingBoardIds.has(b.id)
     );
@@ -1532,6 +1669,8 @@ export class StorageRepository {
           activities: b.activities,
           automation_rules: b.automation_rules,
           webhooks: b.webhooks,
+          invite_links: b.invite_links,
+          visibility: b.visibility,
           created_at: b.created_at,
         })
         .onConflictDoNothing();
@@ -1699,6 +1838,12 @@ export class StorageRepository {
       ? row.webhooks
       : [];
 
+    const inviteLinks: BoardInviteLink[] = Array.isArray((row as any).invite_links)
+      ? (row as any).invite_links
+      : [];
+    const visibility: BoardVisibility =
+      ((row as any).visibility as BoardVisibility) ?? "WORKSPACE";
+
     return {
       id: row.id,
       workspace_id: row.workspace_id,
@@ -1711,6 +1856,8 @@ export class StorageRepository {
       activities,
       automation_rules: automationRules,
       webhooks,
+      invite_links: inviteLinks,
+      visibility,
       columns: cols,
       cards: boardCards,
       created_at: normalizeIsoTimestamp(row.created_at),
@@ -2061,6 +2208,8 @@ export class StorageRepository {
       });
     }
 
+    const visibility: BoardVisibility = input.visibility ?? "WORKSPACE";
+
     // Keep memory synced
     this.memory.boards.set(boardId, {
       id: boardId,
@@ -2074,6 +2223,8 @@ export class StorageRepository {
       activities,
       automation_rules: automationRules,
       webhooks: [],
+      invite_links: [],
+      visibility,
       created_at: createdAt,
     });
     for (const col of defaultColumns) {
@@ -2097,6 +2248,8 @@ export class StorageRepository {
           activities,
           automation_rules: automationRules,
           webhooks: [],
+          invite_links: [],
+          visibility,
           created_at: createdAt,
         });
         await this.db.insert(schema.columns).values(
@@ -2160,6 +2313,8 @@ export class StorageRepository {
       activities,
       automation_rules: automationRules,
       webhooks: [],
+      invite_links: [],
+      visibility,
       columns: defaultColumns,
       cards: sampleCards,
       created_at: createdAt,
@@ -2179,6 +2334,8 @@ export class StorageRepository {
       activities: board.activities,
       automation_rules: board.automation_rules,
       webhooks: board.webhooks ?? [],
+      invite_links: board.invite_links ?? [],
+      visibility: board.visibility ?? "WORKSPACE",
       created_at: board.created_at,
     });
 
@@ -2204,6 +2361,8 @@ export class StorageRepository {
           activities: board.activities,
           automation_rules: board.automation_rules,
           webhooks: board.webhooks ?? [],
+          invite_links: board.invite_links ?? [],
+          visibility: board.visibility ?? "WORKSPACE",
           created_at: board.created_at,
         });
 
@@ -2343,6 +2502,7 @@ export class StorageRepository {
     const updatedBackground = input.background ?? existing.background;
     const updatedLabels = input.labels ?? existing.labels;
     const updatedMembers = input.members ?? existing.members;
+    const updatedVisibility: BoardVisibility = input.visibility ?? existing.visibility ?? "WORKSPACE";
 
     this.memory.boards.set(boardId, {
       id: existing.id,
@@ -2356,6 +2516,8 @@ export class StorageRepository {
       activities: existing.activities,
       automation_rules: existing.automation_rules,
       webhooks: existing.webhooks,
+      invite_links: existing.invite_links ?? [],
+      visibility: updatedVisibility,
       created_at: existing.created_at,
     });
 
@@ -2370,6 +2532,7 @@ export class StorageRepository {
             background: updatedBackground,
             labels: updatedLabels,
             members: updatedMembers,
+            visibility: updatedVisibility,
           })
           .where(eq(schema.boards.id, boardId));
       } catch (err) {
@@ -2389,6 +2552,7 @@ export class StorageRepository {
       background: updatedBackground,
       labels: updatedLabels,
       members: updatedMembers,
+      visibility: updatedVisibility,
     };
   }
 
@@ -3798,5 +3962,481 @@ export class StorageRepository {
     }
 
     return { deleted: true, boardId };
+  }
+
+  // ==========================================================================
+  // PHASE 6: AUTH & USERS
+  // ==========================================================================
+
+  public async getUserById(id: string): Promise<UserRecord | null> {
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        const rows = await this.db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, id))
+          .limit(1);
+        if (rows[0]) {
+          return {
+            id: rows[0].id,
+            name: rows[0].name,
+            email: rows[0].email,
+            password_hash: rows[0].password_hash ?? null,
+            avatar_url: rows[0].avatar_url ?? null,
+            initials: rows[0].initials,
+            color: rows[0].color,
+            default_role: rows[0].default_role as BoardRole,
+            created_at: normalizeIsoTimestamp(rows[0].created_at),
+          };
+        }
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+    const memUser = this.memory.users.get(id);
+    return memUser ? { ...memUser } : null;
+  }
+
+  public async getUserByEmail(email: string): Promise<UserRecord | null> {
+    const normalized = email.toLowerCase().trim();
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        const rows = await this.db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.email, normalized))
+          .limit(1);
+        if (rows[0]) {
+          return {
+            id: rows[0].id,
+            name: rows[0].name,
+            email: rows[0].email,
+            password_hash: rows[0].password_hash ?? null,
+            avatar_url: rows[0].avatar_url ?? null,
+            initials: rows[0].initials,
+            color: rows[0].color,
+            default_role: rows[0].default_role as BoardRole,
+            created_at: normalizeIsoTimestamp(rows[0].created_at),
+          };
+        }
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+    for (const u of this.memory.users.values()) {
+      if (u.email.toLowerCase() === normalized) {
+        return { ...u };
+      }
+    }
+    return null;
+  }
+
+  public async createUser(user: UserRecord): Promise<UserRecord> {
+    this.memory.users.set(user.id, { ...user });
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db.insert(schema.users).values({
+          id: user.id,
+          name: user.name,
+          email: user.email.toLowerCase(),
+          password_hash: user.password_hash,
+          avatar_url: user.avatar_url,
+          initials: user.initials,
+          color: user.color,
+          default_role: user.default_role,
+          created_at: user.created_at,
+        });
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+    return user;
+  }
+
+  public async getDemoUsers(): Promise<UserRecord[]> {
+    return PRESEEDED_USERS.map((u) => {
+      const live = this.memory.users.get(u.id);
+      return live ? { ...live } : { ...u };
+    });
+  }
+
+  // ==========================================================================
+  // PHASE 6: BOARD MEMBERS (ADMIN ONLY)
+  // ==========================================================================
+
+  public async addBoardMember(boardId: string, member: Member): Promise<Member> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(404, "RESOURCE_NOT_FOUND", `Board '${boardId}' not found`, {
+        board_id: boardId,
+      });
+    }
+
+    const currentMembers = [...board.members];
+    const existingIdx = currentMembers.findIndex(
+      (m) => m.id === member.id || m.email.toLowerCase() === member.email.toLowerCase()
+    );
+
+    if (existingIdx >= 0) {
+      currentMembers[existingIdx] = { ...currentMembers[existingIdx], ...member };
+    } else {
+      currentMembers.push(member);
+    }
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.members = currentMembers;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ members: currentMembers })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    await this.appendBoardActivity(boardId, {
+      actor_name: member.name,
+      action_type: "MEMBER_ASSIGNED",
+      description: `added ${member.name} (${member.role}) to board`,
+    });
+
+    return member;
+  }
+
+  public async updateBoardMemberRole(
+    boardId: string,
+    memberId: string,
+    role: BoardRole
+  ): Promise<Member> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(404, "RESOURCE_NOT_FOUND", `Board '${boardId}' not found`, {
+        board_id: boardId,
+      });
+    }
+
+    const currentMembers = [...board.members];
+    const member = currentMembers.find((m) => m.id === memberId);
+    if (!member) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Member '${memberId}' not found on board '${boardId}'`,
+        { board_id: boardId, member_id: memberId }
+      );
+    }
+
+    member.role = role;
+
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.members = currentMembers;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ members: currentMembers })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    await this.appendBoardActivity(boardId, {
+      actor_name: member.name,
+      action_type: "MEMBER_ASSIGNED",
+      description: `updated role of ${member.name} to ${role}`,
+    });
+
+    return member;
+  }
+
+  public async removeBoardMember(
+    boardId: string,
+    memberId: string
+  ): Promise<{ id: string; removed: boolean }> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(404, "RESOURCE_NOT_FOUND", `Board '${boardId}' not found`, {
+        board_id: boardId,
+      });
+    }
+
+    const member = board.members.find((m) => m.id === memberId);
+    if (!member) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Member '${memberId}' not found on board '${boardId}'`,
+        { board_id: boardId, member_id: memberId }
+      );
+    }
+
+    const filteredMembers = board.members.filter((m) => m.id !== memberId);
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.members = filteredMembers;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ members: filteredMembers })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    await this.appendBoardActivity(boardId, {
+      actor_name: member.name,
+      action_type: "MEMBER_ASSIGNED",
+      description: `removed ${member.name} from board`,
+    });
+
+    return { id: memberId, removed: true };
+  }
+
+  // ==========================================================================
+  // PHASE 6: SHAREABLE INVITE LINKS
+  // ==========================================================================
+
+  public async getBoardInvites(boardId: string): Promise<BoardInviteLink[]> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(404, "RESOURCE_NOT_FOUND", `Board '${boardId}' not found`, {
+        board_id: boardId,
+      });
+    }
+    return board.invite_links ?? [];
+  }
+
+  public async createBoardInvite(
+    boardId: string,
+    invite: BoardInviteLink
+  ): Promise<BoardInviteLink> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(404, "RESOURCE_NOT_FOUND", `Board '${boardId}' not found`, {
+        board_id: boardId,
+      });
+    }
+
+    const nextInvites = [...(board.invite_links ?? []), invite];
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.invite_links = nextInvites;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ invite_links: nextInvites })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return invite;
+  }
+
+  public async getInviteByToken(
+    token: string
+  ): Promise<{ invite: BoardInviteLink; board: Board } | null> {
+    for (const memBoard of this.memory.boards.values()) {
+      const inv = (memBoard.invite_links ?? []).find((i) => i.token === token);
+      if (inv) {
+        const fullBoard = await this.getBoardById(memBoard.id);
+        if (fullBoard) return { invite: inv, board: fullBoard };
+      }
+    }
+    return null;
+  }
+
+  public async getInviteById(
+    inviteId: string
+  ): Promise<{ invite: BoardInviteLink; board: Board } | null> {
+    for (const memBoard of this.memory.boards.values()) {
+      const inv = (memBoard.invite_links ?? []).find((i) => i.id === inviteId);
+      if (inv) {
+        const fullBoard = await this.getBoardById(memBoard.id);
+        if (fullBoard) return { invite: inv, board: fullBoard };
+      }
+    }
+    return null;
+  }
+
+  public async revokeInvite(inviteId: string): Promise<{ id: string; revoked: boolean }> {
+    const found = await this.getInviteById(inviteId);
+    if (!found) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Invite '${inviteId}' not found`,
+        { invite_id: inviteId }
+      );
+    }
+
+    const { invite, board } = found;
+    invite.is_active = false;
+
+    const memBoard = this.memory.boards.get(board.id);
+    if (memBoard) {
+      memBoard.invite_links = (memBoard.invite_links ?? []).map((i) =>
+        i.id === inviteId ? { ...i, is_active: false } : i
+      );
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ invite_links: memBoard?.invite_links ?? [] })
+          .where(eq(schema.boards.id, board.id));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { id: inviteId, revoked: true };
+  }
+
+  public async redeemInvite(
+    token: string,
+    joiningUser: {
+      id?: string;
+      name?: string;
+      email?: string;
+      avatar_url?: string | null;
+      initials?: string;
+      color?: string;
+    }
+  ): Promise<{ board: Board; member: Member; granted_role: BoardRole }> {
+    const found = await this.getInviteByToken(token);
+    if (!found) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Invite link with token '${token}' not found`,
+        { token }
+      );
+    }
+
+    const { invite, board } = found;
+
+    if (!invite.is_active) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "Invite link is no longer active",
+        { token }
+      );
+    }
+
+    if (invite.expires_at && new Date(invite.expires_at).getTime() <= Date.now()) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "Invite link has expired",
+        { token, expires_at: invite.expires_at }
+      );
+    }
+
+    if (invite.max_uses !== null && invite.uses_count >= invite.max_uses) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "Invite link has reached maximum usage limit",
+        { token, max_uses: invite.max_uses, uses_count: invite.uses_count }
+      );
+    }
+
+    // Increment usage
+    invite.uses_count += 1;
+    if (invite.max_uses !== null && invite.uses_count >= invite.max_uses) {
+      invite.is_active = false;
+    }
+
+    // Resolve or create member
+    const email = joiningUser.email?.toLowerCase().trim() || "guest@kinetix.dev";
+    const name = joiningUser.name?.trim() || "Guest Contributor";
+    const initials =
+      joiningUser.initials ||
+      name
+        .split(/\s+/)
+        .map((p) => p[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 4) ||
+      "GC";
+
+    let member = board.members.find(
+      (m) =>
+        (joiningUser.id && m.id === joiningUser.id) ||
+        m.email.toLowerCase() === email
+    );
+
+    if (member) {
+      member.role = invite.role;
+    } else {
+      member = {
+        id: joiningUser.id || randomUUID(),
+        name,
+        email,
+        avatar_url: joiningUser.avatar_url ?? null,
+        initials,
+        color: joiningUser.color || "#ec4899",
+        role: invite.role,
+        joined_at: new Date().toISOString(),
+      };
+      board.members.push(member);
+    }
+
+    // Update board in memory
+    const memBoard = this.memory.boards.get(board.id);
+    if (memBoard) {
+      memBoard.members = board.members;
+      memBoard.invite_links = (memBoard.invite_links ?? []).map((i) =>
+        i.id === invite.id ? { ...invite } : i
+      );
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({
+            members: board.members,
+            invite_links: memBoard?.invite_links ?? [],
+          })
+          .where(eq(schema.boards.id, board.id));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    await this.appendBoardActivity(board.id, {
+      actor_name: member.name,
+      action_type: "MEMBER_ASSIGNED",
+      description: `${member.name} joined the board with ${invite.role} role via invite link`,
+    });
+
+    const updatedBoard = await this.getBoardById(board.id);
+
+    return {
+      board: updatedBoard!,
+      member,
+      granted_role: invite.role,
+    };
   }
 }

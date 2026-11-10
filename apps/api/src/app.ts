@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
@@ -9,13 +9,17 @@ import {
   AIDecomposeResponseSchema,
   AIParseAutomationRequestSchema,
   AIParseAutomationResponseSchema,
+  AIPermissionAuditResponseSchema,
   AISuggestCardEnrichmentRequestSchema,
   AISuggestCardEnrichmentResponseSchema,
   AISummaryNotificationRequestSchema,
   AISummaryNotificationResponseSchema,
+  AuthSessionResponseSchema,
+  AuthUserSchema,
   AutomationRuleSchema,
   BoardAnalyticsSchema,
   BoardExportCsvResponseSchema,
+  BoardInviteLinkSchema,
   BoardSchema,
   BoardSummarySchema,
   BoardTemplateSchema,
@@ -32,11 +36,17 @@ import {
   CreateCardRequestSchema,
   CreateColumnRequestSchema,
   CreateCommentRequestSchema,
+  CreateInviteLinkRequestSchema,
   CreateWorkspaceRequestSchema,
   CreateWebhookRequestSchema,
   HealthCheckResponseSchema,
+  JoinViaInviteRequestSchema,
+  JoinViaInviteResponseSchema,
+  LoginRequestSchema,
+  MemberSchema,
   MoveCardRequestSchema,
   MoveColumnRequestSchema,
+  RegisterRequestSchema,
   StandardErrorSchema,
   TestWebhookResponseSchema,
   TrelloImportRequestSchema,
@@ -50,7 +60,10 @@ import {
   WebhookConfigSchema,
   WorkspaceSchema,
   WorkspaceWithBoardsSchema,
+  type BoardInviteLink,
+  type BoardRole,
   type Checklist,
+  type Member,
   type Priority,
   type Subtask,
   type UserPresence,
@@ -62,6 +75,8 @@ import { AnalyticsService } from "./services/analytics-service.js";
 import { ImportExportService } from "./services/import-export-service.js";
 import { PresenceService } from "./services/presence-service.js";
 import { WebhookDispatcher } from "./services/webhook-dispatcher.js";
+import { AuthService } from "./services/auth-service.js";
+import { requireRole } from "./services/rbac-guard.js";
 import { AppError, buildErrorPayload } from "./errors.js";
 
 const UuidParamSchema = z.string().uuid();
@@ -86,6 +101,7 @@ export interface BuildAppOptions {
   importExportService?: ImportExportService;
   presenceService?: PresenceService;
   webhookDispatcher?: WebhookDispatcher;
+  authService?: AuthService;
 }
 
 export async function buildApp(
@@ -99,6 +115,7 @@ export async function buildApp(
   importExportService: ImportExportService;
   presenceService: PresenceService;
   webhookDispatcher: WebhookDispatcher;
+  authService: AuthService;
 }> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -106,6 +123,7 @@ export async function buildApp(
 
   const repository = options.repository ?? new StorageRepository();
   const hub = options.hub ?? new BoardRealtimeHub();
+  const authService = options.authService ?? new AuthService(repository);
   const presenceService =
     options.presenceService ?? new PresenceService(hub);
   const webhookDispatcher =
@@ -138,6 +156,8 @@ export async function buildApp(
       "Authorization",
       "X-Internal-Token",
       "X-Actor-Id",
+      "X-Kanbanify-Role",
+      "X-Kinetix-Role",
     ],
   });
 
@@ -247,6 +267,49 @@ export async function buildApp(
   });
 
   // ==========================================================================
+  // 1B. AUTHENTICATION & DEMO ACCOUNTS (Phase 6)
+  // ==========================================================================
+  app.get("/api/v1/auth/demo-users", async (_req, reply) => {
+    const demoUsers = await authService.getDemoUsers();
+    return reply.status(200).send(demoUsers);
+  });
+
+  app.post("/api/v1/auth/register", async (req, reply) => {
+    const parsed = RegisterRequestSchema.parse(req.body);
+    const session = await authService.register(parsed);
+    return reply.status(201).send(session);
+  });
+
+  app.post("/api/v1/auth/login", async (req, reply) => {
+    const loginBodySchema = z.object({
+      email: z.string().email(),
+      password: z.string().optional().default(""),
+    });
+    const parsed = loginBodySchema.parse(req.body);
+    const session = await authService.login(parsed);
+    return reply.status(200).send(session);
+  });
+
+  app.get("/api/v1/auth/me", async (req, reply) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.slice(7).trim();
+      const user = await authService.resolveUserFromToken(token);
+      if (user) {
+        return reply.status(200).send(AuthUserSchema.parse(user));
+      }
+      return reply.status(401).send(
+        StandardErrorSchema.parse(
+          buildErrorPayload("UNAUTHORIZED", "Invalid or expired authorization token")
+        )
+      );
+    }
+    // Default to the primary ADMIN demo user if omitted
+    const defaultAdmin = await authService.getDefaultAdminUser();
+    return reply.status(200).send(AuthUserSchema.parse(defaultAdmin));
+  });
+
+  // ==========================================================================
   // 2. WORKSPACES & TEMPLATES ENDPOINTS
   // ==========================================================================
   app.get("/api/v1/workspaces", async (_req, reply) => {
@@ -340,6 +403,7 @@ export async function buildApp(
 
   app.delete<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const result = await repository.deleteBoard(boardId);
@@ -352,6 +416,344 @@ export async function buildApp(
       });
 
       return reply.status(200).send(result);
+    }
+  );
+
+  // ==========================================================================
+  // 2C. BOARD MEMBERS & SHAREABLE INVITE LINKS (Phase 6)
+  // ==========================================================================
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/members",
+    { preHandler: requireRole(["ADMIN"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = z
+        .object({
+          name: z.string().min(1),
+          email: z.string().email(),
+          role: z.enum(["ADMIN", "EDITOR", "VIEWER"]).default("EDITOR"),
+        })
+        .parse(req.body);
+
+      const nameParts = body.name.trim().split(/\s+/);
+      const initials =
+        nameParts.length > 1
+          ? `${nameParts[0]![0]}${nameParts[nameParts.length - 1]![0]}`.toUpperCase()
+          : body.name.slice(0, 2).toUpperCase();
+
+      const member: Member = {
+        id: randomUUID(),
+        name: body.name.trim(),
+        email: body.email.toLowerCase().trim(),
+        avatar_url: null,
+        initials,
+        color: "#10b981",
+        role: body.role,
+        joined_at: new Date().toISOString(),
+      };
+
+      const added = await repository.addBoardMember(boardId, member);
+
+      await hub.broadcast({
+        event: "BOARD_UPDATED",
+        board_id: boardId,
+        actor_id: req.user?.id || getActorId(req.headers),
+        data: { member: added },
+      });
+
+      return reply.status(201).send(MemberSchema.parse(added));
+    }
+  );
+
+  app.patch<{ Params: { boardId: string; memberId: string } }>(
+    "/api/v1/boards/:boardId/members/:memberId",
+    { preHandler: requireRole(["ADMIN"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const memberId = NonEmptyIdParamSchema.parse(req.params.memberId);
+      const body = z
+        .object({
+          role: z.enum(["ADMIN", "EDITOR", "VIEWER"]),
+        })
+        .parse(req.body);
+
+      const updated = await repository.updateBoardMemberRole(
+        boardId,
+        memberId,
+        body.role
+      );
+
+      await hub.broadcast({
+        event: "BOARD_UPDATED",
+        board_id: boardId,
+        actor_id: req.user?.id || getActorId(req.headers),
+        data: { member: updated },
+      });
+
+      return reply.status(200).send(MemberSchema.parse(updated));
+    }
+  );
+
+  app.delete<{ Params: { boardId: string; memberId: string } }>(
+    "/api/v1/boards/:boardId/members/:memberId",
+    { preHandler: requireRole(["ADMIN"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const memberId = NonEmptyIdParamSchema.parse(req.params.memberId);
+
+      const result = await repository.removeBoardMember(boardId, memberId);
+
+      await hub.broadcast({
+        event: "BOARD_UPDATED",
+        board_id: boardId,
+        actor_id: req.user?.id || getActorId(req.headers),
+        data: { removed_member_id: memberId },
+      });
+
+      return reply.status(200).send(result);
+    }
+  );
+
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/invites",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const invites = await repository.getBoardInvites(boardId);
+      return reply.status(200).send(z.array(BoardInviteLinkSchema).parse(invites));
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/invites",
+    { preHandler: requireRole(["ADMIN"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = CreateInviteLinkRequestSchema.parse(req.body);
+
+      const token = `kb_inv_${randomBytes(6).toString("hex")}`;
+      const expiresAt = body.expires_in_hours
+        ? new Date(Date.now() + body.expires_in_hours * 3600 * 1000).toISOString()
+        : null;
+
+      const invite: BoardInviteLink = {
+        id: `inv-${randomUUID().slice(0, 8)}`,
+        board_id: boardId,
+        token,
+        role: body.role,
+        created_by_id: req.user?.id || "88888888-8888-4888-8888-888888888881",
+        created_by_name: req.user?.name || "Alex Rivera",
+        max_uses: body.max_uses ?? null,
+        uses_count: 0,
+        expires_at: expiresAt,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const created = await repository.createBoardInvite(boardId, invite);
+      return reply.status(201).send(BoardInviteLinkSchema.parse(created));
+    }
+  );
+
+  app.delete<{ Params: { inviteId: string } }>(
+    "/api/v1/invites/:inviteId",
+    { preHandler: requireRole(["ADMIN"], authService) },
+    async (req, reply) => {
+      const inviteId = NonEmptyIdParamSchema.parse(req.params.inviteId);
+      const result = await repository.revokeInvite(inviteId);
+      return reply.status(200).send(result);
+    }
+  );
+
+  app.get<{ Params: { token: string } }>(
+    "/api/v1/invites/:token",
+    async (req, reply) => {
+      const token = req.params.token;
+      const found = await repository.getInviteByToken(token);
+      if (!found) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Invite link '${token}' not found`,
+          { token }
+        );
+      }
+
+      const { invite, board } = found;
+      const isExpired =
+        invite.expires_at !== null &&
+        new Date(invite.expires_at).getTime() <= Date.now();
+      const isExhausted =
+        invite.max_uses !== null && invite.uses_count >= invite.max_uses;
+      const isValid = invite.is_active && !isExpired && !isExhausted;
+
+      return reply.status(200).send({
+        board_id: board.id,
+        board_title: board.title,
+        inviter_name: invite.created_by_name,
+        granted_role: invite.role,
+        is_valid: isValid,
+      });
+    }
+  );
+
+  app.post<{ Params: { token: string } }>(
+    "/api/v1/invites/:token/join",
+    async (req, reply) => {
+      const token = req.params.token;
+      const body = JoinViaInviteRequestSchema.optional().parse(req.body);
+
+      const authHeader = req.headers.authorization;
+      let authenticatedUser = null;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        authenticatedUser = await authService.resolveUserFromToken(
+          authHeader.slice(7).trim()
+        );
+      }
+
+      const joiningUser = {
+        id: authenticatedUser?.id,
+        name: body?.name || authenticatedUser?.name,
+        email: body?.email || authenticatedUser?.email,
+        avatar_url: authenticatedUser?.avatar_url,
+        initials: authenticatedUser?.initials,
+        color: authenticatedUser?.color,
+      };
+
+      const { board, member, granted_role } = await repository.redeemInvite(
+        token,
+        joiningUser
+      );
+
+      await hub.broadcast({
+        event: "BOARD_UPDATED",
+        board_id: board.id,
+        actor_id: member.id,
+        data: { joined_member: member },
+      });
+
+      return reply.status(200).send(
+        JoinViaInviteResponseSchema.parse({
+          board_id: board.id,
+          board_title: board.title,
+          granted_role,
+          member,
+        })
+      );
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/security-audit",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+
+      const aiUrl =
+        process.env.INTERNAL_AI_ENGINE_URL || "http://localhost:8001";
+      const internalToken =
+        process.env.INTERNAL_SERVICE_TOKEN || "orca_internal_sync_token_2026";
+
+      const auditPayload = {
+        board_title: board.title,
+        visibility: board.visibility,
+        members: board.members,
+        invite_links: board.invite_links ?? [],
+      };
+
+      try {
+        const response = await fetch(`${aiUrl}/internal/v1/audit-permissions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Internal-Token": internalToken,
+          },
+          body: JSON.stringify(auditPayload),
+          signal: AbortSignal.timeout(3000),
+        });
+
+        if (response.ok) {
+          const json = await response.json();
+          const parsed = AIPermissionAuditResponseSchema.safeParse(json);
+          if (parsed.success) {
+            return reply.status(200).send(parsed.data);
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[AIPermissionAudit] AI Engine unreachable or error; using deterministic fallback:",
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+
+      // Deterministic least-privilege audit fallback
+      const adminCount = board.members.filter((m) => m.role === "ADMIN").length;
+      const editorCount = board.members.filter((m) => m.role === "EDITOR").length;
+      const viewerCount = board.members.filter((m) => m.role === "VIEWER").length;
+      const activeInvites = (board.invite_links ?? []).filter((i) => i.is_active);
+
+      const findings: string[] = [];
+      const recommendations: string[] = [];
+      let score = 90;
+
+      for (const inv of activeInvites) {
+        if (!inv.expires_at) {
+          score -= 10;
+          findings.push(
+            `Invite link '${inv.token}' grants ${inv.role} role with unlimited expiration.`
+          );
+        }
+        if (inv.role === "EDITOR" && inv.max_uses === null) {
+          score -= 5;
+          findings.push(
+            `Invite link '${inv.token}' has no maximum usage limit.`
+          );
+        }
+      }
+
+      if (editorCount > 2) {
+        findings.push(
+          `${editorCount} members hold EDITOR privileges on workspace board.`
+        );
+      }
+
+      if (findings.length > 0) {
+        recommendations.push(
+          "Configure expiration timestamps on all active EDITOR invite links."
+        );
+      }
+      if (editorCount > 3) {
+        recommendations.push("Downgrade inactive collaborators to VIEWER role.");
+      }
+      if (recommendations.length === 0) {
+        recommendations.push(
+          "Maintain current least-privilege role assignments and review public invites periodically."
+        );
+      }
+
+      const clampedScore = Math.max(10, Math.min(100, score));
+      const riskLevel =
+        clampedScore >= 80 ? "LOW" : clampedScore >= 60 ? "MEDIUM" : "HIGH";
+
+      const summary = `Board has ${adminCount} admin, ${editorCount} editors, and ${viewerCount} viewers with ${activeInvites.length} active invite links.`;
+
+      const auditResponse = AIPermissionAuditResponseSchema.parse({
+        security_score: clampedScore,
+        risk_level: riskLevel,
+        summary,
+        findings,
+        recommendations,
+      });
+
+      return reply.status(200).send(auditResponse);
     }
   );
 
@@ -492,6 +894,7 @@ export async function buildApp(
 
   app.post<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId/automations",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const body = CreateAutomationRuleRequestSchema.parse(req.body);
@@ -511,6 +914,7 @@ export async function buildApp(
 
   app.patch<{ Params: { ruleId: string } }>(
     "/api/v1/automations/:ruleId",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const ruleId = NonEmptyIdParamSchema.parse(req.params.ruleId);
       const body = UpdateAutomationRuleRequestSchema.parse(req.body);
@@ -533,6 +937,7 @@ export async function buildApp(
 
   app.delete<{ Params: { ruleId: string } }>(
     "/api/v1/automations/:ruleId",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const ruleId = NonEmptyIdParamSchema.parse(req.params.ruleId);
       const { id, boardId, deleted } = await repository.deleteAutomationRule(
@@ -552,6 +957,7 @@ export async function buildApp(
 
   app.post<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId/automations/ai-generate",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const board = await repository.getBoardById(boardId);
@@ -794,6 +1200,7 @@ export async function buildApp(
   // ==========================================================================
   app.post<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId/columns",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const body = CreateColumnRequestSchema.parse(req.body);
@@ -813,6 +1220,7 @@ export async function buildApp(
 
   app.patch<{ Params: { columnId: string } }>(
     "/api/v1/columns/:columnId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const columnId = UuidParamSchema.parse(req.params.columnId);
       const body = UpdateColumnRequestSchema.parse(req.body);
@@ -832,6 +1240,7 @@ export async function buildApp(
 
   app.patch<{ Params: { columnId: string } }>(
     "/api/v1/columns/:columnId/move",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const columnId = UuidParamSchema.parse(req.params.columnId);
       const body = MoveColumnRequestSchema.parse(req.body);
@@ -857,6 +1266,7 @@ export async function buildApp(
 
   app.post<{ Params: { columnId: string } }>(
     "/api/v1/columns/:columnId/copy",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const columnId = UuidParamSchema.parse(req.params.columnId);
       const body = CopyColumnRequestSchema.parse(req.body ?? {});
@@ -879,6 +1289,7 @@ export async function buildApp(
   // ==========================================================================
   app.post<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId/cards",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const body = CreateCardRequestSchema.parse(req.body);
@@ -934,6 +1345,7 @@ export async function buildApp(
 
   app.patch<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const body = UpdateCardRequestSchema.parse(req.body);
@@ -1009,6 +1421,7 @@ export async function buildApp(
 
   app.patch<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId/move",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const body = MoveCardRequestSchema.parse(req.body);
@@ -1078,6 +1491,7 @@ export async function buildApp(
 
   app.post<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId/copy",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const body = CopyCardRequestSchema.parse(req.body ?? {});
@@ -1097,6 +1511,7 @@ export async function buildApp(
 
   app.delete<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const result = await repository.deleteCard(cardId);
@@ -1130,6 +1545,7 @@ export async function buildApp(
   // ==========================================================================
   app.post<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId/comments",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const rawBody =
@@ -1188,6 +1604,7 @@ export async function buildApp(
 
   app.delete<{ Params: { cardId: string; commentId: string } }>(
     "/api/v1/cards/:cardId/comments/:commentId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const commentId = NonEmptyIdParamSchema.parse(req.params.commentId);
@@ -1213,6 +1630,7 @@ export async function buildApp(
   // ==========================================================================
   app.post<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId/ai-decompose",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
     async (req, reply) => {
       const cardId = UuidParamSchema.parse(req.params.cardId);
       const existingCard = await repository.getCardById(cardId);
@@ -1545,6 +1963,7 @@ export async function buildApp(
 
   app.post<{ Params: { boardId: string } }>(
     "/api/v1/boards/:boardId/webhooks",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const boardId = UuidParamSchema.parse(req.params.boardId);
       const body = CreateWebhookRequestSchema.parse(req.body);
@@ -1556,6 +1975,7 @@ export async function buildApp(
 
   app.patch<{ Params: { webhookId: string } }>(
     "/api/v1/webhooks/:webhookId",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const webhookId = NonEmptyIdParamSchema.parse(req.params.webhookId);
       const body = UpdateWebhookRequestSchema.parse(req.body);
@@ -1567,6 +1987,7 @@ export async function buildApp(
 
   app.delete<{ Params: { webhookId: string } }>(
     "/api/v1/webhooks/:webhookId",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const webhookId = NonEmptyIdParamSchema.parse(req.params.webhookId);
       await repository.deleteWebhook(webhookId);
@@ -1576,6 +1997,7 @@ export async function buildApp(
 
   app.post<{ Params: { webhookId: string } }>(
     "/api/v1/webhooks/:webhookId/test",
+    { preHandler: requireRole(["ADMIN"], authService) },
     async (req, reply) => {
       const webhookId = NonEmptyIdParamSchema.parse(req.params.webhookId);
       const result = await webhookDispatcher.testWebhook(webhookId);
@@ -1733,5 +2155,6 @@ export async function buildApp(
     importExportService,
     presenceService,
     webhookDispatcher,
+    authService,
   };
 }

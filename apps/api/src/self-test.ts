@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import {
   AIAnalyticsReportSchema,
+  AIPermissionAuditResponseSchema,
+  AuthSessionResponseSchema,
+  AuthUserSchema,
   AutomationRuleSchema,
   BoardAnalyticsSchema,
   BoardExportCsvResponseSchema,
+  BoardInviteLinkSchema,
   BoardSchema,
   BoardTemplateSchema,
   CardSchema,
@@ -12,6 +16,8 @@ import {
   CommentSchema,
   CopyColumnResponseSchema,
   HealthCheckResponseSchema,
+  JoinViaInviteResponseSchema,
+  MemberSchema,
   StandardErrorSchema,
   TestWebhookResponseSchema,
   TrelloImportResultSchema,
@@ -1276,8 +1282,419 @@ async function runSelfTest(): Promise<void> {
       "[PASS] 24e. Real-time WebSocket Presence Manager verified with active_card_id tracking & broadcast"
     );
 
+    // ========================================================================
+    // 25. PHASE 6: AUTHENTICATION, RBAC ENFORCEMENT & SHAREABLE INVITE LINKS
+    // ========================================================================
+
+    // 25a. Pre-seeded Demo Users (GET /api/v1/auth/demo-users)
+    const demoUsersRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/demo-users",
+    });
+    assert.equal(demoUsersRes.statusCode, 200, "GET /api/v1/auth/demo-users must return 200");
+    const demoUsers = demoUsersRes.json() as any[];
+    assert.equal(demoUsers.length, 3, "Must return 3 pre-seeded demo users (ADMIN, EDITOR, VIEWER)");
+    const adminDemo = demoUsers.find((u) => u.default_role === "ADMIN");
+    const editorDemo = demoUsers.find((u) => u.default_role === "EDITOR");
+    const viewerDemo = demoUsers.find((u) => u.default_role === "VIEWER");
+    assert.ok(adminDemo && adminDemo.token, "ADMIN demo user must have ready-to-use token");
+    assert.ok(editorDemo && editorDemo.token, "EDITOR demo user must have ready-to-use token");
+    assert.ok(viewerDemo && viewerDemo.token, "VIEWER demo user must have ready-to-use token");
+    console.info("[PASS] 25a. GET /api/v1/auth/demo-users -> 200 OK (ADMIN, EDITOR, VIEWER with ready-to-use tokens)");
+
+    // 25b. User Registration (POST /api/v1/auth/register)
+    const registerRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/register",
+      payload: {
+        name: "Jordan Lee",
+        email: "jordan@kinetix.dev",
+        password: "Password123!",
+      },
+    });
+    assert.equal(registerRes.statusCode, 201, "POST /api/v1/auth/register must return 201");
+    const registerSession = AuthSessionResponseSchema.parse(registerRes.json());
+    assert.equal(registerSession.user.name, "Jordan Lee");
+    assert.equal(registerSession.user.email, "jordan@kinetix.dev");
+    assert.equal(registerSession.user.default_role, "EDITOR");
+    assert.ok(registerSession.token.length > 20);
+    console.info("[PASS] 25b. POST /api/v1/auth/register -> 201 Created AuthSessionResponse");
+
+    // 25c. User Login (POST /api/v1/auth/login)
+    const loginRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: {
+        email: "jordan@kinetix.dev",
+        password: "Password123!",
+      },
+    });
+    assert.equal(loginRes.statusCode, 200, "POST /api/v1/auth/login must return 200");
+    const loginSession = AuthSessionResponseSchema.parse(loginRes.json());
+    assert.equal(loginSession.user.email, "jordan@kinetix.dev");
+    console.info("[PASS] 25c. POST /api/v1/auth/login -> 200 OK");
+
+    // Instant demo login
+    const demoLoginRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: {
+        email: "alex@kinetix.dev",
+        password: "",
+      },
+    });
+    assert.equal(demoLoginRes.statusCode, 200, "POST /api/v1/auth/login demo instant login must return 200");
+    const demoLoginSession = AuthSessionResponseSchema.parse(demoLoginRes.json());
+    assert.equal(demoLoginSession.user.default_role, "ADMIN");
+    console.info("[PASS] 25c-2. POST /api/v1/auth/login (instant demo login) -> 200 OK");
+
+    // 25d. Current User Profile (GET /api/v1/auth/me)
+    const meBearerRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/me",
+      headers: {
+        authorization: `Bearer ${editorDemo.token}`,
+      },
+    });
+    assert.equal(meBearerRes.statusCode, 200);
+    const meEditor = AuthUserSchema.parse(meBearerRes.json());
+    assert.equal(meEditor.email, "maya@kinetix.dev");
+    assert.equal(meEditor.default_role, "EDITOR");
+
+    // Default me without header defaults to primary ADMIN
+    const meDefaultRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/me",
+    });
+    assert.equal(meDefaultRes.statusCode, 200);
+    const meDefault = AuthUserSchema.parse(meDefaultRes.json());
+    assert.equal(meDefault.email, "alex@kinetix.dev");
+    assert.equal(meDefault.default_role, "ADMIN");
+    console.info("[PASS] 25d. GET /api/v1/auth/me -> 200 OK (Bearer resolved & backward-compatible default ADMIN)");
+
+    // 25e. RBAC Guard Verification on Mutations (Cards & Columns)
+    // Attempting card creation with VIEWER role -> 403 FORBIDDEN
+    const viewerCreateCardRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/cards`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        column_id: createdBoard.columns[0]!.id,
+        title: "Unauthorized Viewer Card",
+        position: "b0",
+      },
+    });
+    assert.equal(viewerCreateCardRes.statusCode, 403, "VIEWER mutating cards must return 403");
+    const viewerErr = StandardErrorSchema.parse(viewerCreateCardRes.json());
+    assert.equal(viewerErr.error.code, "FORBIDDEN");
+    assert.equal(
+      viewerErr.error.message,
+      "Viewer role has read-only access and cannot modify board content."
+    );
+    assert.deepEqual(viewerErr.error.details, {
+      required_role: "EDITOR",
+      current_role: "VIEWER",
+    });
+
+    // Attempting card move with VIEWER role -> 403 FORBIDDEN
+    const viewerMoveCardRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/cards/${targetCardId}/move`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        target_column_id: createdBoard.columns[1]!.id,
+        new_position: "a99",
+      },
+    });
+    assert.equal(viewerMoveCardRes.statusCode, 403, "VIEWER moving card must return 403");
+    const viewerMoveErr = StandardErrorSchema.parse(viewerMoveCardRes.json());
+    assert.equal(viewerMoveErr.error.code, "FORBIDDEN");
+
+    // Attempting card comment with VIEWER role -> 403 FORBIDDEN
+    const viewerCommentRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${targetCardId}/comments`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        content: "Viewer comment should be rejected",
+      },
+    });
+    assert.equal(viewerCommentRes.statusCode, 403, "VIEWER adding comments must return 403");
+
+    // Successful card creation with EDITOR role -> 201 Created
+    const editorCreateCardRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/cards`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        column_id: createdBoard.columns[0]!.id,
+        title: "Editor Allowed Card",
+        position: "a0Z",
+      },
+    });
+    assert.equal(editorCreateCardRes.statusCode, 201, "EDITOR card creation must return 201");
+    const editorCard = CardSchema.parse(editorCreateCardRes.json());
+    assert.equal(editorCard.title, "Editor Allowed Card");
+
+    // Successful card move with EDITOR role -> 200 OK
+    const editorMoveRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/cards/${editorCard.id}/move`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        target_column_id: createdBoard.columns[1]!.id,
+        new_position: "a1Z",
+      },
+    });
+    assert.equal(editorMoveRes.statusCode, 200, "EDITOR card move must return 200");
     console.info(
-      "=== ALL KINETIX API PHASE 5 GATE 2 SELF-TESTS PASSED ==="
+      "[PASS] 25e. RBAC Guard on mutations -> VIEWER blocked (403 FORBIDDEN with exact envelope), EDITOR allowed (200/201)"
+    );
+
+    // 25f. RBAC Guard on ADMIN-Only Operations
+    // EDITOR attempting DELETE /api/v1/boards/:boardId -> 403 FORBIDDEN
+    const editorDeleteBoardRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/boards/${createdBoard.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(editorDeleteBoardRes.statusCode, 403, "EDITOR deleting board must return 403");
+    const editorDelErr = StandardErrorSchema.parse(editorDeleteBoardRes.json());
+    assert.equal(editorDelErr.error.code, "FORBIDDEN");
+    assert.equal(editorDelErr.error.message, "Admin role required to perform this action.");
+    assert.deepEqual(editorDelErr.error.details, {
+      required_role: "ADMIN",
+      current_role: "EDITOR",
+    });
+
+    // EDITOR attempting to generate invite -> 403 FORBIDDEN
+    const editorInviteRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/invites`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        role: "EDITOR",
+      },
+    });
+    assert.equal(editorInviteRes.statusCode, 403, "EDITOR creating invite must return 403");
+
+    // EDITOR attempting to add member directly -> 403 FORBIDDEN
+    const editorAddMemberRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/members`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        name: "Unauthorized Member",
+        email: "unauth@kinetix.dev",
+        role: "EDITOR",
+      },
+    });
+    assert.equal(editorAddMemberRes.statusCode, 403, "EDITOR adding member must return 403");
+    console.info(
+      "[PASS] 25f. RBAC Guard on ADMIN-only operations -> EDITOR blocked with 403 FORBIDDEN"
+    );
+
+    // 25g. Board Members Management (ADMIN Only)
+    // ADMIN adds a new board member
+    const addMemberRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/members`,
+      headers: {
+        "x-kanbanify-role": "ADMIN",
+      },
+      payload: {
+        name: "Marcus Vance",
+        email: "marcus@kinetix.dev",
+        role: "EDITOR",
+      },
+    });
+    assert.equal(addMemberRes.statusCode, 201);
+    const addedMember = MemberSchema.parse(addMemberRes.json());
+    assert.equal(addedMember.name, "Marcus Vance");
+    assert.equal(addedMember.email, "marcus@kinetix.dev");
+    assert.equal(addedMember.role, "EDITOR");
+
+    // ADMIN updates member role to VIEWER
+    const updateMemberRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/boards/${createdBoard.id}/members/${addedMember.id}`,
+      headers: {
+        "x-kanbanify-role": "ADMIN",
+      },
+      payload: {
+        role: "VIEWER",
+      },
+    });
+    assert.equal(updateMemberRes.statusCode, 200);
+    const updatedMember = MemberSchema.parse(updateMemberRes.json());
+    assert.equal(updatedMember.role, "VIEWER");
+
+    // ADMIN removes member
+    const removeMemberRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/boards/${createdBoard.id}/members/${addedMember.id}`,
+      headers: {
+        "x-kanbanify-role": "ADMIN",
+      },
+    });
+    assert.equal(removeMemberRes.statusCode, 200);
+    assert.deepEqual(removeMemberRes.json(), { id: addedMember.id, removed: true });
+    console.info(
+      "[PASS] 25g. Board Members Management -> POST, PATCH role, DELETE member verified"
+    );
+
+    // 25h. Shareable Board Invite Links Lifecycle
+    // List existing pre-seeded invites on default board
+    const listInvitesRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${initialBoards[0]!.id}/invites`,
+    });
+    assert.equal(listInvitesRes.statusCode, 200);
+    const existingInvites = z.array(BoardInviteLinkSchema).parse(listInvitesRes.json());
+    assert.ok(existingInvites.length >= 2, "Default board must have at least 2 pre-seeded invites");
+    console.info(
+      `[PASS] 25h-1. GET /api/v1/boards/:boardId/invites -> ${existingInvites.length} invite(s) retrieved`
+    );
+
+    // ADMIN creates a new shareable invite link with max_uses = 2
+    const createInviteRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/invites`,
+      headers: {
+        "x-kanbanify-role": "ADMIN",
+      },
+      payload: {
+        role: "EDITOR",
+        max_uses: 2,
+        expires_in_hours: 48,
+      },
+    });
+    assert.equal(createInviteRes.statusCode, 201);
+    const createdInvite = BoardInviteLinkSchema.parse(createInviteRes.json());
+    assert.ok(createdInvite.token.startsWith("kb_inv_"));
+    assert.equal(createdInvite.role, "EDITOR");
+    assert.equal(createdInvite.max_uses, 2);
+    assert.equal(createdInvite.uses_count, 0);
+    assert.equal(createdInvite.is_active, true);
+    console.info(
+      `[PASS] 25h-2. POST /api/v1/boards/:boardId/invites -> 201 Created token=${createdInvite.token}`
+    );
+
+    // Public preview invite link
+    const previewInviteRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/invites/${createdInvite.token}`,
+    });
+    assert.equal(previewInviteRes.statusCode, 200);
+    const previewData = previewInviteRes.json() as any;
+    assert.equal(previewData.board_id, createdBoard.id);
+    assert.equal(previewData.granted_role, "EDITOR");
+    assert.equal(previewData.is_valid, true);
+    console.info(
+      "[PASS] 25h-3. GET /api/v1/invites/:token -> 200 OK preview (is_valid: true)"
+    );
+
+    // First user redeems invite link to join board
+    const joinRes1 = await app.inject({
+      method: "POST",
+      url: `/api/v1/invites/${createdInvite.token}/join`,
+      payload: {
+        name: "Sarah Connor",
+        email: "sarah@resistance.dev",
+      },
+    });
+    assert.equal(joinRes1.statusCode, 200);
+    const joinBody1 = JoinViaInviteResponseSchema.parse(joinRes1.json());
+    assert.equal(joinBody1.granted_role, "EDITOR");
+    assert.equal(joinBody1.member.name, "Sarah Connor");
+    assert.equal(joinBody1.member.email, "sarah@resistance.dev");
+    assert.equal(joinBody1.member.role, "EDITOR");
+
+    // Verify member exists in board and uses_count incremented
+    const boardAfterJoin = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${createdBoard.id}`,
+    });
+    assert.equal(boardAfterJoin.statusCode, 200);
+    const parsedBoardAfterJoin = BoardSchema.parse(boardAfterJoin.json());
+    const foundMember = parsedBoardAfterJoin.members.find(
+      (m) => m.email === "sarah@resistance.dev"
+    );
+    assert.ok(foundMember, "New member must appear in board.members");
+    assert.equal(foundMember.role, "EDITOR");
+
+    // Second user redeems invite link -> reaches max_uses (2)
+    const joinRes2 = await app.inject({
+      method: "POST",
+      url: `/api/v1/invites/${createdInvite.token}/join`,
+      payload: {
+        name: "John Connor",
+        email: "john@resistance.dev",
+      },
+    });
+    assert.equal(joinRes2.statusCode, 200);
+    const joinBody2 = JoinViaInviteResponseSchema.parse(joinRes2.json());
+    assert.equal(joinBody2.member.name, "John Connor");
+
+    // Third join attempt should fail with 400 because max_uses is exhausted
+    const joinRes3 = await app.inject({
+      method: "POST",
+      url: `/api/v1/invites/${createdInvite.token}/join`,
+      payload: {
+        name: "Kyle Reese",
+        email: "kyle@resistance.dev",
+      },
+    });
+    assert.equal(joinRes3.statusCode, 400, "Exhausted invite link must reject join with 400");
+    const joinErr = StandardErrorSchema.parse(joinRes3.json());
+    assert.equal(joinErr.error.code, "VALIDATION_ERROR");
+
+    // Revoke an invite link
+    const revokeRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/invites/${createdInvite.id}`,
+      headers: {
+        "x-kanbanify-role": "ADMIN",
+      },
+    });
+    assert.equal(revokeRes.statusCode, 200);
+    assert.deepEqual(revokeRes.json(), { id: createdInvite.id, revoked: true });
+    console.info(
+      "[PASS] 25h. Shareable Invite Link Lifecycle (Create, Preview, Join, Usage Increment & Revoke) verified"
+    );
+
+    // 25i. AI Permission & Security Audit Proxy
+    const auditRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${createdBoard.id}/security-audit`,
+    });
+    assert.equal(auditRes.statusCode, 200);
+    const auditBody = AIPermissionAuditResponseSchema.parse(auditRes.json());
+    assert.ok(auditBody.security_score >= 0 && auditBody.security_score <= 100);
+    assert.ok(["LOW", "MEDIUM", "HIGH"].includes(auditBody.risk_level));
+    assert.ok(auditBody.summary.length > 0);
+    console.info(
+      `[PASS] 25i. POST /api/v1/boards/:boardId/security-audit -> 200 OK (score: ${auditBody.security_score}, risk: ${auditBody.risk_level})`
+    );
+
+    console.info(
+      "=== ALL KINETIX API PHASE 6 GATE 2 SELF-TESTS PASSED ==="
     );
   } finally {
     await app.close();

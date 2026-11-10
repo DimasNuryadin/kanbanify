@@ -238,6 +238,8 @@ export class ImportExportService {
               ? rawMem.initials.trim().toUpperCase().slice(0, 4)
               : deriveInitials(fullName),
           color: palette[idx % palette.length] ?? "#3b82f6",
+          role: (rawMem.role === "ADMIN" || rawMem.role === "VIEWER" ? rawMem.role : "EDITOR"),
+          joined_at: typeof rawMem.joined_at === "string" ? rawMem.joined_at : new Date().toISOString(),
         });
       });
     }
