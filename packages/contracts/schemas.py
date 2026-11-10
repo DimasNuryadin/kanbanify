@@ -130,6 +130,22 @@ class ClientPresenceEventEnum(str, Enum):
     STOP_TYPING = "STOP_TYPING"
 
 
+class CustomFieldTypeEnum(str, Enum):
+    TEXT = "TEXT"
+    NUMBER = "NUMBER"
+    DATE = "DATE"
+    CHECKBOX = "CHECKBOX"
+    DROPDOWN = "DROPDOWN"
+
+
+class ThemePresetEnum(str, Enum):
+    DEFAULT_CLEAN = "DEFAULT_CLEAN"
+    FROSTED_GLASS = "FROSTED_GLASS"
+    CYBERPUNK_NEON = "CYBERPUNK_NEON"
+    MINIMAL_NORD = "MINIMAL_NORD"
+    WARM_ESPRESSO = "WARM_ESPRESSO"
+
+
 class WSEventTypeEnum(str, Enum):
     CARD_MOVED = "CARD_MOVED"
     CARD_UPDATED = "CARD_UPDATED"
@@ -150,6 +166,11 @@ class WSEventTypeEnum(str, Enum):
     USER_JOINED = "USER_JOINED"
     USER_LEFT = "USER_LEFT"
     USER_TYPING = "USER_TYPING"
+    CUSTOM_FIELD_CREATED = "CUSTOM_FIELD_CREATED"
+    CUSTOM_FIELD_UPDATED = "CUSTOM_FIELD_UPDATED"
+    CUSTOM_FIELD_DELETED = "CUSTOM_FIELD_DELETED"
+    DEPENDENCY_ADDED = "DEPENDENCY_ADDED"
+    DEPENDENCY_REMOVED = "DEPENDENCY_REMOVED"
 
 
 class SprintHealthStatusEnum(str, Enum):
@@ -415,6 +436,48 @@ class AutomationRuleSchema(BaseModel):
     created_at: datetime
 
 
+# Phase 7 Custom Field Schemas
+class CustomFieldOptionSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    label: str = Field(..., min_length=1, max_length=100)
+    color: str = Field(default="blue")
+
+
+class CustomFieldDefinitionSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=100)
+    type: CustomFieldTypeEnum
+    options: list[CustomFieldOptionSchema] = Field(default_factory=list)
+    show_on_front: bool = True
+    position: str = Field(default="a0", min_length=1, max_length=64)
+    created_at: datetime | str
+
+
+class CardCustomFieldValueSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    field_id: str = Field(..., min_length=1)
+    value: str | int | float | bool | None = None
+
+
+# Phase 7 Advanced Board Theme & Glassmorphism Studio Schemas
+class BoardThemeConfigSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    preset: ThemePresetEnum = ThemePresetEnum.DEFAULT_CLEAN
+    glass_blur: Literal["none", "sm", "md", "lg"] = "md"
+    card_density: Literal["comfortable", "compact"] = "comfortable"
+    card_radius: Literal["sm", "md", "xl"] = "md"
+    accent_color: str = "#6366f1"
+    show_custom_fields_on_front: bool = True
+    show_dependency_badges_on_front: bool = True
+
+
 class CardSchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -442,6 +505,8 @@ class CardSchema(BaseModel):
     is_due_complete: bool = False
     is_archived: bool = False
     is_watching: bool = False
+    # Phase 7 Custom Fields Values
+    custom_field_values: list[CardCustomFieldValueSchema] = Field(default_factory=list)
 
 
 class ColumnSchema(BaseModel):
@@ -494,6 +559,9 @@ class BoardSchema(BaseModel):
     # Phase 6 RBAC & Shareable Invites
     invite_links: list[BoardInviteLinkSchema] = Field(default_factory=list)
     visibility: BoardVisibilityEnum = BoardVisibilityEnum.WORKSPACE
+    # Phase 7 Custom Fields & Theme Studio
+    custom_fields: list[CustomFieldDefinitionSchema] = Field(default_factory=list)
+    theme_config: BoardThemeConfigSchema = Field(default_factory=BoardThemeConfigSchema)
 
 
 # Phase 3 Workspace & Board Summary Schemas
@@ -507,6 +575,7 @@ class BoardSummarySchema(BaseModel):
     is_starred: bool = False
     background: BoardBackgroundSchema = Field(default_factory=BoardBackgroundSchema)
     card_count: int = Field(default=0, ge=0)
+    theme_config: BoardThemeConfigSchema | None = None
     updated_at: datetime | None = None
     created_at: datetime | None = None
 
@@ -570,6 +639,8 @@ class CreateBoardRequestSchema(BaseModel):
     background: BoardBackgroundSchema | None = None
     template_id: str | None = None
     visibility: BoardVisibilityEnum = BoardVisibilityEnum.WORKSPACE
+    theme_config: BoardThemeConfigSchema | None = None
+    custom_fields: list[CustomFieldDefinitionSchema] | None = None
 
 
 class UpdateBoardRequestSchema(BaseModel):
@@ -582,6 +653,8 @@ class UpdateBoardRequestSchema(BaseModel):
     labels: list[LabelSchema] | None = None
     members: list[MemberSchema] | None = None
     visibility: BoardVisibilityEnum | None = None
+    theme_config: BoardThemeConfigSchema | None = None
+    custom_fields: list[CustomFieldDefinitionSchema] | None = None
 
 
 class CreateColumnRequestSchema(BaseModel):
@@ -646,6 +719,7 @@ class CreateCardRequestSchema(BaseModel):
     is_due_complete: bool = False
     is_archived: bool = False
     is_watching: bool = False
+    custom_field_values: list[CardCustomFieldValueSchema] = Field(default_factory=list)
 
 
 class UpdateCardRequestSchema(BaseModel):
@@ -671,6 +745,7 @@ class UpdateCardRequestSchema(BaseModel):
     is_due_complete: bool | None = None
     is_archived: bool | None = None
     is_watching: bool | None = None
+    custom_field_values: list[CardCustomFieldValueSchema] | None = None
 
 
 class MoveCardRequestSchema(BaseModel):
@@ -690,6 +765,7 @@ class CopyCardRequestSchema(BaseModel):
     keep_labels: bool = True
     keep_members: bool = True
     keep_attachments: bool = True
+    keep_custom_fields: bool = True
 
 
 class CreateCommentRequestSchema(BaseModel):
@@ -749,6 +825,52 @@ class TestWebhookResponseSchema(BaseModel):
     status_code: int | None = None
     message: str
     delivered_at: datetime | str | None = None
+
+
+# Phase 7 Custom Field Request Payloads
+class CreateCustomFieldDefinitionRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=100)
+    type: CustomFieldTypeEnum
+    options: list[CustomFieldOptionSchema] = Field(default_factory=list)
+    show_on_front: bool = True
+    position: str | None = None
+
+
+class UpdateCustomFieldDefinitionRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    options: list[CustomFieldOptionSchema] | None = None
+    show_on_front: bool | None = None
+    position: str | None = None
+
+
+class SetCardCustomFieldValueRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    value: str | int | float | bool | None = None
+
+
+# Phase 7 Theme Studio Request Payload
+class UpdateBoardThemeRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    preset: ThemePresetEnum | None = None
+    glass_blur: Literal["none", "sm", "md", "lg"] | None = None
+    card_density: Literal["comfortable", "compact"] | None = None
+    card_radius: Literal["sm", "md", "xl"] | None = None
+    accent_color: str | None = None
+    show_custom_fields_on_front: bool | None = None
+    show_dependency_badges_on_front: bool | None = None
+
+
+# Phase 7 Dependency Linker Request Payload
+class AddCardDependencyRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    blocker_card_id: str = Field(..., min_length=1)
 
 
 # ============================================================================
@@ -1087,6 +1209,79 @@ class AIPermissionAuditResponseSchema(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
 
 
+# ============================================================================
+# 5.7 PHASE 7 VISUAL DEPENDENCY GRAPH & AI CRITICAL PATH SCHEMAS
+# ============================================================================
+
+
+class DependencyNodeSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1, max_length=255)
+    column_id: str = Field(..., min_length=1)
+    column_title: str = Field(..., min_length=1)
+    priority: PriorityEnum = PriorityEnum.MEDIUM
+    story_points: int | None = Field(default=None, ge=0, le=100)
+    is_completed: bool = False
+    assignee_initials: list[str] = Field(default_factory=list)
+    in_degree: int = Field(default=0, ge=0)
+    out_degree: int = Field(default=0, ge=0)
+    is_on_critical_path: bool = False
+
+
+class DependencyEdgeSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_card_id: str = Field(..., min_length=1)
+    to_card_id: str = Field(..., min_length=1)
+    is_resolved: bool = False
+    is_critical: bool = False
+
+
+class BoardDependencyGraphSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_id: str = Field(..., min_length=1)
+    nodes: list[DependencyNodeSchema] = Field(default_factory=list)
+    edges: list[DependencyEdgeSchema] = Field(default_factory=list)
+    critical_path_card_ids: list[str] = Field(default_factory=list)
+    total_blocked_cards: int = Field(default=0, ge=0)
+    has_circular_dependency: bool = False
+
+
+class AddCardDependencyResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card: CardSchema
+    graph: BoardDependencyGraphSchema
+
+
+class CriticalPathBlockerCardSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    blocks_count: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=1)
+
+
+class AICriticalPathRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    graph: BoardDependencyGraphSchema
+
+
+class AICriticalPathResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    risk_summary: str = Field(..., min_length=1)
+    critical_path_titles: list[str] = Field(default_factory=list)
+    top_blocker_cards: list[CriticalPathBlockerCardSchema] = Field(default_factory=list)
+    unblocking_recommendations: list[str] = Field(default_factory=list)
+
+
 # Aliases for direct import without Schema suffix
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
@@ -1156,6 +1351,25 @@ JoinViaInviteRequest = JoinViaInviteRequestSchema
 JoinViaInviteResponse = JoinViaInviteResponseSchema
 AIPermissionAuditRequest = AIPermissionAuditRequestSchema
 AIPermissionAuditResponse = AIPermissionAuditResponseSchema
+
+CustomFieldType = CustomFieldTypeEnum
+CustomFieldOption = CustomFieldOptionSchema
+CustomFieldDefinition = CustomFieldDefinitionSchema
+CardCustomFieldValue = CardCustomFieldValueSchema
+ThemePreset = ThemePresetEnum
+BoardThemeConfig = BoardThemeConfigSchema
+DependencyNode = DependencyNodeSchema
+DependencyEdge = DependencyEdgeSchema
+BoardDependencyGraph = BoardDependencyGraphSchema
+CriticalPathBlockerCard = CriticalPathBlockerCardSchema
+AICriticalPathRequest = AICriticalPathRequestSchema
+AICriticalPathResponse = AICriticalPathResponseSchema
+CreateCustomFieldDefinitionRequest = CreateCustomFieldDefinitionRequestSchema
+UpdateCustomFieldDefinitionRequest = UpdateCustomFieldDefinitionRequestSchema
+SetCardCustomFieldValueRequest = SetCardCustomFieldValueRequestSchema
+UpdateBoardThemeRequest = UpdateBoardThemeRequestSchema
+AddCardDependencyRequest = AddCardDependencyRequestSchema
+AddCardDependencyResponse = AddCardDependencyResponseSchema
 
 
 # ============================================================================
