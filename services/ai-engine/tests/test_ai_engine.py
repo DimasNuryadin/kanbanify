@@ -23,6 +23,8 @@ from app.contracts import (
     AIAnalyticsReportSchema,
     AIDecomposeResponseSchema,
     AIParseAutomationResponseSchema,
+    AIPermissionAuditResponseSchema,
+    AIPermissionRiskLevelEnum,
     AISuggestCardEnrichmentResponseSchema,
     AISummaryNotificationRequestSchema,
     AISummaryNotificationResponseSchema,
@@ -1703,6 +1705,513 @@ def test_format_notification_live_llm_orchestration_and_fallback() -> None:
             fallback_body = fallback_res.json()
             assert "🚀 Kanbanify Daily Digest for Kinetix Platform Launch" in fallback_body["summary_text"]
             assert "1 card moved" in fallback_body["summary_text"]
+
+
+# ============================================================================
+# 6. PERMISSION & ACCESS AUDITOR TESTS (`POST /internal/v1/audit-permissions`)
+# ============================================================================
+
+
+def test_audit_permissions_missing_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/audit-permissions without X-Internal-Token returns 401 StandardErrorSchema."""
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        json={
+            "board_title": "Platform Security Review",
+            "visibility": "WORKSPACE",
+            "members": [],
+            "invite_links": [],
+        },
+    )
+    assert response.status_code == 401
+    body = response.json()
+    validated_err = StandardErrorSchema.model_validate(body)
+    assert validated_err.error.code.value == "UNAUTHORIZED"
+    assert "token" in validated_err.error.message.lower()
+
+
+def test_audit_permissions_invalid_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/audit-permissions with invalid X-Internal-Token returns 401."""
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": "invalid_wrong_token_123"},
+        json={
+            "board_title": "Platform Security Review",
+            "visibility": "WORKSPACE",
+            "members": [],
+            "invite_links": [],
+        },
+    )
+    assert response.status_code == 401
+    body = response.json()
+    validated_err = StandardErrorSchema.model_validate(body)
+    assert validated_err.error.code.value == "UNAUTHORIZED"
+
+
+def test_audit_permissions_empty_board_title_returns_400_validation_error() -> None:
+    """Verify POST /internal/v1/audit-permissions with empty board_title returns 400 validation error."""
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json={
+            "board_title": "",
+            "visibility": "WORKSPACE",
+            "members": [],
+            "invite_links": [],
+        },
+    )
+    assert response.status_code == 400
+    body = response.json()
+    validated_err = StandardErrorSchema.model_validate(body)
+    assert validated_err.error.code.value == "VALIDATION_ERROR"
+
+
+def test_audit_permissions_healthy_least_privilege_returns_200_low_risk() -> None:
+    """Verify healthy role distribution and bounded invite links return 200 OK with LOW risk (>= 80)."""
+    payload = {
+        "board_title": "Core Engine Infrastructure",
+        "visibility": "WORKSPACE",
+        "members": [
+            {
+                "id": "mem-01",
+                "name": "Alex Rivera",
+                "email": "alex@kinetix.dev",
+                "avatar_url": None,
+                "initials": "AR",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+                "joined_at": "2026-11-01T00:00:00.000Z",
+            },
+            {
+                "id": "mem-02",
+                "name": "Sarah Chen",
+                "email": "sarah@kinetix.dev",
+                "avatar_url": None,
+                "initials": "SC",
+                "color": "#10b981",
+                "role": "EDITOR",
+                "joined_at": "2026-11-02T00:00:00.000Z",
+            },
+            {
+                "id": "mem-03",
+                "name": "Marcus Vance",
+                "email": "marcus@kinetix.dev",
+                "avatar_url": None,
+                "initials": "MV",
+                "color": "#f59e0b",
+                "role": "EDITOR",
+                "joined_at": "2026-11-03T00:00:00.000Z",
+            },
+            {
+                "id": "mem-04",
+                "name": "Elena Rostova",
+                "email": "elena@kinetix.dev",
+                "avatar_url": None,
+                "initials": "ER",
+                "color": "#8b5cf6",
+                "role": "VIEWER",
+                "joined_at": "2026-11-04T00:00:00.000Z",
+            },
+        ],
+        "invite_links": [
+            {
+                "id": "inv-01",
+                "board_id": "board-uuid-1",
+                "token": "tok_ed_bounded",
+                "role": "EDITOR",
+                "created_by_id": "mem-01",
+                "created_by_name": "Alex Rivera",
+                "max_uses": 5,
+                "uses_count": 1,
+                "expires_at": "2026-12-01T00:00:00.000Z",
+                "is_active": True,
+                "created_at": "2026-11-10T00:00:00.000Z",
+            }
+        ],
+    }
+
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    # Validate against local and canonical contracts
+    validated = AIPermissionAuditResponseSchema.model_validate(data)
+    canonical = _canonical_contracts.AIPermissionAuditResponseSchema.model_validate(data)
+    assert validated.security_score >= 80.0
+    assert validated.risk_level == AIPermissionRiskLevelEnum.LOW
+    assert canonical.risk_level.value == "LOW"
+    assert len(validated.summary) > 0
+    assert len(validated.recommendations) >= 1
+
+
+def test_audit_permissions_excessive_admin_sprawl_violation() -> None:
+    """Verify > 50% ADMIN role distribution triggers deduction and least-privilege finding."""
+    payload = {
+        "board_title": "Admin Heavy Workspace",
+        "visibility": "WORKSPACE",
+        "members": [
+            {
+                "id": "mem-01",
+                "name": "Alice Admin",
+                "email": "alice@kinetix.dev",
+                "avatar_url": None,
+                "initials": "AA",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+            },
+            {
+                "id": "mem-02",
+                "name": "Bob Admin",
+                "email": "bob@kinetix.dev",
+                "avatar_url": None,
+                "initials": "BA",
+                "color": "#ef4444",
+                "role": "ADMIN",
+            },
+            {
+                "id": "mem-03",
+                "name": "Charlie Editor",
+                "email": "charlie@kinetix.dev",
+                "avatar_url": None,
+                "initials": "CE",
+                "color": "#10b981",
+                "role": "EDITOR",
+            },
+        ],
+        "invite_links": [],
+    }
+
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = AIPermissionAuditResponseSchema.model_validate(data)
+
+    # 2 out of 3 = 67% admins > 50%
+    assert validated.security_score < 100.0
+    assert any("ADMIN" in f and "least-privilege" in f.lower() for f in validated.findings)
+    assert any("downgrade" in r.lower() for r in validated.recommendations)
+
+
+def test_audit_permissions_unbounded_invite_link_violation() -> None:
+    """Verify active invite link with expires_at == null AND max_uses == null flags unbounded risk."""
+    payload = {
+        "board_title": "Unbounded Link Board",
+        "visibility": "WORKSPACE",
+        "members": [
+            {
+                "id": "mem-01",
+                "name": "Solo Owner",
+                "email": "owner@kinetix.dev",
+                "avatar_url": None,
+                "initials": "SO",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+            }
+        ],
+        "invite_links": [
+            {
+                "id": "inv-unbounded-editor",
+                "board_id": "board-uuid-1",
+                "token": "kb_inv_unbounded_editor",
+                "role": "EDITOR",
+                "created_by_id": "mem-01",
+                "created_by_name": "Solo Owner",
+                "max_uses": None,
+                "uses_count": 0,
+                "expires_at": None,
+                "is_active": True,
+                "created_at": "2026-11-10T00:00:00.000Z",
+            }
+        ],
+    }
+
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = AIPermissionAuditResponseSchema.model_validate(data)
+
+    # Unbounded invite link deduction
+    assert validated.security_score < 100.0
+    assert any("unbounded" in f.lower() or "unlimited expiration" in f.lower() for f in validated.findings)
+    assert any("expiration" in r.lower() or "max_uses" in r.lower() for r in validated.recommendations)
+
+
+def test_audit_permissions_public_read_with_sensitive_invite_links() -> None:
+    """Verify visibility === 'PUBLIC_READ' with active sensitive invite links triggers deduction."""
+    payload = {
+        "board_title": "Open Source Public Board",
+        "visibility": "PUBLIC_READ",
+        "members": [
+            {
+                "id": "mem-01",
+                "name": "Alex Rivera",
+                "email": "alex@kinetix.dev",
+                "avatar_url": None,
+                "initials": "AR",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+            }
+        ],
+        "invite_links": [
+            {
+                "id": "inv-editor-pub",
+                "board_id": "board-uuid-1",
+                "token": "kb_inv_pub_editor",
+                "role": "EDITOR",
+                "created_by_id": "mem-01",
+                "created_by_name": "Alex Rivera",
+                "max_uses": 20,
+                "uses_count": 2,
+                "expires_at": "2026-11-20T00:00:00.000Z",
+                "is_active": True,
+                "created_at": "2026-11-10T00:00:00.000Z",
+            }
+        ],
+    }
+
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = AIPermissionAuditResponseSchema.model_validate(data)
+
+    # Deducts 20 points for PUBLIC_READ with active sensitive link
+    assert validated.security_score <= 80.0
+    assert any("PUBLIC_READ" in f and "privileged" in f for f in validated.findings)
+    assert any("PUBLIC_READ" in r or "revoke" in r.lower() for r in validated.recommendations)
+
+
+def test_audit_permissions_compound_high_risk_scenario() -> None:
+    """Verify compound violations result in HIGH risk (< 50) and critical recommendations."""
+    payload = {
+        "board_title": "Severely Vulnerable Project",
+        "visibility": "PUBLIC_READ",
+        "members": [
+            {
+                "id": "mem-01",
+                "name": "Admin 1",
+                "email": "a1@kinetix.dev",
+                "avatar_url": None,
+                "initials": "A1",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+            },
+            {
+                "id": "mem-02",
+                "name": "Admin 2",
+                "email": "a2@kinetix.dev",
+                "avatar_url": None,
+                "initials": "A2",
+                "color": "#ef4444",
+                "role": "ADMIN",
+            },
+        ],
+        "invite_links": [
+            {
+                "id": "inv-admin-unbounded",
+                "board_id": "board-uuid-1",
+                "token": "kb_inv_root_admin",
+                "role": "ADMIN",
+                "created_by_id": "mem-01",
+                "created_by_name": "Admin 1",
+                "max_uses": None,
+                "uses_count": 0,
+                "expires_at": None,
+                "is_active": True,
+                "created_at": "2026-11-10T00:00:00.000Z",
+            },
+            {
+                "id": "inv-editor-unbounded",
+                "board_id": "board-uuid-1",
+                "token": "kb_inv_editor_wildcard",
+                "role": "EDITOR",
+                "created_by_id": "mem-01",
+                "created_by_name": "Admin 1",
+                "max_uses": None,
+                "uses_count": 0,
+                "expires_at": None,
+                "is_active": True,
+                "created_at": "2026-11-10T00:00:00.000Z",
+            },
+        ],
+    }
+
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = AIPermissionAuditResponseSchema.model_validate(data)
+
+    # 100 - 25 (100% admins) - 25 (unbounded admin link) - 15 (unbounded editor link) - 20 (public read with sensitive links) = 15
+    assert validated.security_score < 50.0
+    assert validated.risk_level == AIPermissionRiskLevelEnum.HIGH
+    assert len(validated.findings) >= 3
+    assert len(validated.recommendations) >= 2
+
+
+def test_audit_permissions_docs_contract_sample() -> None:
+    """Verify docs/api-contract.md 8.4 exact sample matches specification."""
+    payload = {
+        "board_title": "Kinetix Platform Launch",
+        "visibility": "WORKSPACE",
+        "members": [
+            {
+                "id": "88888888-8888-4888-8888-888888888881",
+                "name": "Alex Rivera",
+                "email": "alex@kinetix.dev",
+                "avatar_url": None,
+                "initials": "AR",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+                "joined_at": "2026-11-08T00:00:00.000Z",
+            }
+        ],
+        "invite_links": [
+            {
+                "id": "inv-001",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "token": "kb_inv_8f92a1bc3d4e",
+                "role": "EDITOR",
+                "created_by_id": "88888888-8888-4888-8888-888888888881",
+                "created_by_name": "Alex Rivera",
+                "max_uses": 10,
+                "uses_count": 3,
+                "expires_at": None,
+                "is_active": True,
+                "created_at": "2026-11-10T10:00:00.000Z",
+            }
+        ],
+    }
+
+    response = client.post(
+        "/internal/v1/audit-permissions",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = _canonical_contracts.AIPermissionAuditResponseSchema.model_validate(data)
+    assert validated.security_score >= 0.0 and validated.security_score <= 100.0
+    assert validated.risk_level in (_canonical_contracts.AIPermissionRiskLevelEnum.LOW, _canonical_contracts.AIPermissionRiskLevelEnum.MEDIUM)
+
+
+def test_audit_permissions_live_llm_mode_and_error_fallback() -> None:
+    """Verify live LLM orchestration path and fallback on network/upstream LLM error."""
+    mock_llm_output = {
+        "security_score": 75.0,
+        "risk_level": "MEDIUM",
+        "summary": "LLM Access Audit: Board has moderate permission risks.",
+        "findings": [
+            "Invite link grants EDITOR role without expiration timestamp.",
+        ],
+        "recommendations": [
+            "Configure a 14-day expiration timestamp on active invite links.",
+        ],
+    }
+
+    mock_response = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(mock_llm_output),
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    request_payload = {
+        "board_title": "Production Deployment Board",
+        "visibility": "WORKSPACE",
+        "members": [
+            {
+                "id": "mem-01",
+                "name": "Dev Lead",
+                "email": "lead@kinetix.dev",
+                "avatar_url": None,
+                "initials": "DL",
+                "color": "#3b82f6",
+                "role": "ADMIN",
+            }
+        ],
+        "invite_links": [
+            {
+                "id": "inv-01",
+                "board_id": "b-1",
+                "token": "kb_inv_mock",
+                "role": "EDITOR",
+                "created_by_id": "mem-01",
+                "created_by_name": "Dev Lead",
+                "max_uses": 5,
+                "uses_count": 1,
+                "expires_at": None,
+                "is_active": True,
+                "created_at": "2026-11-10T00:00:00.000Z",
+            }
+        ],
+    }
+
+    # 1. Test live LLM orchestration path
+    with patch("app.permission_auditor.get_settings") as mock_settings:
+        from app.config import Settings
+        mock_settings.return_value = Settings(
+            llm_api_key="sk-real-valid-api-key-for-testing",
+        )
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            res = client.post(
+                "/internal/v1/audit-permissions",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=request_payload,
+            )
+            assert res.status_code == 200
+            body = res.json()
+            assert body["security_score"] == 75.0
+            assert body["risk_level"] == "MEDIUM"
+            assert body["summary"] == mock_llm_output["summary"]
+            assert body["findings"] == mock_llm_output["findings"]
+
+        # 2. Test fallback on network / upstream LLM error
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(side_effect=httpx.ConnectError("OpenAI unreachable")),
+        ):
+            fallback_res = client.post(
+                "/internal/v1/audit-permissions",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=request_payload,
+            )
+            assert fallback_res.status_code == 200
+            fallback_body = fallback_res.json()
+            assert fallback_body["security_score"] == 90.0  # 100 - 10 for max_uses with no expires_at
+            assert fallback_body["risk_level"] == "LOW"
+            assert "Production Deployment Board" in fallback_body["summary"]
+
 
 
 
