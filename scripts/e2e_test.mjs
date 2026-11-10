@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Kanbanify Phase 5 — Automated Cross-Service End-to-End Smoke Test
+ * Kanbanify Phase 6 — Automated Cross-Service End-to-End Smoke Test
  * Verifies:
  *  1. Process orchestration / connection to AI Engine (Port 8001) & Core API (Port 8000)
  *  2. Health check endpoints (GET :8001/health & GET :8000/health)
@@ -15,6 +15,10 @@
  * 11. Native Trello JSON Import & CSV/JSON Export
  * 12. Real-Time Co-Presence & Live Typing Indicators (Phase 5)
  * 13. Slack & Discord Webhooks Lifecycle & AI Notification Formatter (Phase 5)
+ * 14. Enterprise Authentication & Pre-Seeded Demo User Profiles (Phase 6)
+ * 15. Strict RBAC Enforcement (VIEWER 403 FORBIDDEN vs EDITOR/ADMIN 200/201) (Phase 6)
+ * 16. Shareable Invite Links Lifecycle (Create, Inspect, Join, Usage Increment) (Phase 6)
+ * 17. AI Workspace Access & Permission Security Audit (API -> AI Engine) (Phase 6)
  */
 
 import assert from "node:assert/strict";
@@ -198,7 +202,7 @@ async function cleanup() {
 
 async function runSmokeTests() {
   console.log("==================================================================");
-  console.log(" KANBANIFY PHASE 5 — LIVE PRESENCE, WEBHOOKS & E2E SMOKE TEST");
+  console.log(" KANBANIFY PHASE 6 — ENTERPRISE AUTH, RBAC & INVITES E2E SMOKE TEST");
   console.log("==================================================================");
 
   await ensureServicesRunning();
@@ -1493,6 +1497,438 @@ async function runSmokeTests() {
     `DELETE /api/v1/webhooks/${discordWebhook.id} -> 204 No Content verified`
   );
 
+  // ---------------------------------------------------------------------------
+  // STEP 15: Enterprise Authentication & Pre-Seeded Demo User Profiles (Phase 6)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "AUTH_DEMO_USERS",
+    "Fetching pre-seeded demo user accounts via GET /api/v1/auth/demo-users..."
+  );
+  const demoUsersRes = await fetch(`${API_BASE_URL}/api/v1/auth/demo-users`);
+  assert.equal(
+    demoUsersRes.status,
+    200,
+    `Expected 200 from GET /api/v1/auth/demo-users, got ${demoUsersRes.status}`
+  );
+  const demoUsers = await demoUsersRes.json();
+  assert.ok(
+    Array.isArray(demoUsers) && demoUsers.length >= 3,
+    `Expected at least 3 demo accounts, got ${demoUsers?.length}`
+  );
+
+  const adminDemo = demoUsers.find((u) => u.default_role === "ADMIN");
+  const editorDemo = demoUsers.find((u) => u.default_role === "EDITOR");
+  const viewerDemo = demoUsers.find((u) => u.default_role === "VIEWER");
+
+  assert.ok(adminDemo, "Expected demo user with ADMIN default_role");
+  assert.ok(editorDemo, "Expected demo user with EDITOR default_role");
+  assert.ok(viewerDemo, "Expected demo user with VIEWER default_role");
+  assert.ok(
+    typeof adminDemo.token === "string" && adminDemo.token.length > 10,
+    "Expected demo users to include pre-signed session tokens"
+  );
+  logPass(
+    `GET /api/v1/auth/demo-users -> 200 OK (${demoUsers.length} accounts: ADMIN="${adminDemo.name}", EDITOR="${editorDemo.name}", VIEWER="${viewerDemo.name}")`
+  );
+
+  logStep(
+    "AUTH_REGISTER_LOGIN",
+    "Registering and logging in custom user via POST /api/v1/auth/register and /login..."
+  );
+  const testAccount = {
+    name: "Rina QA Integration",
+    email: `rina.integration.${Date.now()}@kanbanify.dev`,
+    password: "SecurePassword123!",
+  };
+
+  const registerRes = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(testAccount),
+  });
+  assert.ok(
+    registerRes.status === 200 || registerRes.status === 201,
+    `Expected 200/201 from POST /api/v1/auth/register, got ${registerRes.status}`
+  );
+  const registerBody = await registerRes.json();
+  assert.ok(registerBody.token, "Register response must contain JWT token");
+  assert.equal(registerBody.user.email, testAccount.email.toLowerCase());
+  assert.equal(registerBody.user.default_role, "EDITOR");
+
+  const loginRes = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: testAccount.email,
+      password: testAccount.password,
+    }),
+  });
+  assert.equal(
+    loginRes.status,
+    200,
+    `Expected 200 from POST /api/v1/auth/login, got ${loginRes.status}`
+  );
+  const loginBody = await loginRes.json();
+  assert.ok(loginBody.token, "Login response must contain session token");
+  assert.equal(loginBody.user.email, testAccount.email.toLowerCase());
+
+  // Verify GET /api/v1/auth/me with Bearer token
+  const meRes = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+    headers: { Authorization: `Bearer ${loginBody.token}` },
+  });
+  assert.equal(
+    meRes.status,
+    200,
+    `Expected 200 from GET /api/v1/auth/me with Bearer token, got ${meRes.status}`
+  );
+  const meBody = await meRes.json();
+  assert.equal(meBody.email, testAccount.email.toLowerCase());
+
+  // Verify GET /api/v1/auth/me defaults gracefully to ADMIN without auth headers
+  const meDefaultRes = await fetch(`${API_BASE_URL}/api/v1/auth/me`);
+  assert.equal(meDefaultRes.status, 200);
+  const meDefaultBody = await meDefaultRes.json();
+  assert.equal(meDefaultBody.default_role, "ADMIN");
+  logPass(
+    `POST /api/v1/auth/register & /login -> 200 OK (token issued, user resolved via /me, default ADMIN fallback confirmed)`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 16: Strict RBAC Enforcement Verification (403 FORBIDDEN vs 200/201) (Phase 6)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "RBAC_VIEWER_BLOCKED",
+    "Testing RBAC Guard: sending mutations with X-Kanbanify-Role: VIEWER and asserting strictly 403 FORBIDDEN..."
+  );
+
+  // 1. VIEWER card creation rejection
+  const viewerCardCreateRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/cards`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "VIEWER",
+      },
+      body: JSON.stringify({
+        column_id: backlogCol.id,
+        title: "Unauthorized Viewer Card Creation Attempt",
+        position: "a5",
+      }),
+    }
+  );
+  assert.equal(
+    viewerCardCreateRes.status,
+    403,
+    `Expected 403 FORBIDDEN for VIEWER card create, got ${viewerCardCreateRes.status}`
+  );
+  const viewerCardCreateBody = await viewerCardCreateRes.json();
+  assert.equal(
+    viewerCardCreateBody.error?.code,
+    "FORBIDDEN",
+    `Expected error.code === "FORBIDDEN", got ${JSON.stringify(viewerCardCreateBody)}`
+  );
+
+  // 2. VIEWER card move rejection
+  const viewerCardMoveRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}/move`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "VIEWER",
+      },
+      body: JSON.stringify({
+        target_column_id: reviewCol.id,
+        new_position: "a0",
+      }),
+    }
+  );
+  assert.equal(
+    viewerCardMoveRes.status,
+    403,
+    `Expected 403 FORBIDDEN for VIEWER card move, got ${viewerCardMoveRes.status}`
+  );
+  const viewerCardMoveBody = await viewerCardMoveRes.json();
+  assert.equal(viewerCardMoveBody.error?.code, "FORBIDDEN");
+
+  // 3. VIEWER comment creation rejection
+  const viewerCommentRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}/comments`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "VIEWER",
+      },
+      body: JSON.stringify({
+        content: "Unauthorized Viewer Comment Attempt",
+      }),
+    }
+  );
+  assert.equal(
+    viewerCommentRes.status,
+    403,
+    `Expected 403 FORBIDDEN for VIEWER card comment, got ${viewerCommentRes.status}`
+  );
+
+  // 4. Admin-only operations: EDITOR rejected with 403 FORBIDDEN
+  const editorInviteRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/invites`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "EDITOR",
+      },
+      body: JSON.stringify({
+        role: "VIEWER",
+        max_uses: 2,
+      }),
+    }
+  );
+  assert.equal(
+    editorInviteRes.status,
+    403,
+    `Expected 403 FORBIDDEN for EDITOR creating invite link, got ${editorInviteRes.status}`
+  );
+  const editorInviteBody = await editorInviteRes.json();
+  assert.equal(editorInviteBody.error?.code, "FORBIDDEN");
+
+  logPass(
+    "RBAC Enforcement verified: VIEWER mutations strictly rejected with 403 FORBIDDEN; ADMIN-only endpoints reject EDITOR with 403 FORBIDDEN"
+  );
+
+  logStep(
+    "RBAC_EDITOR_ALLOWED",
+    "Testing RBAC Guard: performing card creation & updates with X-Kanbanify-Role: EDITOR and asserting 200/201..."
+  );
+  const editorCardCreateRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/cards`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "EDITOR",
+      },
+      body: JSON.stringify({
+        column_id: backlogCol.id,
+        title: "Authorized Editor Card Creation",
+        position: "a6",
+        priority: "MEDIUM",
+      }),
+    }
+  );
+  assert.ok(
+    editorCardCreateRes.status === 200 || editorCardCreateRes.status === 201,
+    `Expected 200/201 for EDITOR card create, got ${editorCardCreateRes.status}`
+  );
+  const editorCard = await editorCardCreateRes.json();
+  assert.ok(editorCard.id, "Editor-created card must have valid id");
+
+  const editorCardMoveRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${editorCard.id}/move`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "EDITOR",
+      },
+      body: JSON.stringify({
+        target_column_id: inProgressCol.id,
+        new_position: "a1",
+      }),
+    }
+  );
+  assert.equal(
+    editorCardMoveRes.status,
+    200,
+    `Expected 200 for EDITOR card move, got ${editorCardMoveRes.status}`
+  );
+
+  // Backward compatibility check: mutation without auth/role headers succeeds as ADMIN
+  const backwardCompatCardRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${editorCard.id}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Authorized Card Update without Header (Defaults to ADMIN)",
+      }),
+    }
+  );
+  assert.equal(
+    backwardCompatCardRes.status,
+    200,
+    `Expected 200 for mutation without auth headers (default ADMIN), got ${backwardCompatCardRes.status}`
+  );
+  logPass(
+    "RBAC EDITOR and Backward-Compatible Default ADMIN mutations succeeded with 200/201"
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 17: Shareable Invite Link Lifecycle Verification (Phase 6)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "INVITE_CREATE",
+    `Creating shareable invite link via POST /api/v1/boards/${board.id}/invites as ADMIN...`
+  );
+  const createInviteRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/invites`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Kanbanify-Role": "ADMIN",
+      },
+      body: JSON.stringify({
+        role: "EDITOR",
+        max_uses: 5,
+      }),
+    }
+  );
+  assert.ok(
+    createInviteRes.status === 200 || createInviteRes.status === 201,
+    `Expected 200/201 from POST /api/v1/boards/:boardId/invites, got ${createInviteRes.status}`
+  );
+  const createdInvite = await createInviteRes.json();
+  assert.ok(
+    typeof createdInvite.token === "string" && createdInvite.token.length > 5,
+    "Expected generated invite link to have a valid token string"
+  );
+  assert.equal(createdInvite.role, "EDITOR");
+  assert.equal(createdInvite.max_uses, 5);
+  assert.equal(createdInvite.uses_count, 0);
+  assert.equal(createdInvite.is_active, true);
+  logPass(
+    `POST /api/v1/boards/${board.id}/invites -> ${createInviteRes.status} Created invite token="${createdInvite.token}" (role=EDITOR, max_uses=5, uses_count=0)`
+  );
+
+  logStep(
+    "INVITE_INSPECT",
+    `Inspecting invite link via GET /api/v1/invites/${createdInvite.token}...`
+  );
+  const inspectInviteRes = await fetch(
+    `${API_BASE_URL}/api/v1/invites/${createdInvite.token}`
+  );
+  assert.equal(
+    inspectInviteRes.status,
+    200,
+    `Expected 200 from GET /api/v1/invites/:token, got ${inspectInviteRes.status}`
+  );
+  const inspectInviteBody = await inspectInviteRes.json();
+  assert.equal(inspectInviteBody.board_id, board.id);
+  assert.equal(inspectInviteBody.granted_role, "EDITOR");
+  assert.equal(inspectInviteBody.is_valid, true);
+  logPass(
+    `GET /api/v1/invites/${createdInvite.token} -> 200 OK (board="${inspectInviteBody.board_title}", granted_role="${inspectInviteBody.granted_role}", is_valid=true)`
+  );
+
+  logStep(
+    "INVITE_JOIN",
+    `Redeeming invite link via POST /api/v1/invites/${createdInvite.token}/join for Rina QA...`
+  );
+  const joinPayload = {
+    name: "Rina QA",
+    email: "rina@kanbanify.dev",
+  };
+  const joinInviteRes = await fetch(
+    `${API_BASE_URL}/api/v1/invites/${createdInvite.token}/join`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(joinPayload),
+    }
+  );
+  assert.equal(
+    joinInviteRes.status,
+    200,
+    `Expected 200 from POST /api/v1/invites/:token/join, got ${joinInviteRes.status}`
+  );
+  const joinInviteBody = await joinInviteRes.json();
+  assert.equal(joinInviteBody.board_id, board.id);
+  assert.equal(
+    joinInviteBody.granted_role,
+    "EDITOR",
+    `Expected granted_role === "EDITOR", got ${joinInviteBody.granted_role}`
+  );
+  assert.equal(joinInviteBody.member.name, "Rina QA");
+  assert.equal(joinInviteBody.member.email, "rina@kanbanify.dev");
+
+  // Verify member is now in board.members and invite uses_count incremented
+  const boardAfterJoinRes = await fetch(`${API_BASE_URL}/api/v1/boards/${board.id}`);
+  assert.equal(boardAfterJoinRes.status, 200);
+  const boardAfterJoin = await boardAfterJoinRes.json();
+  const joinedMember = boardAfterJoin.members.find(
+    (m) => m.email.toLowerCase() === "rina@kanbanify.dev"
+  );
+  assert.ok(joinedMember, "Expected Rina QA in board.members after invite redemption");
+  assert.equal(joinedMember.role, "EDITOR");
+
+  const listInvitesRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/invites`
+  );
+  assert.equal(listInvitesRes.status, 200);
+  const boardInvites = await listInvitesRes.json();
+  const redeemedInvite = boardInvites.find((i) => i.token === createdInvite.token);
+  assert.ok(redeemedInvite, "Expected created invite link in board invites list");
+  assert.equal(
+    redeemedInvite.uses_count,
+    1,
+    `Expected invite uses_count === 1, got ${redeemedInvite.uses_count}`
+  );
+  logPass(
+    `POST /api/v1/invites/${createdInvite.token}/join -> 200 OK (Rina QA added with granted_role="EDITOR", invite uses_count=1)`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 18: AI Workspace Security & Permission Audit (API -> AI Engine) (Phase 6)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "AI_SECURITY_AUDIT",
+    `Calling POST /api/v1/boards/${board.id}/security-audit (API -> AI Engine)...`
+  );
+  const securityAuditRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/security-audit`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    securityAuditRes.status,
+    200,
+    `Expected 200 from POST /api/v1/boards/:boardId/security-audit, got ${securityAuditRes.status}`
+  );
+  const auditReport = await securityAuditRes.json();
+  assert.ok(
+    typeof auditReport.security_score === "number" &&
+      auditReport.security_score >= 0 &&
+      auditReport.security_score <= 100,
+    `Expected security_score in [0, 100], got ${auditReport.security_score}`
+  );
+  assert.ok(
+    ["LOW", "MEDIUM", "HIGH"].includes(auditReport.risk_level),
+    `Expected risk_level in ["LOW", "MEDIUM", "HIGH"], got ${auditReport.risk_level}`
+  );
+  assert.ok(
+    Array.isArray(auditReport.findings),
+    "Expected findings to be an array"
+  );
+  assert.ok(
+    Array.isArray(auditReport.recommendations) &&
+      auditReport.recommendations.length >= 1,
+    "Expected recommendations to have at least 1 item"
+  );
+  assert.ok(
+    typeof auditReport.summary === "string" && auditReport.summary.length > 5,
+    "Expected non-empty summary in security audit report"
+  );
+  logPass(
+    `POST /api/v1/boards/${board.id}/security-audit -> 200 OK (security_score=${auditReport.security_score}, risk_level=${auditReport.risk_level}, findings=${auditReport.findings.length}, recommendations=${auditReport.recommendations.length})`
+  );
+
   if (wsClient) {
     await new Promise((r) => setTimeout(r, 150));
     wsClient.close();
@@ -1507,7 +1943,7 @@ async function runSmokeTests() {
 
   console.log("==================================================================");
   console.log(
-    "\x1b[32m[PASS] Kanbanify Phase 5 Live Presence & Webhooks E2E Smoke Tests Succeeded!\x1b[0m"
+    "\x1b[32m[PASS] Kanbanify Phase 6 Auth, RBAC & Shareable Invite Links E2E Smoke Tests Succeeded!\x1b[0m"
   );
   console.log("==================================================================");
 }
