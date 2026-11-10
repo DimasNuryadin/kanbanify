@@ -1468,6 +1468,11 @@ If neither `Authorization` nor `X-Kanbanify-Role` header is provided, the API de
 | **Delete Board** | Allowed | **Blocked (403 FORBIDDEN)** | **Blocked (403 FORBIDDEN)** | Only `ADMIN` can delete workspace boards |
 | **Join Board via Invite Link** | Allowed | Allowed | Allowed | Public invite redemption adds user with granted role |
 | **Run AI Workspace Permission & Security Audit** | Allowed | Allowed | Allowed | Generates least-privilege audit report |
+| **Manage Custom Field Definitions (Create, Update, Delete)** | Allowed | **Allowed (Create/Update)** / **Blocked (Delete)** | **Blocked (403 FORBIDDEN)** | `DELETE` requires `ADMIN`; `POST`/`PATCH` allowed for `EDITOR` |
+| **Mutate Card Custom Field Values** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | `VIEWER` cannot alter field values |
+| **Manage Card Dependencies (Add, Remove)** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | `VIEWER` cannot alter dependency graph |
+| **Run AI Critical Path Dependency Analysis** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | AI dependency bottleneck analysis |
+| **Update Board Theme Studio (`theme_config`)** | Allowed | Allowed | **Blocked (403 FORBIDDEN)** | Customizing glassmorphism / presets |
 
 ---
 
@@ -1801,6 +1806,391 @@ Protected by `X-Internal-Token`.
   "recommendations": [
     "Configure expiration timestamps on all active EDITOR invite links.",
     "Downgrade inactive collaborators to VIEWER role."
+  ]
+}
+```
+
+---
+
+## 9. Custom Fields Power-Up, Visual Dependency Graph & Theme Studio (Phase 7)
+
+### 9.1 Custom Fields Power-Up Endpoints (`apps/api` — Port 8000)
+
+Trello-compatible Custom Fields allow boards to define custom typed metadata (`TEXT`, `NUMBER`, `DATE`, `CHECKBOX`, `DROPDOWN`).
+
+#### `GET /api/v1/boards/:boardId/custom-fields` — List Board Custom Fields
+Returns all custom field definitions registered on the board, ordered by their fractional `position`.
+- **RBAC**: `ADMIN`, `EDITOR`, `VIEWER`
+- **Response `200 OK` (`CustomFieldDefinition[]`)**:
+```json
+[
+  {
+    "id": "cf-001",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "name": "Release Track",
+    "type": "DROPDOWN",
+    "options": [
+      { "id": "opt-1", "label": "Alpha", "color": "purple" },
+      { "id": "opt-2", "label": "Beta", "color": "blue" },
+      { "id": "opt-3", "label": "Stable", "color": "green" }
+    ],
+    "show_on_front": true,
+    "position": "a0",
+    "created_at": "2026-11-10T12:00:00.000Z"
+  },
+  {
+    "id": "cf-002",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "name": "Estimated Hours",
+    "type": "NUMBER",
+    "options": [],
+    "show_on_front": true,
+    "position": "a1",
+    "created_at": "2026-11-10T12:05:00.000Z"
+  }
+]
+```
+
+#### `POST /api/v1/boards/:boardId/custom-fields` — Create Custom Field Definition
+Creates a new custom field definition on a board.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`CreateCustomFieldDefinitionRequestSchema`)**:
+```json
+{
+  "name": "Release Track",
+  "type": "DROPDOWN",
+  "options": [
+    { "id": "opt-1", "label": "Alpha", "color": "purple" },
+    { "id": "opt-2", "label": "Beta", "color": "blue" },
+    { "id": "opt-3", "label": "Stable", "color": "green" }
+  ],
+  "show_on_front": true,
+  "position": "a0"
+}
+```
+- **Response `201 Created` (`CustomFieldDefinitionSchema`)**:
+```json
+{
+  "id": "cf-001",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "name": "Release Track",
+  "type": "DROPDOWN",
+  "options": [
+    { "id": "opt-1", "label": "Alpha", "color": "purple" },
+    { "id": "opt-2", "label": "Beta", "color": "blue" },
+    { "id": "opt-3", "label": "Stable", "color": "green" }
+  ],
+  "show_on_front": true,
+  "position": "a0",
+  "created_at": "2026-11-10T12:00:00.000Z"
+}
+```
+
+#### `PATCH /api/v1/custom-fields/:fieldId` — Update Custom Field Definition
+Updates an existing field definition's name, options list, or card front visibility.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`UpdateCustomFieldDefinitionRequestSchema`)**:
+```json
+{
+  "name": "Release Train",
+  "show_on_front": false
+}
+```
+- **Response `200 OK` (`CustomFieldDefinitionSchema`)**:
+```json
+{
+  "id": "cf-001",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "name": "Release Train",
+  "type": "DROPDOWN",
+  "options": [
+    { "id": "opt-1", "label": "Alpha", "color": "purple" },
+    { "id": "opt-2", "label": "Beta", "color": "blue" },
+    { "id": "opt-3", "label": "Stable", "color": "green" }
+  ],
+  "show_on_front": false,
+  "position": "a0",
+  "created_at": "2026-11-10T12:00:00.000Z"
+}
+```
+
+#### `DELETE /api/v1/custom-fields/:fieldId` — Delete Custom Field Definition
+Deletes the custom field definition from the board and cascade removes all stored values for this field across cards on the board.
+- **RBAC**: `ADMIN` only (`EDITOR`/`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK`**:
+```json
+{
+  "id": "cf-001",
+  "deleted": true
+}
+```
+
+#### `PUT /api/v1/cards/:cardId/custom-fields/:fieldId` — Set or Clear Card Custom Field Value
+Sets or clears the value for a specific custom field on a card. The API validates that the supplied value type matches the definition's `CustomFieldTypeEnum`:
+- `DROPDOWN`: string (option `id`)
+- `NUMBER`: number
+- `DATE`: ISO8601 string
+- `CHECKBOX`: boolean
+- `TEXT`: string
+- Clearing value: `null`
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`SetCardCustomFieldValueRequestSchema`)**:
+```json
+{
+  "value": "opt-2"
+}
+```
+- **Response `200 OK` (`CardSchema`)**:
+```json
+{
+  "id": "44444444-4444-4444-8444-444444444441",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "column_id": "33333333-3333-4333-8333-333333333331",
+  "title": "Implement OAuth2 PKCE flow",
+  "custom_field_values": [
+    {
+      "field_id": "cf-001",
+      "value": "opt-2"
+    }
+  ],
+  "blocked_by_card_ids": [],
+  "updated_at": "2026-11-10T12:15:00.000Z"
+}
+```
+
+---
+
+### 9.2 Visual Dependency Graph & Cycle-Safe Linker Endpoints (`apps/api` — Port 8000)
+
+Provides DAG (Directed Acyclic Graph) computation, topological sorting, circular dependency prevention, and critical path analysis for Kanban cards.
+
+#### `GET /api/v1/boards/:boardId/dependency-graph` — Compute Board Dependency Graph
+Computes in-degree, out-degree, resolution status (`is_resolved` is true when the blocker card is in a Done/Completed column), detects cycles, and calculates the ordered chain of card IDs forming the longest critical path.
+- **RBAC**: `ADMIN`, `EDITOR`, `VIEWER`
+- **Response `200 OK` (`BoardDependencyGraphSchema`)**:
+```json
+{
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "nodes": [
+    {
+      "card_id": "44444444-4444-4444-8444-444444444441",
+      "title": "Implement OAuth2 PKCE flow",
+      "column_id": "33333333-3333-4333-8333-333333333331",
+      "column_title": "Backlog",
+      "priority": "HIGH",
+      "story_points": 5,
+      "is_completed": false,
+      "assignee_initials": ["AR"],
+      "in_degree": 0,
+      "out_degree": 1,
+      "is_on_critical_path": true
+    },
+    {
+      "card_id": "44444444-4444-4444-8444-444444444442",
+      "title": "Implement Webhook Dispatcher",
+      "column_id": "33333333-3333-4333-8333-333333333332",
+      "column_title": "In Progress",
+      "priority": "MEDIUM",
+      "story_points": 8,
+      "is_completed": false,
+      "assignee_initials": ["SP"],
+      "in_degree": 1,
+      "out_degree": 0,
+      "is_on_critical_path": true
+    }
+  ],
+  "edges": [
+    {
+      "from_card_id": "44444444-4444-4444-8444-444444444441",
+      "to_card_id": "44444444-4444-4444-8444-444444444442",
+      "is_resolved": false,
+      "is_critical": true
+    }
+  ],
+  "critical_path_card_ids": [
+    "44444444-4444-4444-8444-444444444441",
+    "44444444-4444-4444-8444-444444444442"
+  ],
+  "total_blocked_cards": 1,
+  "has_circular_dependency": false
+}
+```
+
+#### `POST /api/v1/cards/:cardId/dependencies` — Link Blocker Dependency (Cycle-Safe)
+Adds `blocker_card_id` to `card.blocked_by_card_ids`. Runs cycle detection: if linking this dependency creates a circular loop (e.g., A -> B -> C -> A), the operation rejects with `400 VALIDATION_ERROR` and an explanatory message.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`AddCardDependencyRequestSchema`)**:
+```json
+{
+  "blocker_card_id": "44444444-4444-4444-8444-444444444441"
+}
+```
+- **Response `200 OK` (`AddCardDependencyResponseSchema`)**:
+```json
+{
+  "card": {
+    "id": "44444444-4444-4444-8444-444444444442",
+    "title": "Implement Webhook Dispatcher",
+    "blocked_by_card_ids": [
+      "44444444-4444-4444-8444-444444444441"
+    ]
+  },
+  "graph": {
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "nodes": [],
+    "edges": [],
+    "critical_path_card_ids": [
+      "44444444-4444-4444-8444-444444444441",
+      "44444444-4444-4444-8444-444444444442"
+    ],
+    "total_blocked_cards": 1,
+    "has_circular_dependency": false
+  }
+}
+```
+- **Error `400 VALIDATION_ERROR` (Cycle Detected)**:
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Circular dependency detected: adding blocker 44444444-4444-4444-8444-444444444441 creates a cycle.",
+    "details": {
+      "card_id": "44444444-4444-4444-8444-444444444442",
+      "blocker_card_id": "44444444-4444-4444-8444-444444444441",
+      "cycle_path": [
+        "44444444-4444-4444-8444-444444444442",
+        "44444444-4444-4444-8444-444444444441",
+        "44444444-4444-4444-8444-444444444442"
+      ]
+    }
+  }
+}
+```
+
+#### `DELETE /api/v1/cards/:cardId/dependencies/:blockerCardId` — Unlink Dependency
+Removes `blockerCardId` from `card.blocked_by_card_ids`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK` (`AddCardDependencyResponseSchema`)**:
+```json
+{
+  "card": {
+    "id": "44444444-4444-4444-8444-444444444442",
+    "blocked_by_card_ids": []
+  },
+  "graph": {
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "total_blocked_cards": 0,
+    "has_circular_dependency": false
+  }
+}
+```
+
+#### `POST /api/v1/boards/:boardId/dependency-graph/ai-analyze` — AI Critical Path Analyzer
+Proxies the computed `BoardDependencyGraphSchema` to `services/ai-engine` (`POST /internal/v1/analyze-dependencies`) and returns AI-generated risk assessment and bottleneck unblocking recommendations.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK` (`AICriticalPathResponseSchema`)**:
+```json
+{
+  "risk_summary": "1 card sits on the critical path blocking 3 downstream tasks. Delayed release risk: High.",
+  "critical_path_titles": [
+    "Implement OAuth2 PKCE flow",
+    "Implement Webhook Dispatcher",
+    "Deploy Release 1.0"
+  ],
+  "top_blocker_cards": [
+    {
+      "card_id": "44444444-4444-4444-8444-444444444441",
+      "title": "Implement OAuth2 PKCE flow",
+      "blocks_count": 3,
+      "reason": "Blocks downstream authentication and webhook integrations."
+    }
+  ],
+  "unblocking_recommendations": [
+    "Pair program on OAuth2 PKCE flow to expedite code review.",
+    "Decouple Webhook Dispatcher from PKCE dependency if secret tokens can be mocked."
+  ]
+}
+```
+
+---
+
+### 9.3 Theme Studio Endpoint (`apps/api` — Port 8000)
+
+#### `PATCH /api/v1/boards/:boardId/theme` — Update Board Theme & Glassmorphism
+Updates `board.theme_config` and broadcasts `BOARD_UPDATED` WebSocket event to all connected clients.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`UpdateBoardThemeRequestSchema`)**:
+```json
+{
+  "preset": "CYBERPUNK_NEON",
+  "glass_blur": "md",
+  "card_density": "compact",
+  "card_radius": "sm",
+  "accent_color": "#ec4899",
+  "show_custom_fields_on_front": true,
+  "show_dependency_badges_on_front": true
+}
+```
+- **Response `200 OK` (`BoardThemeConfigSchema`)**:
+```json
+{
+  "preset": "CYBERPUNK_NEON",
+  "glass_blur": "md",
+  "card_density": "compact",
+  "card_radius": "sm",
+  "accent_color": "#ec4899",
+  "show_custom_fields_on_front": true,
+  "show_dependency_badges_on_front": true
+}
+```
+
+---
+
+### 9.4 Internal AI Engine Critical Path Analyzer (`services/ai-engine` — Port 8001)
+
+#### `POST /internal/v1/analyze-dependencies` — Dependency Graph Analyzer
+Internal stateless endpoint invoked by `apps/api` with header `X-Internal-Token`.
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>`
+- **Request Body (`AICriticalPathRequestSchema`)**:
+```json
+{
+  "board_title": "Kanbanify Launch Board",
+  "graph": {
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "nodes": [
+      {
+        "card_id": "44444444-4444-4444-8444-444444444441",
+        "title": "Implement OAuth2 PKCE flow",
+        "column_id": "33333333-3333-4333-8333-333333333331",
+        "column_title": "Backlog",
+        "priority": "HIGH",
+        "story_points": 5,
+        "is_completed": false,
+        "assignee_initials": ["AR"],
+        "in_degree": 0,
+        "out_degree": 1,
+        "is_on_critical_path": true
+      }
+    ],
+    "edges": [],
+    "critical_path_card_ids": ["44444444-4444-4444-8444-444444444441"],
+    "total_blocked_cards": 0,
+    "has_circular_dependency": false
+  }
+}
+```
+- **Response `200 OK` (`AICriticalPathResponseSchema`)**:
+```json
+{
+  "risk_summary": "1 card sits on the critical path. No active blockers detected.",
+  "critical_path_titles": [
+    "Implement OAuth2 PKCE flow"
+  ],
+  "top_blocker_cards": [],
+  "unblocking_recommendations": [
+    "Ensure subtasks for PKCE flow are defined and estimated."
   ]
 }
 ```

@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Kinetix Core API & Internal AI Engine Contract
-  version: 4.0.0
+  version: 7.0.0
   description: >
-    Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kinetix
-    High-Performance Real-Time Kanban & AI Workspace (Phase 4 Team Productivity Analytics
-    Dashboard, AI Executive Sprint Insights, Native Trello JSON Import & CSV/JSON Export).
+    Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kanbanify
+    High-Performance Real-Time Kanban & AI Workspace (Phase 7 Trello Custom Fields Power-Up,
+    Visual Card Dependency Graph & AI Critical Path Analyzer, and Advanced Glassmorphism / Theme Studio).
 servers:
   - url: http://localhost:8000
     description: Fastify Core API Server (apps/api)
@@ -1550,6 +1550,383 @@ paths:
               schema:
                 $ref: "#/components/schemas/StandardError"
 
+  # ============================================================================
+  # PHASE 7: CUSTOM FIELDS POWER-UP (Port 8000)
+  # ============================================================================
+  /api/v1/boards/{boardId}/custom-fields:
+    get:
+      summary: List all custom field definitions for a board
+      operationId: getBoardCustomFields
+      tags:
+        - Custom Fields
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of custom field definitions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomFieldDefinition"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    post:
+      summary: Create a new custom field definition (ADMIN or EDITOR)
+      operationId: createCustomFieldDefinition
+      tags:
+        - Custom Fields
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomFieldDefinitionRequest"
+      responses:
+        "201":
+          description: Custom field definition created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomFieldDefinition"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (Requires ADMIN or EDITOR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/custom-fields/{fieldId}:
+    patch:
+      summary: Update custom field definition name, options, or show_on_front (ADMIN or EDITOR)
+      operationId: updateCustomFieldDefinition
+      tags:
+        - Custom Fields
+      parameters:
+        - name: fieldId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCustomFieldDefinitionRequest"
+      responses:
+        "200":
+          description: Custom field definition updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomFieldDefinition"
+        "404":
+          description: Custom field not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    delete:
+      summary: Delete custom field definition and cascade remove its values from cards (ADMIN only)
+      operationId: deleteCustomFieldDefinition
+      tags:
+        - Custom Fields
+      parameters:
+        - name: fieldId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Custom field definition deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+        "403":
+          description: Forbidden (Requires ADMIN)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Custom field not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/custom-fields/{fieldId}:
+    put:
+      summary: Set or clear custom field value on a card (ADMIN or EDITOR)
+      operationId: setCardCustomFieldValue
+      tags:
+        - Custom Fields
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: fieldId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetCardCustomFieldValueRequest"
+      responses:
+        "200":
+          description: Updated card with custom field values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+        "400":
+          description: Validation error or invalid value type for custom field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card or Custom Field not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # PHASE 7: VISUAL DEPENDENCY GRAPH & CRITICAL PATH LINKER (Port 8000)
+  # ============================================================================
+  /api/v1/boards/{boardId}/dependency-graph:
+    get:
+      summary: Retrieve board dependency graph with nodes, edges, cycle detection, and critical path
+      operationId: getBoardDependencyGraph
+      tags:
+        - Dependency Graph
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Board dependency graph
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardDependencyGraph"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/dependencies:
+    post:
+      summary: Add dependency blocker to a card with cycle detection (ADMIN or EDITOR)
+      operationId: addCardDependency
+      tags:
+        - Dependency Graph
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddCardDependencyRequest"
+      responses:
+        "200":
+          description: Dependency added successfully, returning updated card and graph
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddCardDependencyResponse"
+        "400":
+          description: Circular dependency detected or invalid dependency
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card or Blocker card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/dependencies/{blockerCardId}:
+    delete:
+      summary: Remove blocker dependency from a card (ADMIN or EDITOR)
+      operationId: removeCardDependency
+      tags:
+        - Dependency Graph
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: blockerCardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dependency removed successfully, returning updated card and graph
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddCardDependencyResponse"
+        "404":
+          description: Card or dependency not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/dependency-graph/ai-analyze:
+    post:
+      summary: Trigger AI critical path and dependency bottleneck analysis for a board
+      operationId: analyzeBoardCriticalPath
+      tags:
+        - Dependency Graph
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: AI critical path analysis response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICriticalPathResponse"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # PHASE 7: ADVANCED THEME & GLASSMORPHISM STUDIO (Port 8000)
+  # ============================================================================
+  /api/v1/boards/{boardId}/theme:
+    patch:
+      summary: Update board theme configuration and broadcast BOARD_UPDATED (ADMIN or EDITOR)
+      operationId: updateBoardTheme
+      tags:
+        - Theme Studio
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBoardThemeRequest"
+      responses:
+        "200":
+          description: Updated board theme configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardThemeConfig"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # PHASE 7: INTERNAL AI ENGINE CRITICAL PATH ANALYZER (Port 8001)
+  # ============================================================================
+  /internal/v1/analyze-dependencies:
+    post:
+      summary: Internal AI Engine critical path & dependency analysis endpoint (Port 8001)
+      operationId: internalAnalyzeDependencies
+      tags:
+        - AI Engine Internal
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AICriticalPathRequest"
+      responses:
+        "200":
+          description: Critical path analysis with risk summary and recommendations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AICriticalPathResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
 components:
   schemas:
     PriorityEnum:
@@ -2168,6 +2545,10 @@ components:
           type: boolean
         is_watching:
           type: boolean
+        custom_field_values:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardCustomFieldValue"
 
     Column:
       type: object
@@ -2257,6 +2638,12 @@ components:
         visibility:
           $ref: "#/components/schemas/BoardVisibilityEnum"
           default: WORKSPACE
+        custom_fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomFieldDefinition"
+        theme_config:
+          $ref: "#/components/schemas/BoardThemeConfig"
 
     HealthCheckResponse:
       type: object
@@ -2307,6 +2694,12 @@ components:
         visibility:
           $ref: "#/components/schemas/BoardVisibilityEnum"
           default: WORKSPACE
+        theme_config:
+          $ref: "#/components/schemas/BoardThemeConfig"
+        custom_fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomFieldDefinition"
 
     UpdateBoardRequest:
       type: object
@@ -2329,6 +2722,12 @@ components:
             $ref: "#/components/schemas/Member"
         visibility:
           $ref: "#/components/schemas/BoardVisibilityEnum"
+        theme_config:
+          $ref: "#/components/schemas/BoardThemeConfig"
+        custom_fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomFieldDefinition"
 
     CreateColumnRequest:
       type: object
@@ -2447,6 +2846,10 @@ components:
           type: boolean
         is_watching:
           type: boolean
+        custom_field_values:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardCustomFieldValue"
 
     UpdateCardRequest:
       type: object
@@ -2511,6 +2914,10 @@ components:
           type: boolean
         is_watching:
           type: boolean
+        custom_field_values:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardCustomFieldValue"
 
     MoveCardRequest:
       type: object
@@ -2539,6 +2946,8 @@ components:
         keep_members:
           type: boolean
         keep_attachments:
+          type: boolean
+        keep_custom_fields:
           type: boolean
 
     CreateCommentRequest:
@@ -3290,6 +3699,316 @@ components:
           items:
             type: string
         recommendations:
+          type: array
+          items:
+            type: string
+
+    # Phase 7 Custom Fields Schemas
+    CustomFieldTypeEnum:
+      type: string
+      enum: [TEXT, NUMBER, DATE, CHECKBOX, DROPDOWN]
+
+    CustomFieldOption:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        color:
+          type: string
+          default: blue
+
+    CustomFieldDefinition:
+      type: object
+      required:
+        - id
+        - board_id
+        - name
+        - type
+        - options
+        - show_on_front
+        - position
+        - created_at
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/CustomFieldTypeEnum"
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomFieldOption"
+        show_on_front:
+          type: boolean
+          default: true
+        position:
+          type: string
+          default: a0
+        created_at:
+          type: string
+          format: date-time
+
+    CardCustomFieldValue:
+      type: object
+      required: [field_id]
+      properties:
+        field_id:
+          type: string
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: "null"
+
+    CreateCustomFieldDefinitionRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/CustomFieldTypeEnum"
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomFieldOption"
+        show_on_front:
+          type: boolean
+          default: true
+        position:
+          type: string
+
+    UpdateCustomFieldDefinitionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/CustomFieldOption"
+        show_on_front:
+          type: boolean
+        position:
+          type: string
+
+    SetCardCustomFieldValueRequest:
+      type: object
+      properties:
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+            - type: "null"
+
+    # Phase 7 Theme Studio Schemas
+    ThemePresetEnum:
+      type: string
+      enum:
+        - DEFAULT_CLEAN
+        - FROSTED_GLASS
+        - CYBERPUNK_NEON
+        - MINIMAL_NORD
+        - WARM_ESPRESSO
+
+    BoardThemeConfig:
+      type: object
+      properties:
+        preset:
+          $ref: "#/components/schemas/ThemePresetEnum"
+        glass_blur:
+          type: string
+          enum: [none, sm, md, lg]
+          default: md
+        card_density:
+          type: string
+          enum: [comfortable, compact]
+          default: comfortable
+        card_radius:
+          type: string
+          enum: [sm, md, xl]
+          default: md
+        accent_color:
+          type: string
+          default: "#6366f1"
+        show_custom_fields_on_front:
+          type: boolean
+          default: true
+        show_dependency_badges_on_front:
+          type: boolean
+          default: true
+
+    UpdateBoardThemeRequest:
+      type: object
+      properties:
+        preset:
+          $ref: "#/components/schemas/ThemePresetEnum"
+        glass_blur:
+          type: string
+          enum: [none, sm, md, lg]
+        card_density:
+          type: string
+          enum: [comfortable, compact]
+        card_radius:
+          type: string
+          enum: [sm, md, xl]
+        accent_color:
+          type: string
+        show_custom_fields_on_front:
+          type: boolean
+        show_dependency_badges_on_front:
+          type: boolean
+
+    # Phase 7 Dependency Graph Schemas
+    DependencyNode:
+      type: object
+      required:
+        - card_id
+        - title
+        - column_id
+        - column_title
+        - priority
+        - is_completed
+      properties:
+        card_id:
+          type: string
+        title:
+          type: string
+        column_id:
+          type: string
+        column_title:
+          type: string
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        story_points:
+          type: [integer, "null"]
+        is_completed:
+          type: boolean
+        assignee_initials:
+          type: array
+          items:
+            type: string
+        in_degree:
+          type: integer
+          default: 0
+        out_degree:
+          type: integer
+          default: 0
+        is_on_critical_path:
+          type: boolean
+          default: false
+
+    DependencyEdge:
+      type: object
+      required: [from_card_id, to_card_id, is_resolved, is_critical]
+      properties:
+        from_card_id:
+          type: string
+        to_card_id:
+          type: string
+        is_resolved:
+          type: boolean
+          default: false
+        is_critical:
+          type: boolean
+          default: false
+
+    BoardDependencyGraph:
+      type: object
+      required:
+        - board_id
+        - nodes
+        - edges
+        - critical_path_card_ids
+        - total_blocked_cards
+        - has_circular_dependency
+      properties:
+        board_id:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyEdge"
+        critical_path_card_ids:
+          type: array
+          items:
+            type: string
+        total_blocked_cards:
+          type: integer
+          default: 0
+        has_circular_dependency:
+          type: boolean
+          default: false
+
+    AddCardDependencyRequest:
+      type: object
+      required: [blocker_card_id]
+      properties:
+        blocker_card_id:
+          type: string
+
+    AddCardDependencyResponse:
+      type: object
+      required: [card, graph]
+      properties:
+        card:
+          $ref: "#/components/schemas/Card"
+        graph:
+          $ref: "#/components/schemas/BoardDependencyGraph"
+
+    CriticalPathBlockerCard:
+      type: object
+      required: [card_id, title, blocks_count, reason]
+      properties:
+        card_id:
+          type: string
+        title:
+          type: string
+        blocks_count:
+          type: integer
+        reason:
+          type: string
+
+    AICriticalPathRequest:
+      type: object
+      required: [board_title, graph]
+      properties:
+        board_title:
+          type: string
+        graph:
+          $ref: "#/components/schemas/BoardDependencyGraph"
+
+    AICriticalPathResponse:
+      type: object
+      required:
+        - risk_summary
+        - critical_path_titles
+        - top_blocker_cards
+        - unblocking_recommendations
+      properties:
+        risk_summary:
+          type: string
+        critical_path_titles:
+          type: array
+          items:
+            type: string
+        top_blocker_cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/CriticalPathBlockerCard"
+        unblocking_recommendations:
           type: array
           items:
             type: string
