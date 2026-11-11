@@ -20,6 +20,9 @@ import {
   UserPresence,
   WebhookConfig,
   WorkspaceWithBoards,
+  ActiveCardTimer,
+  CardTimeTrackingSummary,
+  RetroItem,
 } from "@kinetix/contracts";
 import {
   INITIAL_SEED_BOARD,
@@ -32,7 +35,7 @@ import { WSConnectionStatus } from "@/lib/ws-client";
 import { comparePositions } from "@/lib/fractional-index";
 import { ButlerExecutionToast } from "@/lib/automation-engine";
 
-export type ViewMode = "kanban" | "table" | "calendar" | "analytics" | "graph";
+export type ViewMode = "kanban" | "table" | "calendar" | "analytics" | "graph" | "retro";
 export type ThemeMode = "light" | "dark" | "system";
 export type DueFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "COMPLETED" | "NO_DATE";
 
@@ -155,6 +158,9 @@ interface WorkspaceState {
   isWebhooksModalOpen: boolean;
   isCustomFieldsModalOpen: boolean;
   isThemeStudioOpen: boolean;
+  // Phase 8 Pomodoro Dock
+  isPomodoroOpen: boolean;
+  pomodoroTargetCardId: string | null;
 
   // Real-Time Co-Presence & Live Typing Indicators
   presences: UserPresence[];
@@ -231,6 +237,19 @@ interface WorkspaceState {
   setWebhooksModalOpen: (open: boolean) => void;
   setCustomFieldsModalOpen: (open: boolean) => void;
   setThemeStudioOpen: (open: boolean) => void;
+  // Phase 8 Pomodoro Dock Actions
+  setPomodoroOpen: (open: boolean) => void;
+  openPomodoroForCard: (cardId: string) => void;
+
+  // Phase 8 Retrospective Actions
+  setRetroItems: (items: RetroItem[]) => void;
+  upsertRetroItem: (item: RetroItem) => void;
+  removeRetroItem: (itemId: string) => void;
+  toggleRetroVote: (itemId: string, userId: string) => void;
+
+  // Phase 8 Card Time Tracking Actions
+  updateCardTimeTracking: (cardId: string, summary: CardTimeTrackingSummary) => void;
+  setCardActiveTimer: (cardId: string, activeTimer: ActiveCardTimer | null) => void;
 
   // Phase 7 Custom Fields, Dependencies & Theme Studio Actions
   updateBoardThemeConfig: (config: BoardThemeConfig) => void;
@@ -315,6 +334,7 @@ function sortBoard(board: Board): Board {
     visibility: board.visibility ?? "WORKSPACE",
     custom_fields: board.custom_fields ?? [],
     theme_config: board.theme_config ?? { ...DEFAULT_THEME_CONFIG },
+    retro_items: [...(board.retro_items ?? [])].sort((a, b) => b.votes - a.votes),
   };
 }
 
@@ -389,6 +409,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isWebhooksModalOpen: false,
   isCustomFieldsModalOpen: false,
   isThemeStudioOpen: false,
+  isPomodoroOpen: false,
+  pomodoroTargetCardId: null,
 
   presences: [
     {
@@ -584,6 +606,127 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setCustomFieldsModalOpen: (isCustomFieldsModalOpen) =>
     set({ isCustomFieldsModalOpen }),
   setThemeStudioOpen: (isThemeStudioOpen) => set({ isThemeStudioOpen }),
+
+  // Phase 8 Pomodoro Dock
+  setPomodoroOpen: (open) => set({ isPomodoroOpen: open }),
+  openPomodoroForCard: (cardId) =>
+    set({ isPomodoroOpen: true, pomodoroTargetCardId: cardId }),
+
+  // Phase 8 Retrospective Actions
+  setRetroItems: (items) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        retro_items: [...items].sort((a, b) => b.votes - a.votes),
+      },
+    })),
+
+  upsertRetroItem: (item) =>
+    set((state) => {
+      const current = state.board.retro_items ?? [];
+      const idx = current.findIndex((r) => r.id === item.id);
+      let next: RetroItem[];
+      if (idx !== -1) {
+        next = [...current];
+        next[idx] = item;
+      } else {
+        next = [item, ...current];
+      }
+      return {
+        board: {
+          ...state.board,
+          retro_items: next.sort((a, b) => b.votes - a.votes),
+        },
+      };
+    }),
+
+  removeRetroItem: (itemId) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        retro_items: (state.board.retro_items ?? []).filter((r) => r.id !== itemId),
+      },
+    })),
+
+  toggleRetroVote: (itemId, userId) =>
+    set((state) => {
+      const current = state.board.retro_items ?? [];
+      const next = current.map((item) => {
+        if (item.id !== itemId) return item;
+        const hasVoted = (item.voted_by_user_ids ?? []).includes(userId);
+        let nextVotedBy: string[];
+        let nextVotes: number;
+        if (hasVoted) {
+          nextVotedBy = item.voted_by_user_ids.filter((id) => id !== userId);
+          nextVotes = Math.max(0, item.votes - 1);
+        } else {
+          nextVotedBy = [...(item.voted_by_user_ids ?? []), userId];
+          nextVotes = item.votes + 1;
+        }
+        return {
+          ...item,
+          votes: nextVotes,
+          voted_by_user_ids: nextVotedBy,
+        };
+      });
+      return {
+        board: {
+          ...state.board,
+          retro_items: next.sort((a, b) => b.votes - a.votes),
+        },
+      };
+    }),
+
+  updateCardTimeTracking: (cardId, summary) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        cards: state.board.cards.map((c) =>
+          c.id === cardId
+            ? { ...c, time_tracking: summary, updated_at: new Date().toISOString() }
+            : c
+        ),
+      },
+    })),
+
+  setCardActiveTimer: (cardId, activeTimer) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        cards: state.board.cards.map((c) => {
+          if (c.id === cardId) {
+            return {
+              ...c,
+              time_tracking: {
+                ...(c.time_tracking ?? {
+                  estimated_seconds: 0,
+                  total_logged_seconds: 0,
+                  active_timer: null,
+                  entries: [],
+                  pomodoro_completed_count: 0,
+                }),
+                active_timer: activeTimer,
+              },
+              updated_at: new Date().toISOString(),
+            };
+          }
+          if (
+            activeTimer &&
+            c.time_tracking?.active_timer?.user_id === activeTimer.user_id
+          ) {
+            return {
+              ...c,
+              time_tracking: {
+                ...c.time_tracking,
+                active_timer: null,
+              },
+              updated_at: new Date().toISOString(),
+            };
+          }
+          return c;
+        }),
+      },
+    })),
 
   updateBoardThemeConfig: (config) =>
     set((state) => ({

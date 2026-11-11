@@ -49,6 +49,7 @@ import {
   UpdateCardRequest,
 } from "@kinetix/contracts";
 import { PRIORITY_STYLES } from "./kanban-board";
+import { CardTimeTrackingSection } from "./card-time-tracking";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import { apiClient } from "@/lib/api-client";
 import {
@@ -166,6 +167,7 @@ export function CardDetailDrawer({
   const linkCardDependency = useWorkspaceStore((s) => s.linkCardDependency);
   const unlinkCardDependency = useWorkspaceStore((s) => s.unlinkCardDependency);
   const addToast = useWorkspaceStore((s) => s.addToast);
+  const openPomodoroForCard = useWorkspaceStore((s) => s.openPomodoroForCard);
 
   const card: Card | null =
     board.cards.find((c) => c.id === selectedCardId) ?? null;
@@ -1219,6 +1221,14 @@ export function CardDetailDrawer({
               )}
             </div>
 
+            {/* Phase 8 Time Tracking & Worklog Section */}
+            <CardTimeTrackingSection
+              card={card}
+              isViewer={isViewer}
+              onUpdateCard={onUpdateCard}
+              onOpenPomodoro={openPomodoroForCard}
+            />
+
             {/* Multiple Named Checklists */}
             {card.checklists.map((cl) => {
               const total = cl.items.length;
@@ -1627,6 +1637,15 @@ export function CardDetailDrawer({
                   Add to card
                 </h5>
                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-1">
+                  <button
+                    type="button"
+                    onClick={() => openPomodoroForCard(card.id)}
+                    className="flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-50/70 px-3 py-2 text-left text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/50"
+                  >
+                    <span>🍅</span>
+                    <span>Focus Timer</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() =>

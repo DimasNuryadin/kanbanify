@@ -47,6 +47,8 @@ import { TableView } from "./table-view";
 import { CalendarView } from "./calendar-view";
 import { AnalyticsView } from "./analytics-view";
 import { DependencyGraphView } from "./dependency-graph-view";
+import { RetroView } from "./retro-view";
+import { PomodoroDock } from "./pomodoro-dock";
 import { CustomFieldsManagerModal } from "./custom-fields-manager-modal";
 import { ThemeStudioDrawer } from "./theme-studio-drawer";
 import { TrelloImportExportModal } from "./trello-import-export-modal";
@@ -1284,6 +1286,8 @@ export function KinetixWorkspace() {
             />
           ) : viewMode === "graph" ? (
             <DependencyGraphView />
+          ) : viewMode === "retro" ? (
+            <RetroView />
           ) : (
             <AnalyticsView
               onOpenImportExport={() => setImportExportModalOpen(true)}
@@ -1373,6 +1377,7 @@ export function KinetixWorkspace() {
       <ShareBoardModal />
       <CustomFieldsManagerModal />
       <ThemeStudioDrawer />
+      <PomodoroDock />
 
       <ButlerToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>

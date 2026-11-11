@@ -99,6 +99,37 @@ import {
   THEME_PRESET_CONFIGS,
   UpdateBoardThemeRequest,
   UpdateCustomFieldDefinitionRequest,
+  // Phase 8 Time Tracking, Pomodoro & Retrospective Contracts
+  ActiveCardTimer,
+  ActiveCardTimerSchema,
+  AIRetroActionItem,
+  AIRetroAnalysisRequest,
+  AIRetroAnalysisResponse,
+  AIRetroAnalysisResponseSchema,
+  AIRetroSuggestedItem,
+  CardTimeTrackingSummary,
+  CardTimeTrackingSummarySchema,
+  ConvertRetroItemToCardRequest,
+  ConvertRetroItemToCardResponse,
+  ConvertRetroItemToCardResponseSchema,
+  CreateRetroItemRequest,
+  DEFAULT_CARD_TIME_TRACKING,
+  LogTimeEntryRequest,
+  PomodoroCompleteRequest,
+  PomodoroMode,
+  PomodoroModeEnum,
+  RetroCategory,
+  RetroCategoryEnum,
+  RetroItem,
+  RetroItemSchema,
+  StartCardTimerRequest,
+  StopCardTimerRequest,
+  TimeEntry,
+  TimeEntrySchema,
+  TimeEntrySource,
+  UpdateRetroItemRequest,
+  VoteRetroItemResponse,
+  VoteRetroItemResponseSchema,
 } from "@kinetix/contracts";
 import { comparePositions, generatePositionBetween } from "./fractional-index";
 
@@ -133,6 +164,106 @@ const MEMBER_ALEX = DEFAULT_BOARD_MEMBERS[0].id;
 const MEMBER_MAYA = DEFAULT_BOARD_MEMBERS[1].id;
 const MEMBER_SAMIR = DEFAULT_BOARD_MEMBERS[2].id;
 const MEMBER_ELENA = DEFAULT_BOARD_MEMBERS[3].id;
+
+export const INITIAL_RETRO_ITEMS: RetroItem[] = [
+  {
+    id: "55555555-5555-4555-8555-555555555551",
+    board_id: SEED_BOARD_ID,
+    category: "WENT_WELL",
+    content: "Zero-downtime database migration executed cleanly on first try with fractional indexing telemetry.",
+    author_id: "88888888-8888-4888-8888-888888888881",
+    author_name: "Alex Rivera",
+    author_initials: "AR",
+    votes: 5,
+    voted_by_user_ids: [
+      "88888888-8888-4888-8888-888888888881",
+      "88888888-8888-4888-8888-888888888882"
+    ],
+    linked_card_id: CARD_1_ID,
+    is_resolved: false,
+    created_at: "2026-11-11T09:00:00.000Z",
+  },
+  {
+    id: "55555555-5555-4555-8555-555555555552",
+    board_id: SEED_BOARD_ID,
+    category: "WENT_WELL",
+    content: "Glassmorphism UI performance is silky smooth with sub-16ms frame render times across theme presets.",
+    author_id: "88888888-8888-4888-8888-888888888882",
+    author_name: "Sarah Connor",
+    author_initials: "SC",
+    votes: 4,
+    voted_by_user_ids: ["88888888-8888-4888-8888-888888888882"],
+    linked_card_id: null,
+    is_resolved: false,
+    created_at: "2026-11-11T09:15:00.000Z",
+  },
+  {
+    id: "55555555-5555-4555-8555-555555555553",
+    board_id: SEED_BOARD_ID,
+    category: "TO_IMPROVE",
+    content: "PR review turnaround time for large architectural PRs created a 2-day bottleneck in QA sign-off.",
+    author_id: "88888888-8888-4888-8888-888888888883",
+    author_name: "Samir Patel",
+    author_initials: "SP",
+    votes: 6,
+    voted_by_user_ids: [
+      "88888888-8888-4888-8888-888888888881",
+      "88888888-8888-4888-8888-888888888883"
+    ],
+    linked_card_id: null,
+    is_resolved: false,
+    created_at: "2026-11-11T09:30:00.000Z",
+  },
+  {
+    id: "55555555-5555-4555-8555-555555555554",
+    board_id: SEED_BOARD_ID,
+    category: "TO_IMPROVE",
+    content: "Time estimates on complex fullstack integration tasks drifted by ~20% without real-time tracking.",
+    author_id: "88888888-8888-4888-8888-888888888881",
+    author_name: "Alex Rivera",
+    author_initials: "AR",
+    votes: 3,
+    voted_by_user_ids: ["88888888-8888-4888-8888-888888888881"],
+    linked_card_id: null,
+    is_resolved: false,
+    created_at: "2026-11-11T09:45:00.000Z",
+  },
+  {
+    id: "55555555-5555-4555-8555-555555555555",
+    board_id: SEED_BOARD_ID,
+    category: "KUDOS",
+    content: "Huge kudos to Elena for catching the edge case with multi-peer WebSocket heartbeat race conditions! 🚀",
+    author_id: "88888888-8888-4888-8888-888888888882",
+    author_name: "Sarah Connor",
+    author_initials: "SC",
+    votes: 7,
+    voted_by_user_ids: [
+      "88888888-8888-4888-8888-888888888881",
+      "88888888-8888-4888-8888-888888888882",
+      "88888888-8888-4888-8888-888888888883"
+    ],
+    linked_card_id: null,
+    is_resolved: false,
+    created_at: "2026-11-11T10:00:00.000Z",
+  },
+  {
+    id: "55555555-5555-4555-8555-555555555556",
+    board_id: SEED_BOARD_ID,
+    category: "ACTION_ITEMS",
+    content: "Establish a dedicated daily 15-minute code review window at 2 PM to eliminate the QA review bottleneck.",
+    author_id: "88888888-8888-4888-8888-888888888883",
+    author_name: "Samir Patel",
+    author_initials: "SP",
+    votes: 8,
+    voted_by_user_ids: [
+      "88888888-8888-4888-8888-888888888881",
+      "88888888-8888-4888-8888-888888888882"
+    ],
+    linked_card_id: null,
+    is_resolved: false,
+    created_at: "2026-11-11T10:15:00.000Z",
+  },
+];
 
 export const DEMO_USERS: AuthUser[] = [
   {
@@ -686,6 +817,53 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 6 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 18000,
+        total_logged_seconds: 16200,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999981",
+            card_id: CARD_1_ID,
+            user_id: MEMBER_ALEX,
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 3600,
+            note: "Implemented base-62 character table & prefix stripper",
+            source: "STOPWATCH",
+            started_at: "2026-11-04T09:00:00.000Z",
+            ended_at: "2026-11-04T10:00:00.000Z",
+            created_at: "2026-11-04T10:00:00.000Z",
+          },
+          {
+            id: "99999999-9999-4999-8999-999999999982",
+            card_id: CARD_1_ID,
+            user_id: MEMBER_ALEX,
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 1500,
+            note: "Completed 25m Pomodoro focus session on boundary ordering checks",
+            source: "POMODORO",
+            started_at: "2026-11-05T11:00:00.000Z",
+            ended_at: "2026-11-05T11:25:00.000Z",
+            created_at: "2026-11-05T11:25:00.000Z",
+          },
+          {
+            id: "99999999-9999-4999-8999-999999999983",
+            card_id: CARD_1_ID,
+            user_id: MEMBER_SAMIR,
+            user_name: "Samir Patel",
+            user_initials: "SP",
+            duration_seconds: 11100,
+            note: "Multi-peer concurrent drag stress tests and property checks",
+            source: "MANUAL",
+            started_at: "2026-11-06T13:00:00.000Z",
+            ended_at: "2026-11-06T16:05:00.000Z",
+            created_at: "2026-11-06T16:05:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 2,
+      },
       updated_at: "2026-11-08T09:10:00.000Z",
     },
     {
@@ -758,6 +936,27 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 12 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 14400,
+        total_logged_seconds: 12600,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999984",
+            card_id: CARD_2_ID,
+            user_id: MEMBER_MAYA,
+            user_name: "Maya Lin",
+            user_initials: "ML",
+            duration_seconds: 12600,
+            note: "Implemented Fastify WebSocket room multiplexing & heartbeats",
+            source: "MANUAL",
+            started_at: "2026-11-06T10:00:00.000Z",
+            ended_at: "2026-11-06T13:30:00.000Z",
+            created_at: "2026-11-06T13:30:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 3,
+      },
       updated_at: "2026-11-08T09:20:00.000Z",
     },
     {
@@ -912,6 +1111,32 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 4 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 14400,
+        total_logged_seconds: 3600,
+        active_timer: {
+          card_id: CARD_3_ID,
+          user_id: "88888888-8888-4888-8888-888888888881",
+          user_name: "Alex Rivera",
+          started_at: "2026-11-11T04:31:11.448Z",
+        },
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999991",
+            card_id: CARD_3_ID,
+            user_id: "88888888-8888-4888-8888-888888888881",
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 3600,
+            note: "Engineered rule condition matching and action dispatching pipeline",
+            source: "STOPWATCH",
+            started_at: "2026-11-10T14:00:00.000Z",
+            ended_at: "2026-11-10T15:00:00.000Z",
+            created_at: "2026-11-10T15:00:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 1,
+      },
       updated_at: "2026-11-08T09:45:00.000Z",
     },
     {
@@ -996,6 +1221,27 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 8 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 7200,
+        total_logged_seconds: 9000,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999992",
+            card_id: CARD_4_ID,
+            user_id: "88888888-8888-4888-8888-888888888882",
+            user_name: "Sarah Connor",
+            user_initials: "SC",
+            duration_seconds: 9000,
+            note: "Implemented HMAC signature generation and payload retry backoff logic",
+            source: "MANUAL",
+            started_at: "2026-11-10T09:00:00.000Z",
+            ended_at: "2026-11-10T11:30:00.000Z",
+            created_at: "2026-11-10T11:30:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 2,
+      },
       updated_at: "2026-11-08T10:00:00.000Z",
     },
     {
@@ -1104,6 +1350,27 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 16 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 10800,
+        total_logged_seconds: 7200,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999993",
+            card_id: CARD_5_ID,
+            user_id: MEMBER_MAYA,
+            user_name: "Maya Lin",
+            user_initials: "ML",
+            duration_seconds: 7200,
+            note: "Created SVG burndown chart curves and WIP bottleneck monitors",
+            source: "STOPWATCH",
+            started_at: "2026-11-09T10:00:00.000Z",
+            ended_at: "2026-11-09T12:00:00.000Z",
+            created_at: "2026-11-09T12:00:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 1,
+      },
       updated_at: "2026-11-08T10:05:00.000Z",
     },
     {
@@ -1176,6 +1443,27 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 5 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 7200,
+        total_logged_seconds: 3600,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999994",
+            card_id: CARD_6_ID,
+            user_id: MEMBER_ELENA,
+            user_name: "Elena Rostova",
+            user_initials: "ER",
+            duration_seconds: 3600,
+            note: "Drafted test plan for WebSocket heartbeat disconnections",
+            source: "MANUAL",
+            started_at: "2026-11-10T08:00:00.000Z",
+            ended_at: "2026-11-10T09:00:00.000Z",
+            created_at: "2026-11-10T09:00:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 1,
+      },
       updated_at: "2026-11-08T10:12:00.000Z",
     },
     {
@@ -1246,6 +1534,13 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 10 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 14400,
+        total_logged_seconds: 0,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 0,
+      },
       updated_at: "2026-11-08T10:15:00.000Z",
     },
     {
@@ -1281,6 +1576,13 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 20 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 7200,
+        total_logged_seconds: 0,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 0,
+      },
       updated_at: "2026-11-08T10:20:00.000Z",
     },
     {
@@ -1316,9 +1618,17 @@ export const INITIAL_SEED_BOARD: Board = {
         { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 3 },
         { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 3600,
+        total_logged_seconds: 0,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 0,
+      },
       updated_at: "2026-11-08T10:25:00.000Z",
     },
   ],
+  retro_items: INITIAL_RETRO_ITEMS,
   activities: [
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
@@ -1457,6 +1767,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_archived: false,
       is_watching: true,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:00:00.000Z",
     },
     {
@@ -1484,6 +1795,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:10:00.000Z",
     },
     {
@@ -1511,6 +1823,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_archived: false,
       is_watching: true,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:30:00.000Z",
     },
     {
@@ -1538,6 +1851,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:40:00.000Z",
     },
     {
@@ -1565,6 +1879,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:50:00.000Z",
     },
     {
@@ -1592,9 +1907,11 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T10:00:00.000Z",
     },
   ],
+  retro_items: [],
   activities: [
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0010",
@@ -1705,6 +2022,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_archived: false,
       is_watching: true,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:00:00.000Z",
     },
     {
@@ -1732,6 +2050,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:15:00.000Z",
     },
     {
@@ -1759,6 +2078,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:30:00.000Z",
     },
     {
@@ -1786,6 +2106,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T09:45:00.000Z",
     },
     {
@@ -1813,9 +2134,11 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: "2026-11-08T10:00:00.000Z",
     },
   ],
+  retro_items: [],
   activities: [
     {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0020",
@@ -1842,7 +2165,7 @@ export const INITIAL_SEED_BOARDS = [
   INITIAL_MARKETING_BOARD,
 ];
 
-const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v7";
+const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v8";
 const STORAGE_KEY_WORKSPACES = "kanbanify_mock_workspaces_v6";
 const STORAGE_KEY = "kanbanify_mock_board_v6";
 
@@ -2634,6 +2957,7 @@ export class MockApiService {
       invite_links: [],
       visibility: payload.visibility ?? "WORKSPACE",
       custom_fields: createDefaultCustomFields(boardId),
+      retro_items: [],
       theme_config: { ...DEFAULT_THEME_CONFIG },
     };
 
@@ -2927,6 +3251,7 @@ export class MockApiService {
       is_archived: payload.is_archived ?? false,
       is_watching: payload.is_watching ?? false,
       custom_field_values: payload.custom_field_values ?? [],
+      time_tracking: payload.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING },
       updated_at: new Date().toISOString(),
     });
 
@@ -3084,6 +3409,7 @@ export class MockApiService {
             }))
           : [],
         custom_field_values: keepCustomFields ? [...(existing.custom_field_values ?? [])] : [],
+        time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
         comments: [],
         is_archived: false,
         updated_at: new Date().toISOString(),
@@ -4016,6 +4342,445 @@ export class MockApiService {
     return mergedTheme;
   }
 
+  // --- Phase 8: Card Time Tracking & Stopwatch Endpoints ---
+  async startCardTimer(
+    cardId: string,
+    req?: StartCardTimerRequest
+  ): Promise<Card> {
+    this.loadState();
+    const userId = req?.user_id || "88888888-8888-4888-8888-888888888881";
+    const userName = req?.user_name || "Alex Rivera";
+
+    for (const board of this.boards.values()) {
+      let changed = false;
+      for (const card of board.cards) {
+        if (card.time_tracking?.active_timer && card.time_tracking.active_timer.user_id === userId) {
+          const timer = card.time_tracking.active_timer;
+          const duration = Math.max(1, Math.round((Date.now() - new Date(timer.started_at).getTime()) / 1000));
+          const entry: TimeEntry = {
+            id: crypto.randomUUID(),
+            card_id: card.id,
+            user_id: timer.user_id,
+            user_name: timer.user_name,
+            user_initials: timer.user_name.split(" ").map((n) => n[0]).join("").slice(0, 4) || "AR",
+            duration_seconds: duration,
+            note: "Auto-committed on starting new timer",
+            source: "STOPWATCH",
+            started_at: timer.started_at,
+            ended_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+          };
+          card.time_tracking = {
+            ...card.time_tracking,
+            total_logged_seconds: card.time_tracking.total_logged_seconds + duration,
+            active_timer: null,
+            entries: [entry, ...card.time_tracking.entries],
+          };
+          card.updated_at = new Date().toISOString();
+          changed = true;
+        }
+      }
+      if (changed) this.saveState(board);
+    }
+
+    for (const board of this.boards.values()) {
+      const card = board.cards.find((c) => c.id === cardId);
+      if (card) {
+        const activeTimer: ActiveCardTimer = {
+          card_id: cardId,
+          user_id: userId,
+          user_name: userName,
+          started_at: new Date().toISOString(),
+        };
+        const currentTt = card.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING };
+        card.time_tracking = {
+          ...currentTt,
+          active_timer: activeTimer,
+        };
+        card.updated_at = new Date().toISOString();
+        this.saveState(board);
+        return card;
+      }
+    }
+    throw new Error(`Card not found: ${cardId}`);
+  }
+
+  async stopCardTimer(
+    cardId: string,
+    req?: StopCardTimerRequest
+  ): Promise<Card> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const card = board.cards.find((c) => c.id === cardId);
+      if (card) {
+        const currentTt = card.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING };
+        const timer = currentTt.active_timer;
+        if (!timer) return card;
+
+        const duration = Math.max(1, Math.round((Date.now() - new Date(timer.started_at).getTime()) / 1000));
+        const entry: TimeEntry = {
+          id: crypto.randomUUID(),
+          card_id: cardId,
+          user_id: timer.user_id,
+          user_name: timer.user_name,
+          user_initials: timer.user_name.split(" ").map((n) => n[0]).join("").slice(0, 4) || "AR",
+          duration_seconds: duration,
+          note: req?.note || "Stopped live stopwatch",
+          source: "STOPWATCH",
+          started_at: timer.started_at,
+          ended_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        };
+
+        card.time_tracking = {
+          ...currentTt,
+          total_logged_seconds: currentTt.total_logged_seconds + duration,
+          active_timer: null,
+          entries: [entry, ...currentTt.entries],
+        };
+        card.updated_at = new Date().toISOString();
+        this.saveState(board);
+        return card;
+      }
+    }
+    throw new Error(`Card not found: ${cardId}`);
+  }
+
+  async logTimeEntry(
+    cardId: string,
+    req: LogTimeEntryRequest
+  ): Promise<Card> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const card = board.cards.find((c) => c.id === cardId);
+      if (card) {
+        const currentTt = card.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING };
+        let entries = [...currentTt.entries];
+        let totalLogged = currentTt.total_logged_seconds;
+        let estimated = currentTt.estimated_seconds;
+
+        if (req.estimated_seconds !== undefined) {
+          estimated = req.estimated_seconds;
+        }
+
+        if (req.duration_seconds && req.duration_seconds > 0) {
+          const duration = req.duration_seconds;
+          const startedAt = req.started_at || new Date(Date.now() - duration * 1000).toISOString();
+          const endedAt = req.ended_at || new Date().toISOString();
+          const entry: TimeEntry = {
+            id: crypto.randomUUID(),
+            card_id: cardId,
+            user_id: "88888888-8888-4888-8888-888888888881",
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: duration,
+            note: req.note || "Logged manual worklog",
+            source: req.source || "MANUAL",
+            started_at: startedAt,
+            ended_at: endedAt,
+            created_at: new Date().toISOString(),
+          };
+          entries = [entry, ...entries];
+          totalLogged += duration;
+        }
+
+        card.time_tracking = {
+          ...currentTt,
+          estimated_seconds: estimated,
+          total_logged_seconds: totalLogged,
+          entries,
+        };
+        card.updated_at = new Date().toISOString();
+        this.saveState(board);
+        return card;
+      }
+    }
+    throw new Error(`Card not found: ${cardId}`);
+  }
+
+  async deleteTimeEntry(
+    cardId: string,
+    entryId: string
+  ): Promise<Card> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const card = board.cards.find((c) => c.id === cardId);
+      if (card) {
+        const currentTt = card.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING };
+        const nextEntries = currentTt.entries.filter((e) => e.id !== entryId);
+        const nextTotal = nextEntries.reduce((sum, e) => sum + e.duration_seconds, 0);
+
+        card.time_tracking = {
+          ...currentTt,
+          total_logged_seconds: nextTotal,
+          entries: nextEntries,
+        };
+        card.updated_at = new Date().toISOString();
+        this.saveState(board);
+        return card;
+      }
+    }
+    throw new Error(`Card not found: ${cardId}`);
+  }
+
+  async completePomodoro(
+    req: PomodoroCompleteRequest
+  ): Promise<Card> {
+    this.loadState();
+    const duration = req.duration_seconds || 1500;
+    for (const board of this.boards.values()) {
+      const card = board.cards.find((c) => c.id === req.card_id);
+      if (card) {
+        const currentTt = card.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING };
+        const entry: TimeEntry = {
+          id: crypto.randomUUID(),
+          card_id: card.id,
+          user_id: "88888888-8888-4888-8888-888888888881",
+          user_name: "Alex Rivera",
+          user_initials: "AR",
+          duration_seconds: duration,
+          note: req.note || "Completed 25m Pomodoro focus session",
+          source: "POMODORO",
+          started_at: new Date(Date.now() - duration * 1000).toISOString(),
+          ended_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        };
+
+        card.time_tracking = {
+          ...currentTt,
+          total_logged_seconds: currentTt.total_logged_seconds + duration,
+          pomodoro_completed_count: (currentTt.pomodoro_completed_count ?? 0) + 1,
+          entries: [entry, ...currentTt.entries],
+        };
+        card.updated_at = new Date().toISOString();
+        this.saveState(board);
+        return card;
+      }
+    }
+    throw new Error(`Card not found: ${req.card_id}`);
+  }
+
+  // --- Phase 8: Retrospective Board Endpoints ---
+  async getRetroItems(boardId: string): Promise<RetroItem[]> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    return [...(board.retro_items ?? [])].sort((a, b) => b.votes - a.votes);
+  }
+
+  async createRetroItem(
+    boardId: string,
+    req: CreateRetroItemRequest
+  ): Promise<RetroItem> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const newItem: RetroItem = {
+      id: crypto.randomUUID(),
+      board_id: boardId,
+      category: req.category,
+      content: req.content,
+      author_id: req.author_id || "88888888-8888-4888-8888-888888888881",
+      author_name: req.author_name || "Alex Rivera",
+      author_initials: req.author_initials || "AR",
+      votes: 0,
+      voted_by_user_ids: [],
+      linked_card_id: null,
+      is_resolved: false,
+      created_at: new Date().toISOString(),
+    };
+
+    const updatedBoard: Board = {
+      ...board,
+      retro_items: [newItem, ...(board.retro_items ?? [])],
+    };
+    this.saveState(updatedBoard);
+    return newItem;
+  }
+
+  async updateRetroItem(
+    itemId: string,
+    req: UpdateRetroItemRequest
+  ): Promise<RetroItem> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const idx = (board.retro_items ?? []).findIndex((r) => r.id === itemId);
+      if (idx !== -1) {
+        const item = board.retro_items[idx];
+        const updated: RetroItem = {
+          ...item,
+          ...(req.content !== undefined ? { content: req.content } : {}),
+          ...(req.category !== undefined ? { category: req.category } : {}),
+          ...(req.is_resolved !== undefined ? { is_resolved: req.is_resolved } : {}),
+        };
+        const nextItems = [...board.retro_items];
+        nextItems[idx] = updated;
+        this.saveState({
+          ...board,
+          retro_items: nextItems,
+        });
+        return updated;
+      }
+    }
+    throw new Error(`Retro item not found: ${itemId}`);
+  }
+
+  async deleteRetroItem(itemId: string): Promise<{ id: string; deleted: boolean }> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const idx = (board.retro_items ?? []).findIndex((r) => r.id === itemId);
+      if (idx !== -1) {
+        const nextItems = board.retro_items.filter((r) => r.id !== itemId);
+        this.saveState({
+          ...board,
+          retro_items: nextItems,
+        });
+        return { id: itemId, deleted: true };
+      }
+    }
+    return { id: itemId, deleted: false };
+  }
+
+  async voteRetroItem(
+    itemId: string,
+    userId: string = "88888888-8888-4888-8888-888888888881"
+  ): Promise<VoteRetroItemResponse> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const idx = (board.retro_items ?? []).findIndex((r) => r.id === itemId);
+      if (idx !== -1) {
+        const item = board.retro_items[idx];
+        const hasVoted = (item.voted_by_user_ids ?? []).includes(userId);
+        let nextVotedBy: string[];
+        let nextVotes: number;
+
+        if (hasVoted) {
+          nextVotedBy = item.voted_by_user_ids.filter((id) => id !== userId);
+          nextVotes = Math.max(0, item.votes - 1);
+        } else {
+          nextVotedBy = [...(item.voted_by_user_ids ?? []), userId];
+          nextVotes = item.votes + 1;
+        }
+
+        const updated: RetroItem = {
+          ...item,
+          votes: nextVotes,
+          voted_by_user_ids: nextVotedBy,
+        };
+        const nextItems = [...board.retro_items];
+        nextItems[idx] = updated;
+        this.saveState({
+          ...board,
+          retro_items: nextItems,
+        });
+        return { retro_item: updated, has_voted: !hasVoted };
+      }
+    }
+    throw new Error(`Retro item not found: ${itemId}`);
+  }
+
+  async convertRetroItemToCard(
+    itemId: string,
+    req: ConvertRetroItemToCardRequest
+  ): Promise<ConvertRetroItemToCardResponse> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const retroItem = (board.retro_items ?? []).find((r) => r.id === itemId);
+      if (retroItem) {
+        const targetColId = req.target_column_id || board.columns[0]?.id || COL_BACKLOG_ID;
+        const colCards = board.cards.filter((c) => c.column_id === targetColId && !c.is_archived);
+        const lastCard = colCards[colCards.length - 1];
+        const position = lastCard ? generatePositionBetween(lastCard.position, undefined) : "a0";
+
+        const newCard: Card = CardSchema.parse({
+          id: crypto.randomUUID(),
+          board_id: board.id,
+          column_id: targetColId,
+          title: retroItem.content,
+          description: `Converted from Sprint Retrospective (${retroItem.category}) note by ${retroItem.author_name}.\n\nOriginal upvotes: ${retroItem.votes}`,
+          position,
+          priority: req.priority || "MEDIUM",
+          story_points: req.story_points ?? null,
+          tags: ["retro-action-item"],
+          subtasks: [],
+          blocked_by_card_ids: [],
+          due_date: null,
+          start_date: null,
+          cover: { type: "none", value: null, size: "normal" },
+          label_ids: [],
+          member_ids: [retroItem.author_id],
+          checklists: [],
+          comments: [],
+          attachments: [],
+          is_due_complete: false,
+          is_archived: false,
+          is_watching: false,
+          custom_field_values: [],
+          time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
+          updated_at: new Date().toISOString(),
+        });
+
+        const updatedRetroItem: RetroItem = {
+          ...retroItem,
+          linked_card_id: newCard.id,
+        };
+
+        const updatedBoard: Board = {
+          ...board,
+          cards: [...board.cards, newCard],
+          retro_items: board.retro_items.map((r) => (r.id === itemId ? updatedRetroItem : r)),
+        };
+
+        this.saveState(updatedBoard);
+        return {
+          retro_item: updatedRetroItem,
+          card: newCard,
+        };
+      }
+    }
+    throw new Error(`Retro item not found: ${itemId}`);
+  }
+
+  async synthesizeRetroAI(boardId: string): Promise<AIRetroAnalysisResponse> {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const board = await this.getBoard(boardId);
+    const analytics = computeBoardAnalyticsFromBoard(board);
+
+    return AIRetroAnalysisResponseSchema.parse({
+      sprint_morale_score: 88,
+      estimation_accuracy_summary: `Team logged ${analytics.total_logged_hours}h against ${analytics.total_estimated_hours}h estimated. High estimation accuracy within healthy agile variance limits (+/- 15%).`,
+      key_themes: [
+        "High delivery velocity on real-time WebSockets and fractional indexing",
+        "PR code review bottlenecks delayed QA handoff for 2 days",
+        "Need clearer time estimation guidelines for multi-service tasks",
+      ],
+      suggested_retro_items: [
+        {
+          category: "ACTION_ITEMS",
+          content: "Establish a dedicated daily 15-minute code review window at 2 PM to eliminate QA bottleneck.",
+        },
+        {
+          category: "TO_IMPROVE",
+          content: "Break down PRs larger than 400 lines into incremental staged releases.",
+        },
+      ],
+      recommended_action_items: [
+        {
+          title: "Automate PR Review Reminders on Slack & Discord",
+          priority: "HIGH",
+          story_points: 2,
+        },
+        {
+          title: "Define Standard Estimation Benchmarks for Schema Migrations",
+          priority: "MEDIUM",
+          story_points: 3,
+        },
+        {
+          title: "Implement Automated WebSocket Heartbeat Flakiness Test",
+          priority: "MEDIUM",
+          story_points: 2,
+        },
+      ],
+    });
+  }
 }
 
 export function computeBoardAnalyticsFromBoard(board: Board): BoardAnalytics {
@@ -4242,6 +5007,19 @@ export function computeBoardAnalyticsFromBoard(board: Board): BoardAnalytics {
     }
   );
 
+  const totalEstimatedSeconds = activeCards.reduce(
+    (sum, c) => sum + (c.time_tracking?.estimated_seconds ?? 0),
+    0
+  );
+  const totalLoggedSeconds = activeCards.reduce(
+    (sum, c) => sum + (c.time_tracking?.total_logged_seconds ?? 0),
+    0
+  );
+  const totalPomodorosCompleted = activeCards.reduce(
+    (sum, c) => sum + (c.time_tracking?.pomodoro_completed_count ?? 0),
+    0
+  );
+
   return BoardAnalyticsSchema.parse({
     board_id: board.id,
     total_cards: totalCards,
@@ -4259,6 +5037,9 @@ export function computeBoardAnalyticsFromBoard(board: Board): BoardAnalytics {
     cards_by_priority: cardsByPriority,
     cards_by_label: cardsByLabel,
     burndown_series: burndownSeries,
+    total_estimated_hours: Number((totalEstimatedSeconds / 3600).toFixed(1)),
+    total_logged_hours: Number((totalLoggedSeconds / 3600).toFixed(1)),
+    total_pomodoros_completed: totalPomodorosCompleted,
   });
 }
 

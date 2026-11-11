@@ -9,6 +9,7 @@ import {
   Bot,
   CheckCircle2,
   CheckSquare,
+  Clock,
   Download,
   Flame,
   Gauge,
@@ -137,6 +138,31 @@ export function AnalyticsView({ onOpenImportExport }: AnalyticsViewProps) {
   const localAnalytics = useMemo(
     () => computeBoardAnalyticsFromBoard(board),
     [board]
+  );
+
+  const totalLoggedSec = useMemo(
+    () =>
+      board.cards.reduce(
+        (acc, c) => acc + (c.time_tracking?.total_logged_seconds ?? 0),
+        0
+      ),
+    [board.cards]
+  );
+  const totalEstimatedSec = useMemo(
+    () =>
+      board.cards.reduce(
+        (acc, c) => acc + (c.time_tracking?.estimated_seconds ?? 0),
+        0
+      ),
+    [board.cards]
+  );
+  const totalPomodoros = useMemo(
+    () =>
+      board.cards.reduce(
+        (acc, c) => acc + (c.time_tracking?.pomodoro_completed_count ?? 0),
+        0
+      ),
+    [board.cards]
   );
 
   const [remoteAnalytics, setRemoteAnalytics] =
@@ -325,8 +351,8 @@ export function AnalyticsView({ onOpenImportExport }: AnalyticsViewProps) {
         </div>
       </div>
 
-      {/* 1. TOP KPI METRIC CARDS (5 CARDS) */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      {/* 1. TOP KPI METRIC CARDS (6 CARDS) */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {/* Card 1: Completion Rate (Progress Ring + Bar) */}
         <div className="relative overflow-hidden rounded-2xl border border-zinc-200/80 bg-white/95 p-4 shadow-xs backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-900/90">
           <div className="flex items-start justify-between gap-2">
@@ -545,6 +571,56 @@ export function AnalyticsView({ onOpenImportExport }: AnalyticsViewProps) {
               enabled rules
             </span>
           </p>
+        </div>
+
+        {/* Card 6: Time Tracking & Pomodoro Focus Calibration */}
+        <div className="relative overflow-hidden rounded-2xl border border-rose-500/30 bg-white/95 p-4 shadow-xs backdrop-blur-md dark:border-rose-500/25 dark:bg-zinc-900/90">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[11px] font-semibold tracking-wider text-rose-700 uppercase dark:text-rose-300">
+                Time Tracking &amp; Focus
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-baseline gap-1.5">
+                <span className="font-mono text-2xl font-bold text-zinc-900 dark:text-white">
+                  {(totalLoggedSec / 3600).toFixed(1)}h
+                </span>
+                {totalEstimatedSec > 0 && (
+                  <span className="font-mono text-xs text-zinc-400">
+                    / {(totalEstimatedSec / 3600).toFixed(1)}h
+                  </span>
+                )}
+                <span className="rounded-md bg-rose-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-700 dark:text-rose-300">
+                  🍅 x{totalPomodoros}
+                </span>
+              </div>
+            </div>
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+              <Clock className="h-5 w-5" />
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-rose-500 to-amber-500 transition-all duration-500"
+                style={{
+                  width: `${
+                    totalEstimatedSec > 0
+                      ? Math.min(
+                          100,
+                          Math.round((totalLoggedSec / totalEstimatedSec) * 100)
+                        )
+                      : 100
+                  }%`,
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+              {totalEstimatedSec > 0
+                ? `${Math.round((totalLoggedSec / totalEstimatedSec) * 100)}% of sprint estimation logged`
+                : "Continuous focus time logged"}
+            </p>
+          </div>
         </div>
       </div>
 

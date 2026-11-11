@@ -23,6 +23,10 @@ import {
   UserPresence,
   UserPresenceSchema,
   WSMessageSchema,
+  ActiveCardTimer,
+  ActiveCardTimerSchema,
+  RetroItem,
+  RetroItemSchema,
 } from "@kinetix/contracts";
 import { z } from "zod";
 
@@ -57,6 +61,11 @@ export interface WSBoardHandlers {
   onUserJoined?: (presence: UserPresence) => void;
   onUserLeft?: (userId: string) => void;
   onUserTyping?: (presence: UserPresence) => void;
+  // Phase 8 Card Time Tracking & Retrospective Events
+  onTimerUpdated?: (data: { card_id: string; active_timer: ActiveCardTimer | null; updated_at?: string }) => void;
+  onRetroItemCreated?: (item: RetroItem) => void;
+  onRetroItemUpdated?: (item: RetroItem) => void;
+  onRetroItemDeleted?: (data: { id: string; board_id?: string }) => void;
 }
 
 export class BoardWebSocketClient {
@@ -308,6 +317,33 @@ export class BoardWebSocketClient {
                 if (nested.success) {
                   this.handlers?.onBoardImported?.(nested.data);
                 }
+              }
+              break;
+            }
+            case "TIMER_UPDATED": {
+              if (data && typeof data === "object" && "card_id" in data) {
+                const timerData = data as { card_id: string; active_timer: ActiveCardTimer | null; updated_at?: string };
+                this.handlers?.onTimerUpdated?.(timerData);
+              }
+              break;
+            }
+            case "RETRO_ITEM_CREATED": {
+              const item = RetroItemSchema.safeParse(data);
+              if (item.success) {
+                this.handlers?.onRetroItemCreated?.(item.data);
+              }
+              break;
+            }
+            case "RETRO_ITEM_UPDATED": {
+              const item = RetroItemSchema.safeParse(data);
+              if (item.success) {
+                this.handlers?.onRetroItemUpdated?.(item.data);
+              }
+              break;
+            }
+            case "RETRO_ITEM_DELETED": {
+              if (data && typeof data === "object" && "id" in data) {
+                this.handlers?.onRetroItemDeleted?.(data as { id: string; board_id?: string });
               }
               break;
             }
