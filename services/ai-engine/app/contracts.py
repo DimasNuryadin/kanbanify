@@ -528,6 +528,67 @@ class AICriticalPathResponseSchema(BaseModel):
     unblocking_recommendations: list[str] = Field(default_factory=list)
 
 
+# Phase 8 Sprint Retrospective Facilitator Fallback Schemas
+class RetroCategoryEnum(str, Enum):
+    WENT_WELL = "WENT_WELL"
+    TO_IMPROVE = "TO_IMPROVE"
+    KUDOS = "KUDOS"
+    ACTION_ITEMS = "ACTION_ITEMS"
+
+
+class RetroItemSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    category: RetroCategoryEnum
+    content: str = Field(..., min_length=1)
+    author_id: str = Field(..., min_length=1)
+    author_name: str = Field(..., min_length=1, max_length=120)
+    author_initials: str = Field(..., min_length=1, max_length=4)
+    votes: int = Field(default=0, ge=0)
+    voted_by_user_ids: list[str] = Field(default_factory=list)
+    linked_card_id: str | None = None
+    is_resolved: bool = False
+    created_at: datetime | str
+
+
+class AIRetroSuggestedItemSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    category: RetroCategoryEnum
+    content: str = Field(..., min_length=1)
+
+
+class AIRetroActionItemSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str = Field(..., min_length=1)
+    priority: PriorityEnum
+    story_points: int = Field(..., ge=0, le=100)
+
+
+class AIRetroAnalysisRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1)
+    retro_items: list[RetroItemSchema] = Field(default_factory=list)
+    completed_cards_count: int = Field(default=0, ge=0)
+    overdue_cards_count: int = Field(default=0, ge=0)
+    total_estimated_hours: float = Field(default=0.0, ge=0)
+    total_logged_hours: float = Field(default=0.0, ge=0)
+
+
+class AIRetroAnalysisResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    sprint_morale_score: float = Field(..., ge=0, le=100)
+    estimation_accuracy_summary: str = Field(..., min_length=1)
+    key_themes: list[str] = Field(default_factory=list)
+    suggested_retro_items: list[AIRetroSuggestedItemSchema] = Field(default_factory=list)
+    recommended_action_items: list[AIRetroActionItemSchema] = Field(default_factory=list)
+
+
 # Bind directly to `packages/contracts/schemas.py` when present in the monorepo
 _SHARED_SCHEMAS_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent
@@ -598,6 +659,12 @@ if _SHARED_SCHEMAS_PATH.is_file():
         CriticalPathBlockerCardSchema = _module.CriticalPathBlockerCardSchema  # type: ignore[misc]
         AICriticalPathRequestSchema = _module.AICriticalPathRequestSchema  # type: ignore[misc]
         AICriticalPathResponseSchema = _module.AICriticalPathResponseSchema  # type: ignore[misc]
+        RetroCategoryEnum = getattr(_module, "RetroCategoryEnum", RetroCategoryEnum)  # type: ignore[misc]
+        RetroItemSchema = getattr(_module, "RetroItemSchema", RetroItemSchema)  # type: ignore[misc]
+        AIRetroSuggestedItemSchema = getattr(_module, "AIRetroSuggestedItemSchema", AIRetroSuggestedItemSchema)  # type: ignore[misc]
+        AIRetroActionItemSchema = getattr(_module, "AIRetroActionItemSchema", AIRetroActionItemSchema)  # type: ignore[misc]
+        AIRetroAnalysisRequestSchema = getattr(_module, "AIRetroAnalysisRequestSchema", AIRetroAnalysisRequestSchema)  # type: ignore[misc]
+        AIRetroAnalysisResponseSchema = getattr(_module, "AIRetroAnalysisResponseSchema", AIRetroAnalysisResponseSchema)  # type: ignore[misc]
 
 
 _DEFAULT_COLOR_NAMES: dict[str, str] = {
@@ -832,6 +899,11 @@ AIPermissionAuditResponseSchema.model_rebuild()
 BoardDependencyGraphSchema.model_rebuild()
 AICriticalPathRequestSchema.model_rebuild()
 AICriticalPathResponseSchema.model_rebuild()
+AIRetroSuggestedItemSchema.model_rebuild()
+AIRetroActionItemSchema.model_rebuild()
+AIRetroAnalysisRequestSchema.model_rebuild()
+AIRetroAnalysisResponseSchema.model_rebuild()
+RetroItemSchema.model_rebuild()
 
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
@@ -877,6 +949,13 @@ CriticalPathBlockerCard = CriticalPathBlockerCardSchema
 AICriticalPathRequest = AICriticalPathRequestSchema
 AICriticalPathResponse = AICriticalPathResponseSchema
 
+AIRetroSuggestedItem = AIRetroSuggestedItemSchema
+AIRetroActionItem = AIRetroActionItemSchema
+AIRetroAnalysisRequest = AIRetroAnalysisRequestSchema
+AIRetroAnalysisResponse = AIRetroAnalysisResponseSchema
+RetroItem = RetroItemSchema
+RetroCategory = RetroCategoryEnum
+
 __all__ = [
     "AIAnalyticsReport",
     "AIAnalyticsReportSchema",
@@ -906,6 +985,14 @@ __all__ = [
     "AIPermissionAuditResponseSchema",
     "AIPermissionRiskLevel",
     "AIPermissionRiskLevelEnum",
+    "AIRetroActionItem",
+    "AIRetroActionItemSchema",
+    "AIRetroAnalysisRequest",
+    "AIRetroAnalysisRequestSchema",
+    "AIRetroAnalysisResponse",
+    "AIRetroAnalysisResponseSchema",
+    "AIRetroSuggestedItem",
+    "AIRetroSuggestedItemSchema",
     "AISuggestCardEnrichmentRequest",
     "AISuggestCardEnrichmentRequestSchema",
     "AISuggestCardEnrichmentResponse",
@@ -962,6 +1049,10 @@ __all__ = [
     "PriorityEnum",
     "PriorityMetric",
     "PriorityMetricSchema",
+    "RetroCategory",
+    "RetroCategoryEnum",
+    "RetroItem",
+    "RetroItemSchema",
     "SprintHealthStatus",
     "SprintHealthStatusEnum",
     "StandardErrorSchema",

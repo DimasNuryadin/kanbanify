@@ -26,6 +26,10 @@ from app.contracts import (
     AIParseAutomationResponseSchema,
     AIPermissionAuditResponseSchema,
     AIPermissionRiskLevelEnum,
+    AIRetroActionItemSchema,
+    AIRetroAnalysisRequestSchema,
+    AIRetroAnalysisResponseSchema,
+    AIRetroSuggestedItemSchema,
     AISuggestCardEnrichmentResponseSchema,
     AISummaryNotificationRequestSchema,
     AISummaryNotificationResponseSchema,
@@ -34,6 +38,8 @@ from app.contracts import (
     HealthCheckResponseSchema,
     LabelColorEnum,
     PriorityEnum,
+    RetroCategoryEnum,
+    RetroItemSchema,
     SprintHealthStatusEnum,
     StandardErrorSchema,
 )
@@ -2683,6 +2689,342 @@ def test_analyze_dependencies_live_llm_mode_and_error_fallback() -> None:
             assert "1 card sits on the critical path" in fallback_body["risk_summary"]
             assert fallback_body["critical_path_titles"] == ["Implement OAuth2 PKCE flow"]
             assert 3 <= len(fallback_body["unblocking_recommendations"]) <= 5
+
+
+# ============================================================================
+# 8. SPRINT RETROSPECTIVE SYNTHESIZER TESTS (`POST /internal/v1/synthesize-retro`)
+# ============================================================================
+
+
+def test_synthesize_retro_missing_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/synthesize-retro without X-Internal-Token returns 401 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        json={
+            "board_title": "Sprint 8 — Retrospective",
+            "retro_items": [],
+            "completed_cards_count": 10,
+            "overdue_cards_count": 0,
+            "total_estimated_hours": 40.0,
+            "total_logged_hours": 40.0,
+        },
+    )
+    assert res.status_code == 401
+    err = StandardErrorSchema.model_validate(res.json())
+    assert err.error.code.value == "UNAUTHORIZED"
+
+
+def test_synthesize_retro_invalid_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/synthesize-retro with invalid token returns 401 StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        headers={"X-Internal-Token": "bad_token"},
+        json={
+            "board_title": "Sprint 8 — Retrospective",
+            "retro_items": [],
+        },
+    )
+    assert res.status_code == 401
+    err = StandardErrorSchema.model_validate(res.json())
+    assert err.error.code.value == "UNAUTHORIZED"
+
+
+def test_synthesize_retro_validation_error_returns_400() -> None:
+    """Verify invalid payload (e.g. empty board_title) returns 400 with StandardErrorSchema."""
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json={
+            "board_title": "",
+        },
+    )
+    assert res.status_code == 400
+    err = StandardErrorSchema.model_validate(res.json())
+    assert err.error.code.value == "VALIDATION_ERROR"
+
+
+def test_synthesize_retro_success_matching_canonical_contract() -> None:
+    """Verify POST /internal/v1/synthesize-retro with sample data returns 200 matching contract 100%."""
+    sample_request = {
+        "board_title": "Sprint 8 — Time Tracking & Retrospectives",
+        "retro_items": [
+            {
+                "id": "55555555-5555-4555-8555-555555555551",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "category": "WENT_WELL",
+                "content": "Zero-downtime migration was executed cleanly.",
+                "author_id": "88888888-8888-4888-8888-888888888881",
+                "author_name": "Alex Rivera",
+                "author_initials": "AR",
+                "votes": 5,
+                "voted_by_user_ids": [],
+                "linked_card_id": None,
+                "is_resolved": False,
+                "created_at": "2026-11-11T09:00:00.000Z",
+            },
+            {
+                "id": "55555555-5555-4555-8555-555555555552",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "category": "TO_IMPROVE",
+                "content": "PR reviews took too long, blocking staging deployment.",
+                "author_id": "88888888-8888-4888-8888-888888888882",
+                "author_name": "Elena Rostova",
+                "author_initials": "ER",
+                "votes": 4,
+                "voted_by_user_ids": [],
+                "linked_card_id": None,
+                "is_resolved": False,
+                "created_at": "2026-11-11T09:10:00.000Z",
+            },
+            {
+                "id": "55555555-5555-4555-8555-555555555553",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "category": "KUDOS",
+                "content": "Kudos to Samir for jumping in on the database schema hotfix!",
+                "author_id": "88888888-8888-4888-8888-888888888881",
+                "author_name": "Alex Rivera",
+                "author_initials": "AR",
+                "votes": 6,
+                "voted_by_user_ids": [],
+                "linked_card_id": None,
+                "is_resolved": False,
+                "created_at": "2026-11-11T09:15:00.000Z",
+            },
+        ],
+        "completed_cards_count": 14,
+        "overdue_cards_count": 1,
+        "total_estimated_hours": 40.0,
+        "total_logged_hours": 42.5,
+    }
+
+    # Validate incoming request structure
+    req_obj = AIRetroAnalysisRequestSchema.model_validate(sample_request)
+    assert all(isinstance(it, RetroItemSchema) for it in req_obj.retro_items)
+
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=sample_request,
+    )
+    assert res.status_code == 200
+    body = res.json()
+
+    # 100% validation against local schemas.py and canonical packages/contracts/schemas.py
+    parsed = AIRetroAnalysisResponseSchema.model_validate(body)
+    canonical = _canonical_contracts.AIRetroAnalysisResponseSchema.model_validate(body)
+
+    assert 0.0 <= parsed.sprint_morale_score <= 100.0
+    assert canonical.sprint_morale_score == parsed.sprint_morale_score
+
+    # Well-calibrated within +-15% (42.5 vs 40.0 = 106%)
+    assert "42.5h against 40.0h estimated" in parsed.estimation_accuracy_summary
+    assert "106% variance" in parsed.estimation_accuracy_summary
+    assert "High estimation accuracy within healthy agile variance limits" in parsed.estimation_accuracy_summary
+
+    assert len(parsed.key_themes) >= 2
+    assert len(parsed.suggested_retro_items) >= 2
+    assert all(isinstance(item, AIRetroSuggestedItemSchema) for item in parsed.suggested_retro_items)
+    assert all(item.category in RetroCategoryEnum for item in parsed.suggested_retro_items)
+
+    # Verify exactly 3 concrete recommended action items
+    assert len(parsed.recommended_action_items) == 3
+    # Top improvement was PR reviews, so action item 1 addresses PR review reminders
+    assert any("PR" in a.title or "Review" in a.title for a in parsed.recommended_action_items)
+    for action in parsed.recommended_action_items:
+        assert isinstance(action, AIRetroActionItemSchema)
+        assert len(action.title) > 0
+        assert action.priority in PriorityEnum
+        assert action.story_points >= 0
+
+
+def test_synthesize_retro_under_estimating_drift() -> None:
+    """Verify under-estimating (logged 60h vs 40h) is flagged and reflected in action items."""
+    req = {
+        "board_title": "Sprint 9 — Complex Backend Build",
+        "retro_items": [
+            {
+                "id": "55555555-5555-4555-8555-555555555554",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "category": "TO_IMPROVE",
+                "content": "Database migration had unexpected lock contention causing hours of debugging.",
+                "author_id": "88888888-8888-4888-8888-888888888881",
+                "author_name": "Alex Rivera",
+                "author_initials": "AR",
+                "votes": 3,
+                "created_at": "2026-11-11T09:00:00.000Z",
+            }
+        ],
+        "completed_cards_count": 8,
+        "overdue_cards_count": 3,
+        "total_estimated_hours": 40.0,
+        "total_logged_hours": 60.0,
+    }
+
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=req,
+    )
+    assert res.status_code == 200
+    parsed = AIRetroAnalysisResponseSchema.model_validate(res.json())
+
+    assert "under-estimating" in parsed.estimation_accuracy_summary
+    assert "150% variance" in parsed.estimation_accuracy_summary
+    assert len(parsed.recommended_action_items) == 3
+    # Action item 2 addresses story point estimation calibration
+    assert any("Estimation" in a.title or "Planning Poker" in a.title for a in parsed.recommended_action_items)
+
+
+def test_synthesize_retro_over_estimating_drift() -> None:
+    """Verify over-estimating (logged 20h vs 40h) is flagged and capacity expansion is advised."""
+    req = {
+        "board_title": "Sprint 10 — Minor Maintenance",
+        "retro_items": [],
+        "completed_cards_count": 12,
+        "overdue_cards_count": 0,
+        "total_estimated_hours": 40.0,
+        "total_logged_hours": 20.0,
+    }
+
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=req,
+    )
+    assert res.status_code == 200
+    parsed = AIRetroAnalysisResponseSchema.model_validate(res.json())
+
+    assert "over-estimating" in parsed.estimation_accuracy_summary
+    assert "50% variance" in parsed.estimation_accuracy_summary
+    assert len(parsed.recommended_action_items) == 3
+    assert any("Capacity" in a.title or "Backlog" in a.title for a in parsed.recommended_action_items)
+
+
+def test_synthesize_retro_empty_retro_and_zero_hours() -> None:
+    """Verify edge case with empty retro items and 0 hours returns valid schema without errors."""
+    req = {
+        "board_title": "Fresh Sprint Board",
+        "retro_items": [],
+        "completed_cards_count": 0,
+        "overdue_cards_count": 0,
+        "total_estimated_hours": 0.0,
+        "total_logged_hours": 0.0,
+    }
+
+    res = client.post(
+        "/internal/v1/synthesize-retro",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=req,
+    )
+    assert res.status_code == 200
+    parsed = AIRetroAnalysisResponseSchema.model_validate(res.json())
+    assert 0.0 <= parsed.sprint_morale_score <= 100.0
+    assert "No estimation or logged hours recorded" in parsed.estimation_accuracy_summary
+    assert len(parsed.recommended_action_items) == 3
+
+
+def test_synthesize_retro_live_llm_mode_and_fallback() -> None:
+    """Verify live LLM mode when valid LLM_API_KEY is present and graceful fallback on LLM failure."""
+    mock_llm_output = {
+        "sprint_morale_score": 92,
+        "estimation_accuracy_summary": "Team logged 42.5h against 40.0h estimated (106% variance). Excellent accuracy.",
+        "key_themes": [
+            "Flawless zero-downtime PostgreSQL migration",
+            "Code review bottlenecks mitigated with peer programming",
+        ],
+        "suggested_retro_items": [
+            {
+                "category": "ACTION_ITEMS",
+                "content": "Configure automated PR reminder bot on Slack.",
+            },
+            {
+                "category": "WENT_WELL",
+                "content": "Pomodoro deep work blocks helped maintain sprint focus.",
+            },
+        ],
+        "recommended_action_items": [
+            {"title": "Automate PR Review Reminders on Slack", "priority": "HIGH", "story_points": 2},
+            {"title": "Calibrate Story Point Estimation with Planning Poker", "priority": "MEDIUM", "story_points": 2},
+            {"title": "Document Pomodoro Best Practices in Handbook", "priority": "LOW", "story_points": 1},
+        ],
+    }
+
+    mock_response = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(mock_llm_output),
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    payload = {
+        "board_title": "Sprint 8 — Retrospective",
+        "retro_items": [
+            {
+                "id": "55555555-5555-4555-8555-555555555551",
+                "board_id": "11111111-1111-4111-8111-111111111111",
+                "category": "WENT_WELL",
+                "content": "Zero-downtime migration was executed cleanly.",
+                "author_id": "88888888-8888-4888-8888-888888888881",
+                "author_name": "Alex Rivera",
+                "author_initials": "AR",
+                "votes": 5,
+                "created_at": "2026-11-11T09:00:00.000Z",
+            }
+        ],
+        "completed_cards_count": 14,
+        "overdue_cards_count": 1,
+        "total_estimated_hours": 40.0,
+        "total_logged_hours": 42.5,
+    }
+
+    # 1. Test live LLM orchestration path
+    with patch("app.retro_synthesizer.get_settings") as mock_settings:
+        from app.config import Settings
+        mock_settings.return_value = Settings(
+            llm_api_key="sk-real-valid-api-key-for-testing",
+        )
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            res = client.post(
+                "/internal/v1/synthesize-retro",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=payload,
+            )
+            assert res.status_code == 200
+            body = res.json()
+            assert body["sprint_morale_score"] == 92
+            assert "106% variance" in body["estimation_accuracy_summary"]
+            assert len(body["key_themes"]) == 2
+            assert len(body["recommended_action_items"]) == 3
+            assert body["recommended_action_items"][0]["title"] == "Automate PR Review Reminders on Slack"
+
+        # 2. Test fallback on network / upstream LLM error
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(side_effect=httpx.ConnectError("OpenAI unreachable")),
+        ):
+            fallback_res = client.post(
+                "/internal/v1/synthesize-retro",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=payload,
+            )
+            assert fallback_res.status_code == 200
+            fallback_body = fallback_res.json()
+            assert 0.0 <= fallback_body["sprint_morale_score"] <= 100.0
+            assert "42.5h against 40.0h estimated" in fallback_body["estimation_accuracy_summary"]
+            assert len(fallback_body["recommended_action_items"]) == 3
+
 
 
 
