@@ -11,7 +11,7 @@ Kanbanify is a polyglot monorepo combining an optimistic real-time Multi-Board K
 ```mermaid
 flowchart LR
     subgraph Client ["apps/web (Next.js 16 — Port 3000)"]
-        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics + 1-Click Role Switcher + Share Modal"]
+        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics / Graph + Custom Fields + Theme Studio"]
         Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer & Auth/RBAC Store"]
     end
 
@@ -19,6 +19,9 @@ flowchart LR
         REST["REST API (/api/v1/*)\nZod Contract Validation & RBAC Guard"]
         Auth["Auth Service & JWT\nRegister, Login, Demo Users & Token Verification"]
         Invites["Shareable Invites Service\nCreate, Preview & Join Board Links"]
+        CustomFields["Custom Fields Service\nCRUD Definitions, Dropdowns & Value Assignments"]
+        DepGraph["Dependency Graph Service\nCycle-Safe Linking & DAG Engine"]
+        Theme["Theme Studio Service\nPresets & Glassmorphism Persistence"]
         Butler["Butler Automation Engine\nRuntime Trigger & Action Executor"]
         Analytics["Analytics & Data Portability\nBurndown + Trello JSON Import + CSV/JSON Export"]
         Presence["Presence & Typing Hub\nGET/POST /presence & WS sync"]
@@ -33,6 +36,7 @@ flowchart LR
         BoardAnalyzer["POST /internal/v1/analyze-board\nAI Executive Sprint Health & Bottleneck Analyzer"]
         Auditor["POST /internal/v1/audit-permissions\nAI Workspace Access & Permission Auditor"]
         Formatter["POST /internal/v1/format-notification\nAI ChatOps Digest & Notification Formatter"]
+        CriticalPath["POST /internal/v1/analyze-dependencies\nAI Critical Path & Bottleneck Analyzer"]
     end
 
     subgraph Infra ["Infrastructure (Docker Compose)"]
@@ -45,12 +49,18 @@ flowchart LR
     Store <-- "Live Events (WS :8000)" --> WS
     REST --> Auth
     REST --> Invites
+    REST --> CustomFields
+    REST --> DepGraph
+    REST --> Theme
     REST --> Butler
     REST --> Analytics
     REST --> Presence
     REST --> Webhook
     Auth --> Repo
     Invites --> Repo
+    CustomFields --> Repo
+    DepGraph --> Repo
+    Theme --> Repo
     Butler --> Repo
     Analytics --> Repo
     Presence --> WS
@@ -62,6 +72,7 @@ flowchart LR
     REST -- "X-Internal-Token (:8001)" --> RuleParser
     REST -- "X-Internal-Token (:8001)" --> BoardAnalyzer
     REST -- "X-Internal-Token (:8001)" --> Auditor
+    DepGraph -- "X-Internal-Token (:8001)" --> CriticalPath
     Webhook -- "X-Internal-Token (:8001)" --> Formatter
 ```
 
@@ -69,10 +80,10 @@ flowchart LR
 
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
-| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | 1-Click Demo Role Switcher (`ADMIN`, `EDITOR`, `VIEWER`), Read-Only Enforcement Mode for Viewers, Shareable Board Invite Modal & Member Access Management, AI Security & Permission Audit Modal, Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
-| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Enterprise JWT Authentication (HS256 tokens, register, login, `/auth/me`), Pre-Seeded Demo User Profiles, Strict RBAC Guard Middleware (`403 FORBIDDEN` enforcement matching `StandardErrorSchema`), Shareable Invite Links Service (`POST /invites`, preview, and join redemption), AI Permission Audit Proxy (`POST /api/v1/boards/:boardId/security-audit`), Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator, Native Trello JSON Importer, CSV/JSON Exporter, Real-Time Co-Presence Service & Live Typing Coordinator, Outbound Webhook Dispatcher with HMAC-SHA256 signatures, WebSocket real-time room fan-out, PostgreSQL & Redis persistence with automatic in-memory fallback |
-| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | AI Workspace Access & Permission Security Auditor (`POST /internal/v1/audit-permissions`) analyzing least-privilege role distribution and invite link exposure with zero-config deterministic fallback, Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads |
-| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for Auth, JWT Sessions, RBAC Roles (`ADMIN`, `EDITOR`, `VIEWER`), Shareable Invite Links, AI Permission Audit, REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
+| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | 1-Click Demo Role Switcher (`ADMIN`, `EDITOR`, `VIEWER`), Read-Only Enforcement Mode for Viewers, Shareable Board Invite Modal & Member Access Management, AI Security & Permission Audit Modal, Trello Custom Fields Power-Up Modal & Card Front Badges, Visual Dependency Graph (`🕸️ Graph`) with Interactive SVG DAG Canvas, Glassmorphism Theme Customization Studio Drawer (`🎨 Theme Studio`), Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table/Graph UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
+| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Enterprise JWT Authentication (HS256 tokens, register, login, `/auth/me`), Pre-Seeded Demo User Profiles, Strict RBAC Guard Middleware (`403 FORBIDDEN` enforcement matching `StandardErrorSchema`), Custom Fields CRUD & Card Value Service (`GET/POST/PATCH/DELETE /custom-fields`), Cycle-Safe Card Dependency Service (`POST/DELETE /cards/:cardId/dependencies` with Tarjan/DFS circular prevention), Interactive Dependency Graph Engine (`GET /dependency-graph`), AI Critical Path Proxy (`POST /dependency-graph/ai-analyze`), Theme Studio Persistence (`PATCH /boards/:boardId/theme`), Shareable Invite Links Service (`POST /invites`, preview, and join redemption), AI Permission Audit Proxy (`POST /api/v1/boards/:boardId/security-audit`), Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator, Native Trello JSON Importer, CSV/JSON Exporter, Real-Time Co-Presence Service & Live Typing Coordinator, Outbound Webhook Dispatcher with HMAC-SHA256 signatures, WebSocket real-time room fan-out, PostgreSQL & Redis persistence with automatic in-memory fallback |
+| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | AI Critical Path & Dependency Bottleneck Analyzer (`POST /internal/v1/analyze-dependencies`) computing longest DAG chain, bottleneck risk ratings, and mitigation actions, AI Workspace Access & Permission Security Auditor (`POST /internal/v1/audit-permissions`) analyzing least-privilege role distribution and invite link exposure with zero-config deterministic fallback, Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads |
+| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for Auth, JWT Sessions, RBAC Roles (`ADMIN`, `EDITOR`, `VIEWER`), Custom Fields (`CustomFieldDefinition`, `CardCustomFieldValue`), Card Dependencies & DAG Graph (`BoardDependencyGraph`, `AICriticalPathResponse`), Theme Configuration (`BoardThemeConfig`), Shareable Invite Links, AI Permission Audit, REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
 | **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 
 ---
@@ -178,7 +189,11 @@ Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2
 17. **Strict RBAC Enforcement (`403 FORBIDDEN` vs `200/201`, Phase 6):** Asserts that card, column, and comment mutations sent with `X-Kanbanify-Role: VIEWER` are strictly rejected with HTTP `403 FORBIDDEN` matching `StandardErrorSchema`; asserts that admin-only invite creation is rejected with `403 FORBIDDEN` for `EDITOR` and `VIEWER`; asserts that `EDITOR` is permitted to create and move cards (`200/201`).
 18. **Shareable Invite Links Lifecycle (Phase 6):** Creates a shareable invite link (`POST /api/v1/boards/:boardId/invites`) with role `EDITOR` and `max_uses: 5`, inspects the public preview (`GET /api/v1/invites/:token`), redeems the token (`POST /api/v1/invites/:token/join`) for a new collaborator ("Rina QA"), and verifies membership on the board with `granted_role === "EDITOR"` and incremented `uses_count: 1`.
 19. **✨ AI Workspace Access & Permission Security Audit (`API -> AI Engine`, Phase 6):** Calls `POST /api/v1/boards/:boardId/security-audit` ($\rightarrow$ `POST /internal/v1/audit-permissions` with `X-Internal-Token`) and asserts `200 OK` returning a `security_score` (`0–100`), `risk_level` (`LOW`, `MEDIUM`, `HIGH`), `findings`, and `recommendations`.
-20. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`).
+20. **Trello Custom Fields Power-Up CRUD & Card Value Assignments (Phase 7):** Creates a `DROPDOWN` field (`Release Track` with colored options) and a `NUMBER` field (`Story Effort`) via `POST /api/v1/boards/:boardId/custom-fields`, assigns values to cards via `PUT /api/v1/cards/:cardId/custom-fields/:fieldId`, and verifies persistence in `card.custom_field_values`.
+21. **Cycle-Safe Dependency Graph & Circular Prevention (Phase 7):** Creates Card A and Card B, links B blocked by A via `POST /api/v1/cards/:cardId/dependencies`, asserts strict rejection of circular dependency (A blocked by B) with HTTP `400 VALIDATION_ERROR`, and retrieves DAG structure via `GET /api/v1/boards/:boardId/dependency-graph`.
+22. **✨ AI Critical Path & Dependency Bottleneck Analysis (`API -> AI Engine`, Phase 7):** Calls `POST /api/v1/boards/:boardId/dependency-graph/ai-analyze` ($\rightarrow$ `POST /internal/v1/analyze-dependencies` with `X-Internal-Token`) and asserts `200 OK` returning `risk_summary`, `critical_path_titles`, `top_blocker_cards`, and `unblocking_recommendations`.
+23. **Glassmorphism & Theme Studio Persistence (Phase 7):** Updates board theme via `PATCH /api/v1/boards/:boardId/theme` with `{ preset: "FROSTED_GLASS", glass_blur: "lg", card_density: "compact" }` and asserts persistence across board reloads.
+24. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`, `CARD_UPDATED`, `BOARD_UPDATED`).
 
 Run the E2E smoke test with a single command:
 
@@ -187,6 +202,34 @@ node scripts/e2e_test.mjs
 # or via root package.json:
 npm run test:e2e
 ```
+
+---
+
+## Phase 7 Custom Fields Power-Up, Visual Dependency Graph & Glassmorphism Theme Studio
+
+- **Trello Custom Fields Power-Up (`apps/web` <-> `apps/api`):**
+  - **Multi-Type Field Support:** Full support for `TEXT`, `NUMBER`, `CHECKBOX`, `DATE`, and `DROPDOWN` custom fields with custom colored option badges (`blue`, `green`, `yellow`, `orange`, `red`, `purple`).
+  - **Comprehensive Field CRUD:** Endpoints `GET /api/v1/boards/:boardId/custom-fields`, `POST /api/v1/boards/:boardId/custom-fields`, `PATCH /api/v1/custom-fields/:fieldId`, and `DELETE /api/v1/custom-fields/:fieldId` (with automatic cascade-strip of deleted field values from all cards on the board).
+  - **Card Value Assignments:** Set or clear card custom field values via `PUT /api/v1/cards/:cardId/custom-fields/:fieldId` with instant real-time `CARD_UPDATED` WebSocket room broadcast.
+  - **Front Badge Display:** Custom fields with `show_on_front: true` automatically render sleek metadata badges directly on the card front in Kanban Board view.
+  - **Spreadsheet Table View & CSV Export Integration:** Custom fields dynamically appear as dedicated columns in Table View (`apps/web`) and are exported into spreadsheet-ready RFC 4180 CSV files via `GET /api/v1/boards/:boardId/export?format=csv`.
+- **Visual Dependency Graph & AI Critical Path Analyzer (`apps/web` -> `apps/api` -> `services/ai-engine`):**
+  - **Interactive SVG DAG Canvas (`"🕸️ Graph"` View):** Visualizes card dependencies as an interactive Directed Acyclic Graph (DAG) with topological layer positioning, smooth Bezier curves, and highlight styling on critical path cards and blocker badges.
+  - **Cycle-Safe Card Dependency Linking:** Link and unlink dependencies via `POST /api/v1/cards/:cardId/dependencies` (`{ blocker_card_id }`) and `DELETE /api/v1/cards/:cardId/dependencies/:blockerCardId`.
+  - **Tarjan/DFS Circular Dependency Prevention:** Prevents dependency deadlocks by rejecting any circular dependency loop or self-dependency with HTTP `400 VALIDATION_ERROR` (`"Circular dependency detected: adding this blocker would create a dependency loop."`).
+  - **Graph Computation Engine (`GET /api/v1/boards/:boardId/dependency-graph`):** Asynchronously calculates DAG nodes, directed edges, root nodes, terminal nodes, cycle flags, and the exact longest sequence of interdependent cards (`critical_path_card_ids`).
+  - **✨ AI Critical Path & Dependency Bottleneck Analysis (`POST /api/v1/boards/:boardId/dependency-graph/ai-analyze` $\rightarrow$ `POST /internal/v1/analyze-dependencies`):**
+    - Click **"Analyze"** inside the Graph view to proxy DAG graph topology to `services/ai-engine` with `X-Internal-Token` authentication.
+    - Evaluates path length, WIP status, and bottleneck clusters to generate an executive **Risk Summary**, ordered **Critical Path Chain**, **Top Blocker Cards** ranked by downstream blast radius, and **Actionable Unblocking Recommendations**.
+- **Glassmorphism & Theme Customization Studio (`apps/web` <-> `apps/api`):**
+  - **Aesthetic Preset Studio (`🎨 Theme Studio` Drawer):** Choose from 5 curated aesthetic themes:
+    - 🧼 `DEFAULT_CLEAN`: Crisp, high-contrast modern minimalist workspace.
+    - ❄️ `FROSTED_GLASS`: Deep glassmorphism with dynamic multi-layer backdrop blurs.
+    - 🌆 `CYBERPUNK_NEON`: Dark futuristic theme with vivid neon cyan and magenta accents.
+    - 🏔️ `MINIMAL_NORD`: Cool arctic slate with subtle muted highlights.
+    - ☕ `WARM_ESPRESSO`: Cozy earth tones and deep amber accents.
+  - **Granular Ergonomic Controls:** Customize glass blur intensity (`none`, `sm`, `md`, `lg`), card density (`compact`, `comfortable`, `spacious`), card corner radius (`none`, `sm`, `md`, `lg`, `full`), accent colors, and front badge visibility toggles.
+  - **Server-Side Persistence (`PATCH /api/v1/boards/:boardId/theme`):** Board theme configurations are persisted in PostgreSQL / In-Memory repository, automatically synchronizing across all connected collaborators via WebSocket (`BOARD_UPDATED`) and surviving browser reloads.
 
 ---
 

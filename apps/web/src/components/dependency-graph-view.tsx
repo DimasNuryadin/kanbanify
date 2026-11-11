@@ -37,6 +37,7 @@ export function DependencyGraphView() {
   const addToast = useWorkspaceStore((s) => s.addToast);
   const activeRole = useWorkspaceStore((s) => s.activeRole);
   const isViewer = activeRole === "VIEWER";
+  const useMockMode = useWorkspaceStore((s) => s.useMockMode);
 
   const [graphData, setGraphData] = useState<BoardDependencyGraph | null>(null);
   const [showConnectedOnly, setShowConnectedOnly] = useState(true);
@@ -56,7 +57,7 @@ export function DependencyGraphView() {
     setIsLoadingGraph(true);
     try {
       const data = await apiClient.getDependencyGraph(board.id, {
-        useMock: true,
+        useMock: useMockMode,
       });
       setGraphData(data);
     } catch (err) {
@@ -68,14 +69,14 @@ export function DependencyGraphView() {
 
   useEffect(() => {
     loadGraph();
-  }, [board.id, board.cards]);
+  }, [board.id, board.cards, useMockMode]);
 
   // Load AI Analysis
   const handleAnalyzeAi = async () => {
     setIsAnalyzingAi(true);
     try {
       const data = await apiClient.aiAnalyzeCriticalPath(board.id, {
-        useMock: true,
+        useMock: useMockMode,
       });
       setAiAnalysis(data);
     } catch (err) {
@@ -88,7 +89,7 @@ export function DependencyGraphView() {
   // Initial AI load on mount
   useEffect(() => {
     handleAnalyzeAi();
-  }, [board.id]);
+  }, [board.id, useMockMode]);
 
   // Handle Quick Linking
   const handleLinkDependency = async (e: React.FormEvent) => {
@@ -108,7 +109,7 @@ export function DependencyGraphView() {
     setIsLinking(true);
     try {
       await apiClient.addCardDependency(selectedBlockedId, selectedBlockerId, {
-        useMock: true,
+        useMock: useMockMode,
       });
       linkCardDependency(selectedBlockedId, selectedBlockerId);
       setSelectedBlockerId("");
