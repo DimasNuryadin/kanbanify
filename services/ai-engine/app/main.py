@@ -25,6 +25,8 @@ from app.contracts import (
     AIParseAutomationResponseSchema,
     AIPermissionAuditRequestSchema,
     AIPermissionAuditResponseSchema,
+    AIRetroAnalysisRequestSchema,
+    AIRetroAnalysisResponseSchema,
     AISuggestCardEnrichmentRequestSchema,
     AISuggestCardEnrichmentResponseSchema,
     AISummaryNotificationRequestSchema,
@@ -38,6 +40,7 @@ from app.critical_path_analyzer import analyze_dependencies
 from app.decomposer import decompose_task, enrich_card
 from app.notification_formatter import format_notification
 from app.permission_auditor import audit_permissions
+from app.retro_synthesizer import synthesize_retro
 from app.rule_parser import parse_automation
 
 
@@ -240,6 +243,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AICriticalPathResponseSchema:
         return await analyze_dependencies(payload)
+
+    @application.post(
+        "/internal/v1/synthesize-retro",
+        response_model=AIRetroAnalysisResponseSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="AI Sprint Retrospective Synthesizer & Estimation Analyzer",
+    )
+    async def post_synthesize_retro(
+        payload: AIRetroAnalysisRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AIRetroAnalysisResponseSchema:
+        return await synthesize_retro(payload)
 
     return application
 
