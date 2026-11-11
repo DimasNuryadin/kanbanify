@@ -31,7 +31,7 @@ import {
   SEED_WORKSPACE_ID,
 } from "@/lib/mock-data";
 import { DEFAULT_USE_MOCK } from "@/lib/api-client";
-import { WSConnectionStatus } from "@/lib/ws-client";
+import { WSConnectionStatus, boardWsClient } from "@/lib/ws-client";
 import { comparePositions } from "@/lib/fractional-index";
 import { ButlerExecutionToast } from "@/lib/automation-engine";
 
@@ -83,23 +83,35 @@ const STORAGE_KEY_ACTIVE_ROLE = "kanbanify_active_role";
 
 export function getStoredAuthToken(): string | null {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(STORAGE_KEY_AUTH_TOKEN) ?? "kb_sess_alex_admin_token";
+  return window.localStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
 }
 
 export function getStoredActiveRole(): BoardRole | null {
-  if (typeof window === "undefined") return "ADMIN";
-  return (window.localStorage.getItem(STORAGE_KEY_ACTIVE_ROLE) as BoardRole) ?? "ADMIN";
+  if (typeof window === "undefined") return null;
+  return (window.localStorage.getItem(STORAGE_KEY_ACTIVE_ROLE) as BoardRole) || null;
 }
 
-export function getStoredAuthUser(): AuthUser {
-  if (typeof window === "undefined") return DEMO_USERS[0];
+export function getStoredAuthUser(): AuthUser | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY_AUTH_USER);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && parsed.id && parsed.email) {
+        return parsed as AuthUser;
+      }
+    }
   } catch {
     // fallback
   }
-  return DEMO_USERS[0];
+  return null;
+}
+
+export function hasValidAuthSession(): boolean {
+  if (typeof window === "undefined") return false;
+  const token = window.localStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+  const user = getStoredAuthUser();
+  return Boolean(token && token.trim().length > 0 && user);
 }
 
 interface WorkspaceState {
@@ -186,6 +198,8 @@ interface WorkspaceState {
   setCurrentUser: (user: AuthUser, token?: string) => void;
   setActiveRole: (role: BoardRole) => void;
   switchDemoUser: (user: AuthUser) => void;
+  logout: () => void;
+  syncStoredAuth: () => void;
   setAuthModalOpen: (open: boolean) => void;
   setShareModalOpen: (open: boolean) => void;
   setPendingInviteToken: (token: string | null) => void;
@@ -348,9 +362,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   fallbackNotice: null,
 
   // Authentication & RBAC Initial State
-  currentUser: DEMO_USERS[0],
-  activeRole: "ADMIN",
-  authToken: "kb_sess_alex_admin_token",
+  currentUser: getStoredAuthUser() ?? DEMO_USERS[0],
+  activeRole: getStoredActiveRole() ?? "ADMIN",
+  authToken: getStoredAuthToken(),
   isAuthModalOpen: false,
   isShareModalOpen: false,
   pendingInviteToken: null,
@@ -500,6 +514,38 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeRole: user.default_role,
       authToken: token,
     });
+  },
+
+  logout: () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(STORAGE_KEY_AUTH_TOKEN);
+        window.localStorage.removeItem(STORAGE_KEY_AUTH_USER);
+        window.localStorage.removeItem(STORAGE_KEY_ACTIVE_ROLE);
+      } catch {
+        // ignore
+      }
+    }
+    boardWsClient.disconnect();
+    set({
+      authToken: null,
+      currentUser: DEMO_USERS[0],
+      activeRole: "VIEWER",
+    });
+  },
+
+  syncStoredAuth: () => {
+    if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem(STORAGE_KEY_AUTH_TOKEN);
+    const user = getStoredAuthUser();
+    const role = getStoredActiveRole();
+    if (token && user) {
+      set({
+        authToken: token,
+        currentUser: user,
+        activeRole: role || user.default_role,
+      });
+    }
   },
 
   setAuthModalOpen: (isAuthModalOpen) => set({ isAuthModalOpen }),

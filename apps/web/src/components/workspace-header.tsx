@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Archive,
@@ -15,6 +16,7 @@ import {
   Kanban,
   Laptop,
   Lock,
+  LogOut,
   Moon,
   Palette,
   PanelLeft,
@@ -142,6 +144,8 @@ export function WorkspaceHeader({
   const switchDemoUser = useWorkspaceStore((s) => s.switchDemoUser);
   const setAuthModalOpen = useWorkspaceStore((s) => s.setAuthModalOpen);
   const setShareModalOpen = useWorkspaceStore((s) => s.setShareModalOpen);
+  const logout = useWorkspaceStore((s) => s.logout);
+  const router = useRouter();
 
   // User Profile & 1-Click Role Switcher Dropdown
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -681,21 +685,48 @@ export function WorkspaceHeader({
 
             {/* User Dropdown Menu */}
             {isUserMenuOpen && (
-              <div className="absolute right-0 z-50 mt-2 w-72 rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="border-b border-zinc-100 pb-2 mb-2 dark:border-zinc-800">
-                  <div className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-                    {currentUser.name}
+              <div className="absolute right-0 z-50 mt-2 w-80 rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+                {/* User Info Header with Avatar, Name, Email and Role Badge */}
+                <div className="flex items-center gap-3 border-b border-zinc-100 pb-3 mb-3 dark:border-zinc-800">
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ring-2 ring-indigo-500/20"
+                    style={{ backgroundColor: currentUser.color || "#6366f1" }}
+                  >
+                    {currentUser.initials}
                   </div>
-                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                    {currentUser.email}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                        {currentUser.name}
+                      </span>
+                      <span
+                        className={`rounded-full px-1.5 py-0.2 text-[9px] font-bold border shrink-0 ${
+                          activeRole === "ADMIN"
+                            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                            : activeRole === "EDITOR"
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                        }`}
+                      >
+                        {activeRole === "ADMIN" && "👑 Admin"}
+                        {activeRole === "EDITOR" && "✏️ Editor"}
+                        {activeRole === "VIEWER" && "👁️ Viewer"}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                      {currentUser.email}
+                    </div>
                   </div>
                 </div>
 
                 {/* ⚡ 1-Click Instant Demo Account / Role Switcher */}
                 <div className="mb-2">
-                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                    <Zap className="h-3 w-3 text-amber-500 fill-amber-500" />
-                    ⚡ 1-Click Demo Account Switcher
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Zap className="h-3 w-3 text-amber-500 fill-amber-500" />
+                      ⚡ 1-Click Persona Switcher
+                    </span>
+                    <span className="text-[9px] font-normal text-zinc-400 lowercase">instant</span>
                   </div>
                   <div className="space-y-1">
                     {DEMO_USERS.map((demo) => {
@@ -708,20 +739,20 @@ export function WorkspaceHeader({
                             switchDemoUser(demo);
                             setIsUserMenuOpen(false);
                           }}
-                          className={`w-full flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+                          className={`w-full flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition-colors ${
                             isSelected
-                              ? "bg-indigo-50 font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
-                              : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                              ? "bg-indigo-50 font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 ring-1 ring-indigo-500/30"
+                              : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800/80"
                           }`}
                         >
                           <div className="flex items-center gap-2">
                             <div
-                              className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                              className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-xs"
                               style={{ backgroundColor: demo.color }}
                             >
                               {demo.initials}
                             </div>
-                            <span>{demo.name}</span>
+                            <span className="truncate">{demo.name}</span>
                           </div>
                           <span
                             className={`rounded-full px-1.5 py-0.2 text-[9px] font-bold border ${
@@ -745,7 +776,7 @@ export function WorkspaceHeader({
                 {/* Direct Role Simulation Override */}
                 <div className="border-t border-zinc-100 pt-2 mb-2 dark:border-zinc-800">
                   <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">
-                    Role Simulation Override
+                    Active Board Role Override
                   </div>
                   <div className="grid grid-cols-3 gap-1">
                     {(["ADMIN", "EDITOR", "VIEWER"] as BoardRole[]).map((r) => (
@@ -756,32 +787,41 @@ export function WorkspaceHeader({
                           setActiveRole(r);
                           setIsUserMenuOpen(false);
                         }}
-                        className={`rounded-lg py-1 text-[10px] font-bold border transition-all ${
+                        className={`rounded-lg py-1.5 text-[10px] font-bold border transition-all ${
                           activeRole === r
-                            ? "ring-2 ring-indigo-500 border-transparent bg-indigo-600 text-white"
+                            ? "ring-2 ring-indigo-500 border-transparent bg-indigo-600 text-white shadow-xs"
                             : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-300"
                         }`}
                       >
-                        {r === "ADMIN" && "Admin"}
-                        {r === "EDITOR" && "Editor"}
-                        {r === "VIEWER" && "Viewer"}
+                        {r === "ADMIN" && "👑 Admin"}
+                        {r === "EDITOR" && "✏️ Editor"}
+                        {r === "VIEWER" && "👁️ Viewer"}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Sign In / Register Account Modal Trigger */}
-                <div className="border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                {/* Prominent Red-Tinted Logout Button */}
+                <div className="border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
                   <button
                     type="button"
                     onClick={() => {
                       setIsUserMenuOpen(false);
-                      setAuthModalOpen(true);
+                      logout();
+                      let inviteParam = "";
+                      if (typeof window !== "undefined") {
+                        const searchParams = new URLSearchParams(window.location.search);
+                        const invite = searchParams.get("invite");
+                        if (invite) {
+                          inviteParam = `?invite=${encodeURIComponent(invite)}`;
+                        }
+                      }
+                      router.replace(`/login${inviteParam}`);
                     }}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-200 transition-colors dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-500/20 hover:text-red-700 active:scale-[0.99] transition-all dark:bg-red-500/15 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/25"
                   >
-                    <Lock className="h-3.5 w-3.5" />
-                    <span>🔐 Sign In / Register Account</span>
+                    <LogOut className="h-4 w-4" />
+                    <span>🚪 Log Out of Kanbanify</span>
                   </button>
                 </div>
               </div>

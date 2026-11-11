@@ -3793,7 +3793,7 @@ export class MockApiService {
           .slice(0, 2)
           .toUpperCase() || "KB",
       color: "#10b981",
-      default_role: "EDITOR",
+      default_role: ((payload as { default_role?: string }).default_role as BoardRole) || "EDITOR",
     };
     return {
       token: `kb_sess_${user.id}_token`,
