@@ -4,7 +4,10 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { z, ZodError } from "zod";
 import {
+  AddCardDependencyRequestSchema,
+  AddCardDependencyResponseSchema,
   AIAnalyticsReportSchema,
+  AICriticalPathResponseSchema,
   AIDecomposeRequestSchema,
   AIDecomposeResponseSchema,
   AIParseAutomationRequestSchema,
@@ -18,11 +21,13 @@ import {
   AuthUserSchema,
   AutomationRuleSchema,
   BoardAnalyticsSchema,
+  BoardDependencyGraphSchema,
   BoardExportCsvResponseSchema,
   BoardInviteLinkSchema,
   BoardSchema,
   BoardSummarySchema,
   BoardTemplateSchema,
+  BoardThemeConfigSchema,
   CardMovedEventDataSchema,
   CardSchema,
   ColumnMovedEventDataSchema,
@@ -36,9 +41,12 @@ import {
   CreateCardRequestSchema,
   CreateColumnRequestSchema,
   CreateCommentRequestSchema,
+  CreateCustomFieldDefinitionRequestSchema,
   CreateInviteLinkRequestSchema,
   CreateWorkspaceRequestSchema,
   CreateWebhookRequestSchema,
+  CustomFieldDefinitionSchema,
+  DEFAULT_THEME_CONFIG,
   HealthCheckResponseSchema,
   JoinViaInviteRequestSchema,
   JoinViaInviteResponseSchema,
@@ -47,14 +55,18 @@ import {
   MoveCardRequestSchema,
   MoveColumnRequestSchema,
   RegisterRequestSchema,
+  SetCardCustomFieldValueRequestSchema,
   StandardErrorSchema,
   TestWebhookResponseSchema,
+  THEME_PRESET_CONFIGS,
   TrelloImportRequestSchema,
   TrelloImportResultSchema,
   UpdateAutomationRuleRequestSchema,
   UpdateBoardRequestSchema,
+  UpdateBoardThemeRequestSchema,
   UpdateCardRequestSchema,
   UpdateColumnRequestSchema,
+  UpdateCustomFieldDefinitionRequestSchema,
   UpdateWebhookRequestSchema,
   UserPresenceSchema,
   WebhookConfigSchema,
@@ -76,6 +88,8 @@ import { ImportExportService } from "./services/import-export-service.js";
 import { PresenceService } from "./services/presence-service.js";
 import { WebhookDispatcher } from "./services/webhook-dispatcher.js";
 import { AuthService } from "./services/auth-service.js";
+import { CustomFieldsService } from "./services/custom-fields-service.js";
+import { DependencyGraphService } from "./services/dependency-graph-service.js";
 import { requireRole } from "./services/rbac-guard.js";
 import { AppError, buildErrorPayload } from "./errors.js";
 
@@ -102,6 +116,8 @@ export interface BuildAppOptions {
   presenceService?: PresenceService;
   webhookDispatcher?: WebhookDispatcher;
   authService?: AuthService;
+  customFieldsService?: CustomFieldsService;
+  dependencyGraphService?: DependencyGraphService;
 }
 
 export async function buildApp(
@@ -116,6 +132,8 @@ export async function buildApp(
   presenceService: PresenceService;
   webhookDispatcher: WebhookDispatcher;
   authService: AuthService;
+  customFieldsService: CustomFieldsService;
+  dependencyGraphService: DependencyGraphService;
 }> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -134,6 +152,10 @@ export async function buildApp(
     options.analyticsService ?? new AnalyticsService();
   const importExportService =
     options.importExportService ?? new ImportExportService(repository, hub);
+  const customFieldsService =
+    options.customFieldsService ?? new CustomFieldsService(repository, hub);
+  const dependencyGraphService =
+    options.dependencyGraphService ?? new DependencyGraphService(repository, hub);
 
   await repository.init();
   await hub.init();
@@ -2106,6 +2128,206 @@ export async function buildApp(
   );
 
   // ==========================================================================
+  // 10. PHASE 7: CUSTOM FIELDS, DEPENDENCY GRAPH & THEME STUDIO ENDPOINTS
+  // ==========================================================================
+
+  // --- Custom Fields Endpoints ---
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/custom-fields",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const fields = await customFieldsService.listCustomFields(boardId);
+      const validated = z.array(CustomFieldDefinitionSchema).parse(fields);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/custom-fields",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const rawBody = (req.body ?? {}) as Record<string, unknown>;
+      if (Array.isArray(rawBody.options)) {
+        rawBody.options = rawBody.options.map((opt: any) => ({
+          ...opt,
+          id:
+            typeof opt?.id === "string" && opt.id.trim().length > 0
+              ? opt.id
+              : `opt-${randomUUID().slice(0, 8)}`,
+        }));
+      }
+      const body = CreateCustomFieldDefinitionRequestSchema.parse(rawBody);
+      const created = await customFieldsService.createCustomField(
+        boardId,
+        body,
+        req.user?.id || getActorId(req.headers)
+      );
+      const validated = CustomFieldDefinitionSchema.parse(created);
+      return reply.status(201).send(validated);
+    }
+  );
+
+  app.patch<{ Params: { fieldId: string } }>(
+    "/api/v1/custom-fields/:fieldId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const fieldId = NonEmptyIdParamSchema.parse(req.params.fieldId);
+      const rawBody = (req.body ?? {}) as Record<string, unknown>;
+      if (Array.isArray(rawBody.options)) {
+        rawBody.options = rawBody.options.map((opt: any) => ({
+          ...opt,
+          id:
+            typeof opt?.id === "string" && opt.id.trim().length > 0
+              ? opt.id
+              : `opt-${randomUUID().slice(0, 8)}`,
+        }));
+      }
+      const body = UpdateCustomFieldDefinitionRequestSchema.parse(rawBody);
+      const updated = await customFieldsService.updateCustomField(
+        fieldId,
+        body,
+        req.user?.id || getActorId(req.headers)
+      );
+      const validated = CustomFieldDefinitionSchema.parse(updated);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.delete<{ Params: { fieldId: string } }>(
+    "/api/v1/custom-fields/:fieldId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const fieldId = NonEmptyIdParamSchema.parse(req.params.fieldId);
+      const result = await customFieldsService.deleteCustomField(
+        fieldId,
+        req.user?.id || getActorId(req.headers)
+      );
+      return reply.status(200).send(result);
+    }
+  );
+
+  app.put<{ Params: { cardId: string; fieldId: string } }>(
+    "/api/v1/cards/:cardId/custom-fields/:fieldId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const fieldId = NonEmptyIdParamSchema.parse(req.params.fieldId);
+      const body = SetCardCustomFieldValueRequestSchema.parse(req.body);
+      const actorName = req.user?.name || "Alex Rivera";
+      const card = await customFieldsService.setCardCustomFieldValue(
+        cardId,
+        fieldId,
+        body.value,
+        actorName,
+        req.user?.id || getActorId(req.headers)
+      );
+      const validated = CardSchema.parse(card);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  // --- Dependency Graph & Critical Path Endpoints ---
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/dependency-graph",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const graph = await dependencyGraphService.computeDependencyGraph(boardId);
+      const validated = BoardDependencyGraphSchema.parse(graph);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post<{ Params: { cardId: string } }>(
+    "/api/v1/cards/:cardId/dependencies",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const body = AddCardDependencyRequestSchema.parse(req.body);
+      const actorName = req.user?.name || "Alex Rivera";
+      const result = await dependencyGraphService.addDependency(
+        cardId,
+        body.blocker_card_id,
+        actorName,
+        req.user?.id || getActorId(req.headers)
+      );
+      const validated = AddCardDependencyResponseSchema.parse(result);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.delete<{ Params: { cardId: string; blockerCardId: string } }>(
+    "/api/v1/cards/:cardId/dependencies/:blockerCardId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const blockerCardId = NonEmptyIdParamSchema.parse(req.params.blockerCardId);
+      const actorName = req.user?.name || "Alex Rivera";
+      const result = await dependencyGraphService.removeDependency(
+        cardId,
+        blockerCardId,
+        actorName,
+        req.user?.id || getActorId(req.headers)
+      );
+      const validated = AddCardDependencyResponseSchema.parse(result);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/dependency-graph/ai-analyze",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const result = await dependencyGraphService.aiAnalyzeDependencies(boardId);
+      const validated = AICriticalPathResponseSchema.parse(result);
+      return reply.status(200).send(validated);
+    }
+  );
+
+  // --- Theme Studio Endpoint ---
+  app.patch<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/theme",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = UpdateBoardThemeRequestSchema.parse(req.body);
+
+      const board = await repository.getBoardById(boardId);
+      if (!board) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Board '${boardId}' not found`,
+          { board_id: boardId }
+        );
+      }
+
+      const currentTheme = board.theme_config ?? DEFAULT_THEME_CONFIG;
+      const baseTheme =
+        body.preset && THEME_PRESET_CONFIGS[body.preset]
+          ? { ...THEME_PRESET_CONFIGS[body.preset] }
+          : currentTheme;
+
+      const mergedTheme = BoardThemeConfigSchema.parse({
+        ...baseTheme,
+        ...body,
+      });
+
+      const updated = await repository.updateBoardTheme(boardId, mergedTheme);
+
+      await hub.broadcast({
+        event: "BOARD_UPDATED",
+        board_id: boardId,
+        actor_id: req.user?.id || getActorId(req.headers),
+        data: { theme_config: updated },
+      });
+
+      return reply.status(200).send(BoardThemeConfigSchema.parse(updated));
+    }
+  );
+
+  // ==========================================================================
   // 9. REAL-TIME WEBSOCKET ENDPOINT (WS /ws/boards/:boardId)
   // ==========================================================================
   app.get<{
@@ -2156,5 +2378,7 @@ export async function buildApp(
     presenceService,
     webhookDispatcher,
     authService,
+    customFieldsService,
+    dependencyGraphService,
   };
 }

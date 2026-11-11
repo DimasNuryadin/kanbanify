@@ -15,14 +15,18 @@ import type {
   AutomationRule,
   BoardBackground,
   BoardInviteLink,
+  BoardThemeConfig,
   CardCover,
+  CardCustomFieldValue,
   Checklist,
   Comment,
+  CustomFieldDefinition,
   Label,
   Member,
   Subtask,
   WebhookConfig,
 } from "@kinetix/contracts";
+import { DEFAULT_THEME_CONFIG } from "@kinetix/contracts";
 
 export const priorityEnum = pgEnum("priority", [
   "LOW",
@@ -88,6 +92,8 @@ export const boards = pgTable("boards", {
   webhooks: jsonb("webhooks").$type<WebhookConfig[]>().default([]).notNull(),
   invite_links: jsonb("invite_links").$type<BoardInviteLink[]>().default([]).notNull(),
   visibility: varchar("visibility", { length: 32 }).default("WORKSPACE").notNull(),
+  custom_fields: jsonb("custom_fields").$type<CustomFieldDefinition[]>().default([]).notNull(),
+  theme_config: jsonb("theme_config").$type<BoardThemeConfig>().default(DEFAULT_THEME_CONFIG).notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -142,6 +148,10 @@ export const cards = pgTable("cards", {
   is_due_complete: boolean("is_due_complete").default(false).notNull(),
   is_archived: boolean("is_archived").default(false).notNull(),
   is_watching: boolean("is_watching").default(false).notNull(),
+  custom_field_values: jsonb("custom_field_values")
+    .$type<CardCustomFieldValue[]>()
+    .default([])
+    .notNull(),
 });
 
 export const subtasks = pgTable("subtasks", {
