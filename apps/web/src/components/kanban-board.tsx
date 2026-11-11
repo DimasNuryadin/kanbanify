@@ -137,11 +137,8 @@ function CardLiveTimerBadge({
   const estimatedSec = card.time_tracking?.estimated_seconds ?? 0;
   const pomodoroCount = card.time_tracking?.pomodoro_completed_count ?? 0;
 
-  const [elapsedSec, setElapsedSec] = useState(() => {
-    if (!activeTimer) return 0;
-    const startMs = new Date(activeTimer.started_at).getTime();
-    return Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-  });
+  // Initialize elapsed seconds deterministically to avoid SSR hydration mismatch
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
     if (!activeTimer) return;
@@ -153,10 +150,6 @@ function CardLiveTimerBadge({
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
   }, [activeTimer?.started_at, activeTimer]);
-
-  if (!activeTimer && totalLoggedSec <= 0 && pomodoroCount <= 0) {
-    return null;
-  }
 
   const userInitials = useMemo(() => {
     if (!activeTimer) return "";
@@ -172,6 +165,10 @@ function CardLiveTimerBadge({
     }
     return "AR";
   }, [activeTimer, boardMembers]);
+
+  if (!activeTimer && totalLoggedSec <= 0 && pomodoroCount <= 0) {
+    return null;
+  }
 
   const isOverBudget = estimatedSec > 0 && totalLoggedSec > estimatedSec;
 

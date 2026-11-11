@@ -105,12 +105,8 @@ export function CardTimeTrackingSection({
   // Stopwatch action state
   const [isTimerLoading, setIsTimerLoading] = useState(false);
 
-  // Live ticking seconds for running timer
-  const [elapsedSec, setElapsedSec] = useState(() => {
-    if (!activeTimer) return 0;
-    const startMs = new Date(activeTimer.started_at).getTime();
-    return Math.max(0, Math.floor((Date.now() - startMs) / 1000));
-  });
+  // Live ticking seconds for running timer (initialized deterministically for SSR)
+  const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
     if (!activeTimer) return;
