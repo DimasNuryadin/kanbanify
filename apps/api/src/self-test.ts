@@ -5,6 +5,7 @@ import {
   AIAnalyticsReportSchema,
   AICriticalPathResponseSchema,
   AIPermissionAuditResponseSchema,
+  AIRetroAnalysisResponseSchema,
   AuthSessionResponseSchema,
   AuthUserSchema,
   AutomationRuleSchema,
@@ -18,15 +19,19 @@ import {
   CardSchema,
   ColumnSchema,
   CommentSchema,
+  ConvertRetroItemToCardResponseSchema,
   CopyColumnResponseSchema,
   CustomFieldDefinitionSchema,
+  DEFAULT_CARD_TIME_TRACKING,
   HealthCheckResponseSchema,
   JoinViaInviteResponseSchema,
   MemberSchema,
+  RetroItemSchema,
   StandardErrorSchema,
   TestWebhookResponseSchema,
   TrelloImportResultSchema,
   UserPresenceSchema,
+  VoteRetroItemResponseSchema,
   WebhookConfigSchema,
   WorkspaceSchema,
   WorkspaceWithBoardsSchema,
@@ -2046,8 +2051,347 @@ async function runSelfTest(): Promise<void> {
       `[PASS] 26d. Theme Studio (FROSTED_GLASS preset persistence & RBAC) verified`
     );
 
+    // ==========================================================================
+    // 27. Phase 8 Gate 2: Card Time Tracking, Pomodoro Focus Timer & Retrospectives
+    // ==========================================================================
+    console.info("=== 27. Phase 8 Gate 2: Time Tracking, Pomodoro & Retrospectives ===");
+    hub.addClient(defaultBoardId, mockSocket);
+
+    // 27a. Live Stopwatch Lifecycle & RBAC
+    // RBAC: VIEWER must be forbidden
+    const viewerStartTimerRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/timer/start`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+    });
+    assert.equal(viewerStartTimerRes.statusCode, 403, "VIEWER must be forbidden from starting stopwatch");
+
+    // Start Stopwatch on Card Alpha
+    const startTimerRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/timer/start`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        user_id: "88888888-8888-4888-8888-888888888882",
+        user_name: "Maya Lin",
+      },
+    });
+    assert.equal(startTimerRes.statusCode, 200);
+    const cardTimerStarted = CardSchema.parse(startTimerRes.json());
+    assert.ok(cardTimerStarted.time_tracking?.active_timer, "active_timer must be set");
+    assert.equal(cardTimerStarted.time_tracking.active_timer.card_id, cardAlpha.id);
+    assert.equal(cardTimerStarted.time_tracking.active_timer.user_id, "88888888-8888-4888-8888-888888888882");
+    console.info(`[PASS] 27a-1. POST /api/v1/cards/:cardId/timer/start -> 200 OK (Stopwatch started)`);
+
+    // Auto-stop prior timer when user starts timer on Card Beta
+    const startTimerBetaRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardBeta.id}/timer/start`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        user_id: "88888888-8888-4888-8888-888888888882",
+        user_name: "Maya Lin",
+      },
+    });
+    assert.equal(startTimerBetaRes.statusCode, 200);
+    const cardBetaTimerStarted = CardSchema.parse(startTimerBetaRes.json());
+    assert.ok(cardBetaTimerStarted.time_tracking?.active_timer);
+    assert.equal(cardBetaTimerStarted.time_tracking.active_timer.card_id, cardBeta.id);
+
+    // Verify Card Alpha's prior timer was auto-stopped and committed
+    const checkCardAlphaRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/cards/${cardAlpha.id}`,
+    });
+    assert.equal(checkCardAlphaRes.statusCode, 200);
+    const checkedAlpha = CardSchema.parse(checkCardAlphaRes.json());
+    assert.equal(checkedAlpha.time_tracking.active_timer, null, "Card Alpha timer must be auto-stopped");
+    assert.ok(
+      checkedAlpha.time_tracking.entries.some((e) => e.source === "STOPWATCH"),
+      "Card Alpha entries must contain auto-committed STOPWATCH entry"
+    );
+    console.info(`[PASS] 27a-2. Auto-stop previous user stopwatch when starting new card verified`);
+
+    // Stop Stopwatch on Card Beta
+    const stopTimerRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardBeta.id}/timer/stop`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        note: "Completed initial implementation",
+      },
+    });
+    assert.equal(stopTimerRes.statusCode, 200);
+    const cardBetaStopped = CardSchema.parse(stopTimerRes.json());
+    assert.equal(cardBetaStopped.time_tracking.active_timer, null);
+    assert.ok(cardBetaStopped.time_tracking.total_logged_seconds >= 1);
+    const committedBetaEntry = cardBetaStopped.time_tracking.entries.find(
+      (e) => e.note === "Completed initial implementation"
+    );
+    assert.ok(committedBetaEntry);
+    assert.equal(committedBetaEntry.source, "STOPWATCH");
+    console.info(`[PASS] 27a-3. POST /api/v1/cards/:cardId/timer/stop -> 200 OK (Committed entry & cleared active_timer)`);
+
+    // 27b. Manual Time Logging & Estimation
+    const manualLogRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/time-entries`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        duration_seconds: 3600,
+        note: "Manual architecture review & test suite",
+        estimated_seconds: 14400,
+        source: "MANUAL",
+      },
+    });
+    assert.equal(manualLogRes.statusCode, 200);
+    const cardAlphaManual = CardSchema.parse(manualLogRes.json());
+    assert.equal(cardAlphaManual.time_tracking.estimated_seconds, 14400);
+    const manualEntry = cardAlphaManual.time_tracking.entries.find(
+      (e) => e.note === "Manual architecture review & test suite"
+    );
+    assert.ok(manualEntry);
+    assert.equal(manualEntry.duration_seconds, 3600);
+    assert.equal(manualEntry.source, "MANUAL");
+    console.info(`[PASS] 27b-1. POST /api/v1/cards/:cardId/time-entries -> 200 OK (Manual log & estimate updated)`);
+
+    // Delete Worklog Entry
+    const deleteEntryRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/cards/${cardAlpha.id}/time-entries/${manualEntry.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(deleteEntryRes.statusCode, 200);
+    const cardAlphaAfterDelete = CardSchema.parse(deleteEntryRes.json());
+    assert.ok(!cardAlphaAfterDelete.time_tracking.entries.some((e) => e.id === manualEntry.id));
+    console.info(`[PASS] 27b-2. DELETE /api/v1/cards/:cardId/time-entries/:entryId -> 200 OK (Entry removed & recalculation)`);
+
+    // 27c. Pomodoro Focus Timer
+    const viewerPomodoroRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/pomodoro/complete`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        mode: "FOCUS",
+        duration_seconds: 1500,
+      },
+    });
+    assert.equal(viewerPomodoroRes.statusCode, 403, "VIEWER must be forbidden from completing pomodoro");
+
+    const pomodoroRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/pomodoro/complete`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        card_id: cardAlpha.id,
+        mode: "FOCUS",
+        duration_seconds: 1500,
+        note: "25m deep work on RBAC and contracts",
+      },
+    });
+    assert.equal(pomodoroRes.statusCode, 200);
+    const cardAlphaPomodoro = CardSchema.parse(pomodoroRes.json());
+    assert.ok(cardAlphaPomodoro.time_tracking.pomodoro_completed_count >= 1);
+    const pomodoroEntry = cardAlphaPomodoro.time_tracking.entries.find(
+      (e) => e.source === "POMODORO"
+    );
+    assert.ok(pomodoroEntry);
+    assert.equal(pomodoroEntry.duration_seconds, 1500);
+    console.info(`[PASS] 27c. POST /api/v1/cards/:cardId/pomodoro/complete -> 200 OK (pomodoro_completed_count incremented)`);
+
+    // 27d. Sprint Retrospectives Endpoints
+    // GET /api/v1/boards/:boardId/retro
+    const retroListRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}/retro`,
+    });
+    assert.equal(retroListRes.statusCode, 200);
+    const retroList = z.array(RetroItemSchema).parse(retroListRes.json());
+    assert.ok(retroList.length >= 4, "Pre-seeded board must have at least 4 default retro items");
+    // Verify sorted by votes descending
+    for (let i = 0; i < retroList.length - 1; i++) {
+      assert.ok(retroList[i]!.votes >= retroList[i + 1]!.votes, "Retro items must be sorted descending by votes");
+    }
+    console.info(`[PASS] 27d-1. GET /api/v1/boards/:boardId/retro -> 200 OK (${retroList.length} items, votes-descending)`);
+
+    // RBAC: VIEWER forbidden to create retro item
+    const viewerCreateRetroRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/retro`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        category: "KUDOS",
+        content: "Viewer attempt",
+      },
+    });
+    assert.equal(viewerCreateRetroRes.statusCode, 403, "VIEWER must be forbidden from creating retro item");
+
+    // POST /api/v1/boards/:boardId/retro (Create Retro item)
+    const createRetroRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/retro`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        category: "KUDOS",
+        content: "Huge shoutout to the full team for seamless Phase 8 delivery!",
+      },
+    });
+    assert.equal(createRetroRes.statusCode, 201);
+    const createdRetro = RetroItemSchema.parse(createRetroRes.json());
+    assert.equal(createdRetro.category, "KUDOS");
+    assert.equal(createdRetro.votes, 0);
+    assert.equal(createdRetro.is_resolved, false);
+    console.info(`[PASS] 27d-2. POST /api/v1/boards/:boardId/retro -> 201 Created`);
+
+    // POST /api/v1/retro/:itemId/vote (Toggle Upvote)
+    const vote1Res = await app.inject({
+      method: "POST",
+      url: `/api/v1/retro/${createdRetro.id}/vote`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(vote1Res.statusCode, 200);
+    const vote1Body = VoteRetroItemResponseSchema.parse(vote1Res.json());
+    assert.equal(vote1Body.has_voted, true);
+    assert.equal(vote1Body.retro_item.votes, 1);
+
+    // Toggle vote off
+    const vote2Res = await app.inject({
+      method: "POST",
+      url: `/api/v1/retro/${createdRetro.id}/vote`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(vote2Res.statusCode, 200);
+    const vote2Body = VoteRetroItemResponseSchema.parse(vote2Res.json());
+    assert.equal(vote2Body.has_voted, false);
+    assert.equal(vote2Body.retro_item.votes, 0);
+    console.info(`[PASS] 27d-3. POST /api/v1/retro/:itemId/vote -> 200 OK (Toggle upvote on/off verified)`);
+
+    // PATCH /api/v1/retro/:itemId (Update Retro Item)
+    const patchRetroRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/retro/${createdRetro.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        content: "Refined kudos note with resolution",
+        is_resolved: true,
+      },
+    });
+    assert.equal(patchRetroRes.statusCode, 200);
+    const patchedRetro = RetroItemSchema.parse(patchRetroRes.json());
+    assert.equal(patchedRetro.content, "Refined kudos note with resolution");
+    assert.equal(patchedRetro.is_resolved, true);
+    console.info(`[PASS] 27d-4. PATCH /api/v1/retro/:itemId -> 200 OK`);
+
+    // POST /api/v1/retro/:itemId/convert-to-card (Convert note to actionable Kanban Card)
+    const convertRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/retro/${createdRetro.id}/convert-to-card`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        priority: "HIGH",
+        story_points: 5,
+      },
+    });
+    assert.equal(convertRes.statusCode, 201);
+    const convertBody = ConvertRetroItemToCardResponseSchema.parse(convertRes.json());
+    assert.equal(convertBody.retro_item.is_resolved, true);
+    assert.equal(convertBody.retro_item.linked_card_id, convertBody.card.id);
+    assert.equal(convertBody.card.priority, "HIGH");
+    assert.equal(convertBody.card.story_points, 5);
+    console.info(`[PASS] 27d-5. POST /api/v1/retro/:itemId/convert-to-card -> 201 Created (linked_card_id & resolved)`);
+
+    // DELETE /api/v1/retro/:itemId (Delete Retro item)
+    const deleteRetroRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/retro/${createdRetro.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(deleteRetroRes.statusCode, 200);
+    const deleteRetroBody = deleteRetroRes.json() as { id: string; deleted: boolean };
+    assert.equal(deleteRetroBody.id, createdRetro.id);
+    assert.equal(deleteRetroBody.deleted, true);
+    console.info(`[PASS] 27d-6. DELETE /api/v1/retro/:itemId -> 200 OK`);
+
+    // 27e. AI Sprint Retrospective Synthesizer
+    const aiRetroRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/retro/ai-synthesize`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(aiRetroRes.statusCode, 200);
+    const aiRetroBody = AIRetroAnalysisResponseSchema.parse(aiRetroRes.json());
+    assert.ok(aiRetroBody.sprint_morale_score >= 0 && aiRetroBody.sprint_morale_score <= 100);
+    assert.ok(aiRetroBody.estimation_accuracy_summary.length > 0);
+    assert.ok(Array.isArray(aiRetroBody.key_themes));
+    assert.ok(Array.isArray(aiRetroBody.suggested_retro_items));
+    assert.ok(Array.isArray(aiRetroBody.recommended_action_items));
+    console.info(`[PASS] 27e. POST /api/v1/boards/:boardId/retro/ai-synthesize -> 200 OK (morale=${aiRetroBody.sprint_morale_score})`);
+
+    // 27f. Phase 8 Analytics & CSV Export Additions
+    const p8AnalyticsRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}/analytics`,
+    });
+    assert.equal(p8AnalyticsRes.statusCode, 200);
+    const p8Analytics = BoardAnalyticsSchema.parse(p8AnalyticsRes.json());
+    assert.ok(p8Analytics.total_estimated_hours >= 0);
+    assert.ok(p8Analytics.total_logged_hours >= 0);
+    assert.ok(p8Analytics.total_pomodoros_completed >= 0);
+    console.info(`[PASS] 27f-1. Board Analytics Phase 8 fields verified: est=${p8Analytics.total_estimated_hours}h, logged=${p8Analytics.total_logged_hours}h, pomodoros=${p8Analytics.total_pomodoros_completed}`);
+
+    const p8CsvRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}/export?format=csv`,
+    });
+    assert.equal(p8CsvRes.statusCode, 200);
+    const p8Csv = BoardExportCsvResponseSchema.parse(p8CsvRes.json());
+    assert.ok(p8Csv.csv_data.includes("Estimated Hours"));
+    assert.ok(p8Csv.csv_data.includes("Logged Hours"));
+    assert.ok(p8Csv.csv_data.includes("Pomodoro Count"));
+    console.info(`[PASS] 27f-2. CSV Export Phase 8 columns verified`);
+
+    // 27g. Phase 8 WebSocket Broadcast Verification
+    const p8WsEvents = receivedWsMessages.map((m) => m.event);
+    assert.ok(p8WsEvents.includes("TIMER_UPDATED"), "WebSocket must receive TIMER_UPDATED event");
+    assert.ok(p8WsEvents.includes("RETRO_ITEM_CREATED"), "WebSocket must receive RETRO_ITEM_CREATED event");
+    assert.ok(p8WsEvents.includes("RETRO_ITEM_UPDATED"), "WebSocket must receive RETRO_ITEM_UPDATED event");
+    assert.ok(p8WsEvents.includes("RETRO_ITEM_DELETED"), "WebSocket must receive RETRO_ITEM_DELETED event");
+    console.info(`[PASS] 27g. Phase 8 WebSocket broadcast events verified: TIMER_UPDATED, RETRO_ITEM_CREATED/UPDATED/DELETED`);
+
     console.info(
-      "=== ALL KINETIX API PHASE 7 GATE 2 SELF-TESTS PASSED ==="
+      "=== ALL KINETIX API PHASE 8 GATE 2 SELF-TESTS PASSED ==="
     );
   } finally {
     await app.close();

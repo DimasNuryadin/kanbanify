@@ -13,6 +13,7 @@ import {
   AIParseAutomationRequestSchema,
   AIParseAutomationResponseSchema,
   AIPermissionAuditResponseSchema,
+  AIRetroAnalysisResponseSchema,
   AISuggestCardEnrichmentRequestSchema,
   AISuggestCardEnrichmentResponseSchema,
   AISummaryNotificationRequestSchema,
@@ -33,6 +34,8 @@ import {
   ColumnMovedEventDataSchema,
   ColumnSchema,
   CommentSchema,
+  ConvertRetroItemToCardRequestSchema,
+  ConvertRetroItemToCardResponseSchema,
   CopyCardRequestSchema,
   CopyColumnRequestSchema,
   CopyColumnResponseSchema,
@@ -43,6 +46,7 @@ import {
   CreateCommentRequestSchema,
   CreateCustomFieldDefinitionRequestSchema,
   CreateInviteLinkRequestSchema,
+  CreateRetroItemRequestSchema,
   CreateWorkspaceRequestSchema,
   CreateWebhookRequestSchema,
   CustomFieldDefinitionSchema,
@@ -50,13 +54,18 @@ import {
   HealthCheckResponseSchema,
   JoinViaInviteRequestSchema,
   JoinViaInviteResponseSchema,
+  LogTimeEntryRequestSchema,
   LoginRequestSchema,
   MemberSchema,
   MoveCardRequestSchema,
   MoveColumnRequestSchema,
+  PomodoroCompleteRequestSchema,
   RegisterRequestSchema,
+  RetroItemSchema,
   SetCardCustomFieldValueRequestSchema,
   StandardErrorSchema,
+  StartCardTimerRequestSchema,
+  StopCardTimerRequestSchema,
   TestWebhookResponseSchema,
   THEME_PRESET_CONFIGS,
   TrelloImportRequestSchema,
@@ -67,8 +76,10 @@ import {
   UpdateCardRequestSchema,
   UpdateColumnRequestSchema,
   UpdateCustomFieldDefinitionRequestSchema,
+  UpdateRetroItemRequestSchema,
   UpdateWebhookRequestSchema,
   UserPresenceSchema,
+  VoteRetroItemResponseSchema,
   WebhookConfigSchema,
   WorkspaceSchema,
   WorkspaceWithBoardsSchema,
@@ -90,7 +101,9 @@ import { WebhookDispatcher } from "./services/webhook-dispatcher.js";
 import { AuthService } from "./services/auth-service.js";
 import { CustomFieldsService } from "./services/custom-fields-service.js";
 import { DependencyGraphService } from "./services/dependency-graph-service.js";
-import { requireRole } from "./services/rbac-guard.js";
+import { TimeTrackingService } from "./services/time-tracking-service.js";
+import { RetroService } from "./services/retro-service.js";
+import { requireRole, resolveActorAndRole } from "./services/rbac-guard.js";
 import { AppError, buildErrorPayload } from "./errors.js";
 
 const UuidParamSchema = z.string().uuid();
@@ -118,6 +131,8 @@ export interface BuildAppOptions {
   authService?: AuthService;
   customFieldsService?: CustomFieldsService;
   dependencyGraphService?: DependencyGraphService;
+  timeTrackingService?: TimeTrackingService;
+  retroService?: RetroService;
 }
 
 export async function buildApp(
@@ -134,6 +149,8 @@ export async function buildApp(
   authService: AuthService;
   customFieldsService: CustomFieldsService;
   dependencyGraphService: DependencyGraphService;
+  timeTrackingService: TimeTrackingService;
+  retroService: RetroService;
 }> {
   const app = Fastify({
     logger: options.logger ?? false,
@@ -150,6 +167,11 @@ export async function buildApp(
     options.automationEngine ?? new AutomationEngine(repository, hub);
   const analyticsService =
     options.analyticsService ?? new AnalyticsService();
+  const timeTrackingService =
+    options.timeTrackingService ?? new TimeTrackingService(repository, hub);
+  const retroService =
+    options.retroService ??
+    new RetroService(repository, hub, analyticsService);
   const importExportService =
     options.importExportService ?? new ImportExportService(repository, hub);
   const customFieldsService =
@@ -1365,6 +1387,23 @@ export async function buildApp(
     }
   );
 
+  app.get<{ Params: { cardId: string } }>(
+    "/api/v1/cards/:cardId",
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const card = await repository.getCardById(cardId);
+      if (!card) {
+        throw new AppError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          `Card '${cardId}' not found`,
+          { card_id: cardId }
+        );
+      }
+      return reply.status(200).send(CardSchema.parse(card));
+    }
+  );
+
   app.patch<{ Params: { cardId: string } }>(
     "/api/v1/cards/:cardId",
     { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
@@ -2328,6 +2367,229 @@ export async function buildApp(
   );
 
   // ==========================================================================
+  // PHASE 8: CARD TIME TRACKING, POMODORO FOCUS TIMER & RETROSPECTIVES
+  // ==========================================================================
+
+  // --- 10.1 Card Time Tracking & Stopwatch Endpoints ---
+  app.post<{ Params: { cardId: string } }>(
+    "/api/v1/cards/:cardId/timer/start",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const body = StartCardTimerRequestSchema.optional().parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const card = await timeTrackingService.startStopwatch(
+        cardId,
+        actor,
+        body?.user_id,
+        body?.user_name
+      );
+      return reply.status(200).send(CardSchema.parse(card));
+    }
+  );
+
+  app.post<{ Params: { cardId: string } }>(
+    "/api/v1/cards/:cardId/timer/stop",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const body = StopCardTimerRequestSchema.optional().parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const card = await timeTrackingService.stopStopwatch(cardId, actor, {
+        note: body?.note,
+      });
+      return reply.status(200).send(CardSchema.parse(card));
+    }
+  );
+
+  app.post<{ Params: { cardId: string } }>(
+    "/api/v1/cards/:cardId/time-entries",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const body = LogTimeEntryRequestSchema.parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const card = await timeTrackingService.logTimeEntry(cardId, actor, body);
+      return reply.status(200).send(CardSchema.parse(card));
+    }
+  );
+
+  app.delete<{ Params: { cardId: string; entryId: string } }>(
+    "/api/v1/cards/:cardId/time-entries/:entryId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const entryId = NonEmptyIdParamSchema.parse(req.params.entryId);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const card = await timeTrackingService.deleteTimeEntry(cardId, entryId, actor);
+      return reply.status(200).send(CardSchema.parse(card));
+    }
+  );
+
+  // --- 10.2 Pomodoro Focus Timer Endpoints ---
+  app.post<{ Params: { cardId: string } }>(
+    "/api/v1/cards/:cardId/pomodoro/complete",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const cardId = UuidParamSchema.parse(req.params.cardId);
+      const rawBody = (req.body as Record<string, unknown>) || {};
+      const body = PomodoroCompleteRequestSchema.parse({
+        ...rawBody,
+        card_id: rawBody.card_id ?? cardId,
+      });
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const card = await timeTrackingService.completePomodoro(cardId, actor, body);
+      return reply.status(200).send(CardSchema.parse(card));
+    }
+  );
+
+  // --- 10.3 Interactive Sprint Retrospectives Endpoints ---
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/retro",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const items = await retroService.getRetroItems(boardId);
+      return reply.status(200).send(z.array(RetroItemSchema).parse(items));
+    }
+  );
+
+  app.get<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/retro/items",
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const items = await retroService.getRetroItems(boardId);
+      return reply.status(200).send(z.array(RetroItemSchema).parse(items));
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/retro",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = CreateRetroItemRequestSchema.parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const item = await retroService.createRetroItem(boardId, actor, body);
+      return reply.status(201).send(RetroItemSchema.parse(item));
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/retro/items",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const body = CreateRetroItemRequestSchema.parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const item = await retroService.createRetroItem(boardId, actor, body);
+      return reply.status(201).send(RetroItemSchema.parse(item));
+    }
+  );
+
+  app.post<{ Params: { itemId: string } }>(
+    "/api/v1/retro/:itemId/vote",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.voteRetroItem(itemId, actor);
+      return reply.status(200).send(VoteRetroItemResponseSchema.parse(result));
+    }
+  );
+
+  app.post<{ Params: { itemId: string } }>(
+    "/api/v1/retro/items/:itemId/vote",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.voteRetroItem(itemId, actor);
+      return reply.status(200).send(VoteRetroItemResponseSchema.parse(result));
+    }
+  );
+
+  app.patch<{ Params: { itemId: string } }>(
+    "/api/v1/retro/:itemId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const body = UpdateRetroItemRequestSchema.parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const item = await retroService.updateRetroItem(itemId, actor, body);
+      return reply.status(200).send(RetroItemSchema.parse(item));
+    }
+  );
+
+  app.patch<{ Params: { itemId: string } }>(
+    "/api/v1/retro/items/:itemId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const body = UpdateRetroItemRequestSchema.parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const item = await retroService.updateRetroItem(itemId, actor, body);
+      return reply.status(200).send(RetroItemSchema.parse(item));
+    }
+  );
+
+  app.delete<{ Params: { itemId: string } }>(
+    "/api/v1/retro/:itemId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.deleteRetroItem(itemId, actor);
+      return reply.status(200).send({ id: result.id, deleted: true });
+    }
+  );
+
+  app.delete<{ Params: { itemId: string } }>(
+    "/api/v1/retro/items/:itemId",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.deleteRetroItem(itemId, actor);
+      return reply.status(200).send({ id: result.id, deleted: true });
+    }
+  );
+
+  app.post<{ Params: { itemId: string } }>(
+    "/api/v1/retro/:itemId/convert-to-card",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const body = ConvertRetroItemToCardRequestSchema.optional().parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.convertToCard(itemId, actor, body);
+      return reply.status(201).send(ConvertRetroItemToCardResponseSchema.parse(result));
+    }
+  );
+
+  app.post<{ Params: { itemId: string } }>(
+    "/api/v1/retro/items/:itemId/convert-to-card",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const itemId = NonEmptyIdParamSchema.parse(req.params.itemId);
+      const body = ConvertRetroItemToCardRequestSchema.optional().parse(req.body);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.convertToCard(itemId, actor, body);
+      return reply.status(201).send(ConvertRetroItemToCardResponseSchema.parse(result));
+    }
+  );
+
+  app.post<{ Params: { boardId: string } }>(
+    "/api/v1/boards/:boardId/retro/ai-synthesize",
+    { preHandler: requireRole(["ADMIN", "EDITOR"], authService) },
+    async (req, reply) => {
+      const boardId = UuidParamSchema.parse(req.params.boardId);
+      const actor = req.user ?? (await resolveActorAndRole(req, authService)).user;
+      const result = await retroService.aiSynthesizeRetro(boardId, actor);
+      return reply.status(200).send(AIRetroAnalysisResponseSchema.parse(result));
+    }
+  );
+
+  // ==========================================================================
   // 9. REAL-TIME WEBSOCKET ENDPOINT (WS /ws/boards/:boardId)
   // ==========================================================================
   app.get<{
@@ -2380,5 +2642,7 @@ export async function buildApp(
     authService,
     customFieldsService,
     dependencyGraphService,
+    timeTrackingService,
+    retroService,
   };
 }

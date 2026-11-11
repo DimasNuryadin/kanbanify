@@ -18,15 +18,17 @@ import type {
   BoardThemeConfig,
   CardCover,
   CardCustomFieldValue,
+  CardTimeTrackingSummary,
   Checklist,
   Comment,
   CustomFieldDefinition,
   Label,
   Member,
+  RetroItem,
   Subtask,
   WebhookConfig,
 } from "@kinetix/contracts";
-import { DEFAULT_THEME_CONFIG } from "@kinetix/contracts";
+import { DEFAULT_CARD_TIME_TRACKING, DEFAULT_THEME_CONFIG } from "@kinetix/contracts";
 
 export const priorityEnum = pgEnum("priority", [
   "LOW",
@@ -94,6 +96,7 @@ export const boards = pgTable("boards", {
   visibility: varchar("visibility", { length: 32 }).default("WORKSPACE").notNull(),
   custom_fields: jsonb("custom_fields").$type<CustomFieldDefinition[]>().default([]).notNull(),
   theme_config: jsonb("theme_config").$type<BoardThemeConfig>().default(DEFAULT_THEME_CONFIG).notNull(),
+  retro_items: jsonb("retro_items").$type<RetroItem[]>().default([]).notNull(),
   created_at: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),
@@ -151,6 +154,10 @@ export const cards = pgTable("cards", {
   custom_field_values: jsonb("custom_field_values")
     .$type<CardCustomFieldValue[]>()
     .default([])
+    .notNull(),
+  time_tracking: jsonb("time_tracking")
+    .$type<CardTimeTrackingSummary>()
+    .default(DEFAULT_CARD_TIME_TRACKING)
     .notNull(),
 });
 

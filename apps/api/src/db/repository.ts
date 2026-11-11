@@ -52,7 +52,11 @@ import {
   type BoardRole,
   type BoardVisibility,
   type AuthUser,
+  type CardTimeTrackingSummary,
+  type RetroItem,
+  type TimeEntry,
 } from "@kinetix/contracts";
+import { DEFAULT_CARD_TIME_TRACKING } from "@kinetix/contracts";
 import * as schema from "./schema.js";
 import { AppError } from "../errors.js";
 
@@ -60,6 +64,77 @@ const { Pool } = pg;
 
 export const DEFAULT_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 export const SEED_BOARD_ID = "11111111-1111-4111-8111-111111111111";
+
+export function buildDefaultRetroItems(boardId: string): RetroItem[] {
+  return [
+    {
+      id: `55555555-5555-4555-8555-${boardId.slice(0, 8)}01`,
+      board_id: boardId,
+      category: "WENT_WELL",
+      content: "Zero-downtime database migration executed cleanly on first try.",
+      author_id: "88888888-8888-4888-8888-888888888881",
+      author_name: "Alex Rivera",
+      author_initials: "AR",
+      votes: 5,
+      voted_by_user_ids: [
+        "88888888-8888-4888-8888-888888888881",
+        "88888888-8888-4888-8888-888888888882",
+      ],
+      linked_card_id: null,
+      is_resolved: false,
+      created_at: "2026-11-11T09:00:00.000Z",
+    },
+    {
+      id: `55555555-5555-4555-8555-${boardId.slice(0, 8)}02`,
+      board_id: boardId,
+      category: "TO_IMPROVE",
+      content: "PR review turnaround was slow on frontend glassmorphism studio.",
+      author_id: "88888888-8888-4888-8888-888888888882",
+      author_name: "Maya Lin",
+      author_initials: "ML",
+      votes: 3,
+      voted_by_user_ids: ["88888888-8888-4888-8888-888888888882"],
+      linked_card_id: null,
+      is_resolved: false,
+      created_at: "2026-11-11T09:10:00.000Z",
+    },
+    {
+      id: `55555555-5555-4555-8555-${boardId.slice(0, 8)}03`,
+      board_id: boardId,
+      category: "KUDOS",
+      content: "Huge thanks to Samir for stepping in to resolve the WebSocket presence heartbeat race condition!",
+      author_id: "88888888-8888-4888-8888-888888888881",
+      author_name: "Alex Rivera",
+      author_initials: "AR",
+      votes: 4,
+      voted_by_user_ids: [
+        "88888888-8888-4888-8888-888888888881",
+        "88888888-8888-4888-8888-888888888883",
+      ],
+      linked_card_id: null,
+      is_resolved: false,
+      created_at: "2026-11-11T09:20:00.000Z",
+    },
+    {
+      id: `55555555-5555-4555-8555-${boardId.slice(0, 8)}04`,
+      board_id: boardId,
+      category: "ACTION_ITEMS",
+      content: "Establish daily 15m PR review slot at 2 PM to eliminate code review bottleneck.",
+      author_id: "88888888-8888-4888-8888-888888888883",
+      author_name: "Samir Patel",
+      author_initials: "SP",
+      votes: 6,
+      voted_by_user_ids: [
+        "88888888-8888-4888-8888-888888888881",
+        "88888888-8888-4888-8888-888888888882",
+        "88888888-8888-4888-8888-888888888883",
+      ],
+      linked_card_id: null,
+      is_resolved: false,
+      created_at: "2026-11-11T09:30:00.000Z",
+    },
+  ];
+}
 
 export const DEFAULT_BOARD_BACKGROUND: BoardBackground = {
   type: "gradient",
@@ -631,6 +706,7 @@ function createPreseededMemoryStore(): InMemoryStore {
     visibility: "WORKSPACE",
     custom_fields: seedCustomFields,
     theme_config: { ...DEFAULT_THEME_CONFIG },
+    retro_items: buildDefaultRetroItems(SEED_BOARD_ID),
     created_at: createdAt,
   });
 
@@ -802,6 +878,40 @@ function createPreseededMemoryStore(): InMemoryStore {
         { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 16 },
         { field_id: "cf-00000000-0000-4000-8000-000000000003", value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 18000,
+        total_logged_seconds: 7200,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999991",
+            card_id: "44444444-4444-4444-8444-444444444444",
+            user_id: "88888888-8888-4888-8888-888888888881",
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 3600,
+            note: "Drafted OAuth2 PKCE flow architecture and endpoints",
+            source: "MANUAL",
+            started_at: "2026-11-09T09:00:00.000Z",
+            ended_at: "2026-11-09T10:00:00.000Z",
+            created_at: "2026-11-09T10:00:00.000Z",
+          },
+          {
+            id: "99999999-9999-4999-8999-999999999992",
+            card_id: "44444444-4444-4444-8444-444444444444",
+            user_id: "88888888-8888-4888-8888-888888888882",
+            user_name: "Maya Lin",
+            user_initials: "ML",
+            duration_seconds: 3600,
+            note: "Implemented token exchange and session refresh logic",
+            source: "STOPWATCH",
+            started_at: "2026-11-09T14:00:00.000Z",
+            ended_at: "2026-11-09T15:00:00.000Z",
+            created_at: "2026-11-09T15:00:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 1,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444403",
@@ -940,6 +1050,40 @@ function createPreseededMemoryStore(): InMemoryStore {
         { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 24 },
         { field_id: "cf-00000000-0000-4000-8000-000000000003", value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 14400,
+        total_logged_seconds: 5400,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999993",
+            card_id: "44444444-4444-4444-8444-444444444403",
+            user_id: "88888888-8888-4888-8888-888888888881",
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 3000,
+            note: "Refactored WebSocket connection retry logic",
+            source: "MANUAL",
+            started_at: "2026-11-10T10:00:00.000Z",
+            ended_at: "2026-11-10T10:50:00.000Z",
+            created_at: "2026-11-10T10:50:00.000Z",
+          },
+          {
+            id: "99999999-9999-4999-8999-999999999994",
+            card_id: "44444444-4444-4444-8444-444444444403",
+            user_id: "88888888-8888-4888-8888-888888888883",
+            user_name: "Samir Patel",
+            user_initials: "SP",
+            duration_seconds: 2400,
+            note: "Pomodoro focus sprint on Redis pub/sub channels",
+            source: "POMODORO",
+            started_at: "2026-11-10T11:00:00.000Z",
+            ended_at: "2026-11-10T11:40:00.000Z",
+            created_at: "2026-11-10T11:40:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 2,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444404",
@@ -1030,6 +1174,27 @@ function createPreseededMemoryStore(): InMemoryStore {
         { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 8 },
         { field_id: "cf-00000000-0000-4000-8000-000000000003", value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 10800,
+        total_logged_seconds: 3600,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999995",
+            card_id: "44444444-4444-4444-8444-444444444404",
+            user_id: "88888888-8888-4888-8888-888888888882",
+            user_name: "Maya Lin",
+            user_initials: "ML",
+            duration_seconds: 3600,
+            note: "Prompt engineering for AI card decomposition",
+            source: "MANUAL",
+            started_at: "2026-11-10T13:00:00.000Z",
+            ended_at: "2026-11-10T14:00:00.000Z",
+            created_at: "2026-11-10T14:00:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 1,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444406",
@@ -1108,6 +1273,40 @@ function createPreseededMemoryStore(): InMemoryStore {
         { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 12 },
         { field_id: "cf-00000000-0000-4000-8000-000000000003", value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 21600,
+        total_logged_seconds: 7500,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999996",
+            card_id: "44444444-4444-4444-8444-444444444406",
+            user_id: "88888888-8888-4888-8888-888888888882",
+            user_name: "Maya Lin",
+            user_initials: "ML",
+            duration_seconds: 4500,
+            note: "Modal cover picker UI styling & color swatches",
+            source: "STOPWATCH",
+            started_at: "2026-11-10T15:00:00.000Z",
+            ended_at: "2026-11-10T16:15:00.000Z",
+            created_at: "2026-11-10T16:15:00.000Z",
+          },
+          {
+            id: "99999999-9999-4999-8999-999999999997",
+            card_id: "44444444-4444-4444-8444-444444444406",
+            user_id: "88888888-8888-4888-8888-888888888881",
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 3000,
+            note: "Pomodoro focus sprint on expandable label tags",
+            source: "POMODORO",
+            started_at: "2026-11-10T16:30:00.000Z",
+            ended_at: "2026-11-10T17:20:00.000Z",
+            created_at: "2026-11-10T17:20:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 2,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444408",
@@ -1158,6 +1357,27 @@ function createPreseededMemoryStore(): InMemoryStore {
         { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 16 },
         { field_id: "cf-00000000-0000-4000-8000-000000000003", value: false },
       ],
+      time_tracking: {
+        estimated_seconds: 28800,
+        total_logged_seconds: 9000,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999998",
+            card_id: "44444444-4444-4444-8444-444444444408",
+            user_id: "88888888-8888-4888-8888-888888888883",
+            user_name: "Samir Patel",
+            user_initials: "SP",
+            duration_seconds: 9000,
+            note: "Cycle detection algorithm and critical path topological sort",
+            source: "MANUAL",
+            started_at: "2026-11-10T09:00:00.000Z",
+            ended_at: "2026-11-10T11:30:00.000Z",
+            created_at: "2026-11-10T11:30:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 3,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444401",
@@ -1256,6 +1476,27 @@ function createPreseededMemoryStore(): InMemoryStore {
         { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 14 },
         { field_id: "cf-00000000-0000-4000-8000-000000000003", value: true },
       ],
+      time_tracking: {
+        estimated_seconds: 25200,
+        total_logged_seconds: 7200,
+        active_timer: null,
+        entries: [
+          {
+            id: "99999999-9999-4999-8999-999999999999",
+            card_id: "44444444-4444-4444-8444-444444444401",
+            user_id: "88888888-8888-4888-8888-888888888881",
+            user_name: "Alex Rivera",
+            user_initials: "AR",
+            duration_seconds: 7200,
+            note: "Fractional index reordering unit benchmarks and edge case tests",
+            source: "MANUAL",
+            started_at: "2026-11-09T13:00:00.000Z",
+            ended_at: "2026-11-09T15:00:00.000Z",
+            created_at: "2026-11-09T15:00:00.000Z",
+          },
+        ],
+        pomodoro_completed_count: 2,
+      },
     },
   ];
   for (const card of seedCards) {
@@ -1294,6 +1535,7 @@ function createPreseededMemoryStore(): InMemoryStore {
     visibility: "WORKSPACE",
     custom_fields: [],
     theme_config: { ...DEFAULT_THEME_CONFIG },
+    retro_items: buildDefaultRetroItems(BOARD_2_ID),
     created_at: createdAt,
   });
 
@@ -1331,6 +1573,13 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: {
+        estimated_seconds: 18000,
+        total_logged_seconds: 7200,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 2,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444422",
@@ -1357,6 +1606,13 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: {
+        estimated_seconds: 10800,
+        total_logged_seconds: 3600,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 1,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444423",
@@ -1383,6 +1639,13 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_archived: false,
       is_watching: true,
       custom_field_values: [],
+      time_tracking: {
+        estimated_seconds: 28800,
+        total_logged_seconds: 10800,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 3,
+      },
     },
   ];
   for (const c of b2Cards) cards.set(c.id, c);
@@ -1419,6 +1682,7 @@ function createPreseededMemoryStore(): InMemoryStore {
     visibility: "WORKSPACE",
     custom_fields: [],
     theme_config: { ...DEFAULT_THEME_CONFIG },
+    retro_items: buildDefaultRetroItems(BOARD_3_ID),
     created_at: createdAt,
   });
 
@@ -1456,6 +1720,13 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: {
+        estimated_seconds: 28800,
+        total_logged_seconds: 14400,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 4,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444432",
@@ -1482,6 +1753,13 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: {
+        estimated_seconds: 18000,
+        total_logged_seconds: 7200,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 2,
+      },
     },
     {
       id: "44444444-4444-4444-8444-444444444433",
@@ -1508,6 +1786,13 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_archived: false,
       is_watching: true,
       custom_field_values: [],
+      time_tracking: {
+        estimated_seconds: 46800,
+        total_logged_seconds: 18000,
+        active_timer: null,
+        entries: [],
+        pomodoro_completed_count: 5,
+      },
     },
   ];
   for (const c of b3Cards) cards.set(c.id, c);
@@ -1621,6 +1906,7 @@ export class StorageRepository {
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS invite_links JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS theme_config JSONB NOT NULL DEFAULT '{"preset":"DEFAULT_CLEAN","glass_blur":"md","card_density":"comfortable","card_radius":"md","accent_color":"#6366f1","show_custom_fields_on_front":true,"show_dependency_badges_on_front":true}'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS retro_items JSONB NOT NULL DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(128) PRIMARY KEY,
@@ -1684,6 +1970,7 @@ export class StorageRepository {
       ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_watching BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE cards ADD COLUMN IF NOT EXISTS custom_field_values JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS time_tracking JSONB NOT NULL DEFAULT '{"estimated_seconds":0,"total_logged_seconds":0,"active_timer":null,"entries":[],"pomodoro_completed_count":0}'::jsonb;
 
       CREATE TABLE IF NOT EXISTS subtasks (
         id UUID PRIMARY KEY,
@@ -1759,6 +2046,7 @@ export class StorageRepository {
           visibility: b.visibility,
           custom_fields: b.custom_fields,
           theme_config: b.theme_config,
+          retro_items: b.retro_items,
           created_at: b.created_at,
         })
         .onConflictDoNothing();
@@ -1809,6 +2097,7 @@ export class StorageRepository {
           is_archived: card.is_archived,
           is_watching: card.is_watching,
           custom_field_values: card.custom_field_values,
+          time_tracking: card.time_tracking,
         })
         .onConflictDoNothing();
 
@@ -1887,6 +2176,7 @@ export class StorageRepository {
       custom_field_values: Array.isArray((row as any).custom_field_values)
         ? (row as any).custom_field_values
         : [],
+      time_tracking: (row as any).time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING },
     };
   }
 
@@ -1939,6 +2229,9 @@ export class StorageRepository {
       ? (row as any).custom_fields
       : [];
     const themeConfig: BoardThemeConfig = (row as any).theme_config ?? { ...DEFAULT_THEME_CONFIG };
+    const retroItems: RetroItem[] = Array.isArray((row as any).retro_items)
+      ? (row as any).retro_items
+      : [];
 
     return {
       id: row.id,
@@ -1956,6 +2249,7 @@ export class StorageRepository {
       visibility,
       custom_fields: customFields,
       theme_config: themeConfig,
+      retro_items: retroItems,
       columns: cols,
       cards: boardCards,
       created_at: normalizeIsoTimestamp(row.created_at),
@@ -2257,6 +2551,7 @@ export class StorageRepository {
           is_archived: false,
           is_watching: false,
           custom_field_values: [],
+          time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
         });
       }
     }
@@ -2328,6 +2623,7 @@ export class StorageRepository {
       visibility,
       custom_fields: customFields,
       theme_config: themeConfig,
+      retro_items: [],
       created_at: createdAt,
     });
     for (const col of defaultColumns) {
@@ -2355,6 +2651,7 @@ export class StorageRepository {
           visibility,
           custom_fields: customFields,
           theme_config: themeConfig,
+          retro_items: [],
           created_at: createdAt,
         });
         await this.db.insert(schema.columns).values(
@@ -2395,6 +2692,7 @@ export class StorageRepository {
               is_archived: sc.is_archived,
               is_watching: sc.is_watching,
               custom_field_values: sc.custom_field_values,
+              time_tracking: sc.time_tracking,
             }))
           );
         }
@@ -2423,6 +2721,7 @@ export class StorageRepository {
       visibility,
       custom_fields: customFields,
       theme_config: themeConfig,
+      retro_items: [],
       columns: defaultColumns,
       cards: sampleCards,
       created_at: createdAt,
@@ -2446,6 +2745,7 @@ export class StorageRepository {
       visibility: board.visibility ?? "WORKSPACE",
       custom_fields: board.custom_fields ?? [],
       theme_config: board.theme_config ?? { ...DEFAULT_THEME_CONFIG },
+      retro_items: board.retro_items ?? [],
       created_at: board.created_at,
     });
 
@@ -2475,6 +2775,7 @@ export class StorageRepository {
           visibility: board.visibility ?? "WORKSPACE",
           custom_fields: board.custom_fields ?? [],
           theme_config: board.theme_config ?? { ...DEFAULT_THEME_CONFIG },
+          retro_items: board.retro_items ?? [],
           created_at: board.created_at,
         });
 
@@ -2519,6 +2820,7 @@ export class StorageRepository {
               is_archived: c.is_archived,
               is_watching: c.is_watching,
               custom_field_values: c.custom_field_values ?? [],
+              time_tracking: c.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING },
             }))
           );
         }
@@ -2637,6 +2939,7 @@ export class StorageRepository {
       visibility: updatedVisibility,
       custom_fields: updatedCustomFields,
       theme_config: updatedThemeConfig,
+      retro_items: (input as any).retro_items ?? existing.retro_items ?? [],
       created_at: existing.created_at,
     });
 
@@ -2982,6 +3285,7 @@ export class StorageRepository {
             is_archived: card.is_archived,
             is_watching: card.is_watching,
             custom_field_values: card.custom_field_values ?? [],
+            time_tracking: card.time_tracking,
           })
           .where(eq(schema.cards.id, card.id));
       } catch (err) {
@@ -3327,6 +3631,7 @@ export class StorageRepository {
       is_archived: input.is_archived ?? false,
       is_watching: input.is_watching ?? false,
       custom_field_values: input.custom_field_values ?? [],
+      time_tracking: (input as any).time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING },
     };
 
     this.memory.cards.set(newCard.id, newCard);
@@ -3358,6 +3663,7 @@ export class StorageRepository {
           is_archived: newCard.is_archived,
           is_watching: newCard.is_watching,
           custom_field_values: newCard.custom_field_values,
+          time_tracking: newCard.time_tracking,
         });
 
         if (newCard.subtasks.length > 0) {
@@ -3481,6 +3787,10 @@ export class StorageRepository {
         input.custom_field_values !== undefined
           ? input.custom_field_values
           : existing.custom_field_values,
+      time_tracking:
+        (input as any).time_tracking !== undefined
+          ? (input as any).time_tracking
+          : existing.time_tracking,
     };
 
     this.memory.cards.set(cardId, updatedCard);
@@ -3512,6 +3822,7 @@ export class StorageRepository {
             is_archived: updatedCard.is_archived,
             is_watching: updatedCard.is_watching,
             custom_field_values: updatedCard.custom_field_values,
+            time_tracking: updatedCard.time_tracking,
           })
           .where(eq(schema.cards.id, cardId));
 
@@ -3719,6 +4030,10 @@ export class StorageRepository {
         custom_field_values: keepCustomFields
           ? (sourceCard.custom_field_values ?? []).map((v) => ({ ...v }))
           : [],
+        time_tracking: {
+          ...DEFAULT_CARD_TIME_TRACKING,
+          estimated_seconds: sourceCard.time_tracking?.estimated_seconds ?? 0,
+        },
       },
       actorName
     );
@@ -4835,5 +5150,180 @@ export class StorageRepository {
     });
 
     return themeConfig;
+  }
+
+  // ==========================================================================
+  // RETROSPECTIVE OPERATIONS (PHASE 8)
+  // ==========================================================================
+
+  public async getRetroItems(boardId: string): Promise<RetroItem[]> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+    return [...(board.retro_items ?? [])].sort((a, b) => {
+      if (b.votes !== a.votes) {
+        return b.votes - a.votes;
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }
+
+  public async createRetroItem(
+    boardId: string,
+    item: RetroItem
+  ): Promise<RetroItem> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const nextRetroItems = [...(board.retro_items ?? []), item];
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.retro_items = nextRetroItems;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ retro_items: nextRetroItems })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    board.retro_items = nextRetroItems;
+    return item;
+  }
+
+  public async findRetroItemById(
+    itemId: string
+  ): Promise<{ board: Board; item: RetroItem } | null> {
+    const boards = await this.listBoards();
+    for (const b of boards) {
+      const item = (b.retro_items ?? []).find((ri) => ri.id === itemId);
+      if (item) {
+        return { board: b, item };
+      }
+    }
+    return null;
+  }
+
+  public async updateRetroItem(
+    itemId: string,
+    updates: Partial<RetroItem>
+  ): Promise<{ item: RetroItem; board: Board }> {
+    const found = await this.findRetroItemById(itemId);
+    if (!found) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Retrospective item '${itemId}' not found`,
+        { item_id: itemId }
+      );
+    }
+
+    const { board, item } = found;
+    const updatedItem: RetroItem = {
+      ...item,
+      ...updates,
+    };
+
+    const nextRetroItems = (board.retro_items ?? []).map((ri) =>
+      ri.id === itemId ? updatedItem : ri
+    );
+
+    const memBoard = this.memory.boards.get(board.id);
+    if (memBoard) {
+      memBoard.retro_items = nextRetroItems;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ retro_items: nextRetroItems })
+          .where(eq(schema.boards.id, board.id));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    board.retro_items = nextRetroItems;
+    return { item: updatedItem, board };
+  }
+
+  public async deleteRetroItem(
+    itemId: string
+  ): Promise<{ id: string; boardId: string; deleted: boolean }> {
+    const found = await this.findRetroItemById(itemId);
+    if (!found) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Retrospective item '${itemId}' not found`,
+        { item_id: itemId }
+      );
+    }
+
+    const { board } = found;
+    const nextRetroItems = (board.retro_items ?? []).filter((ri) => ri.id !== itemId);
+
+    const memBoard = this.memory.boards.get(board.id);
+    if (memBoard) {
+      memBoard.retro_items = nextRetroItems;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ retro_items: nextRetroItems })
+          .where(eq(schema.boards.id, board.id));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { id: itemId, boardId: board.id, deleted: true };
+  }
+
+  // ==========================================================================
+  // TIME TRACKING OPERATIONS (PHASE 8)
+  // ==========================================================================
+
+  public async findCardWithActiveTimerForUser(userId: string): Promise<Card | null> {
+    for (const card of this.memory.cards.values()) {
+      if (card.time_tracking?.active_timer?.user_id === userId) {
+        return card;
+      }
+    }
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        const rows = await this.db.select().from(schema.cards);
+        for (const row of rows) {
+          const c = this.mapRowToCard(row);
+          if (c.time_tracking?.active_timer?.user_id === userId) {
+            return c;
+          }
+        }
+      } catch {
+        // fallback
+      }
+    }
+    return null;
   }
 }

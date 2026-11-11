@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   BoardExportCsvResponseSchema,
   BoardSchema,
+  DEFAULT_CARD_TIME_TRACKING,
   DEFAULT_THEME_CONFIG,
   TrelloImportResultSchema,
   type Activity,
@@ -556,6 +557,7 @@ export class ImportExportService {
           is_archived: Boolean(rawCard.closed ?? rawCard.is_archived ?? false),
           is_watching: Boolean(rawCard.subscribed ?? rawCard.is_watching ?? false),
           custom_field_values: [],
+          time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
         });
       });
     }
@@ -821,6 +823,7 @@ export class ImportExportService {
         custom_field_values: Array.isArray(c?.custom_field_values)
           ? c.custom_field_values
           : [],
+        time_tracking: c?.time_tracking ?? { ...DEFAULT_CARD_TIME_TRACKING },
       };
     });
 
@@ -865,6 +868,7 @@ export class ImportExportService {
         ? payload.custom_fields
         : [],
       theme_config: payload.theme_config ?? { ...DEFAULT_THEME_CONFIG },
+      retro_items: Array.isArray(payload.retro_items) ? payload.retro_items : [],
       created_at: now,
     });
 
@@ -910,6 +914,9 @@ export class ImportExportService {
       "Custom Fields",
       "Archived",
       "Updated At",
+      "Estimated Hours",
+      "Logged Hours",
+      "Pomodoro Count",
     ];
 
     const rows: string[] = [headers.join(",")];
@@ -960,6 +967,12 @@ export class ImportExportService {
         .filter(Boolean)
         .join("; ");
 
+      const estHours =
+        Math.round(((card.time_tracking?.estimated_seconds ?? 0) / 3600) * 10) / 10;
+      const loggedHours =
+        Math.round(((card.time_tracking?.total_logged_seconds ?? 0) / 3600) * 10) / 10;
+      const pomodoroCount = card.time_tracking?.pomodoro_completed_count ?? 0;
+
       const rowCells = [
         escapeCsvCell(card.id),
         escapeCsvCell(card.title),
@@ -975,6 +988,9 @@ export class ImportExportService {
         escapeCsvCell(cfSummary),
         escapeCsvCell(card.is_archived),
         escapeCsvCell(card.updated_at),
+        escapeCsvCell(estHours),
+        escapeCsvCell(loggedHours),
+        escapeCsvCell(pomodoroCount),
       ];
 
       rows.push(rowCells.join(","));
