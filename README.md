@@ -11,7 +11,7 @@ Kanbanify is a polyglot monorepo combining an optimistic real-time Multi-Board K
 ```mermaid
 flowchart LR
     subgraph Client ["apps/web (Next.js 16 — Port 3000)"]
-        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics / Graph + Custom Fields + Theme Studio"]
+        UI["React 19 + Tailwind v4\nKanban / Calendar / Table / Analytics / Graph / Retro + Pomodoro Dock + Time Tracking"]
         Store["Zustand v5 + TanStack Query v5\nOptimistic O(1) Fractional Indexer & Auth/RBAC Store"]
     end
 
@@ -22,6 +22,8 @@ flowchart LR
         CustomFields["Custom Fields Service\nCRUD Definitions, Dropdowns & Value Assignments"]
         DepGraph["Dependency Graph Service\nCycle-Safe Linking & DAG Engine"]
         Theme["Theme Studio Service\nPresets & Glassmorphism Persistence"]
+        TimeTracking["Time Tracking & Pomodoro Service\nStopwatch, Worklogs & Pomodoro Auto-Logger"]
+        Retro["Sprint Retrospective Service\n4-Column Retro, Upvotes & Card Converter"]
         Butler["Butler Automation Engine\nRuntime Trigger & Action Executor"]
         Analytics["Analytics & Data Portability\nBurndown + Trello JSON Import + CSV/JSON Export"]
         Presence["Presence & Typing Hub\nGET/POST /presence & WS sync"]
@@ -37,6 +39,7 @@ flowchart LR
         Auditor["POST /internal/v1/audit-permissions\nAI Workspace Access & Permission Auditor"]
         Formatter["POST /internal/v1/format-notification\nAI ChatOps Digest & Notification Formatter"]
         CriticalPath["POST /internal/v1/analyze-dependencies\nAI Critical Path & Bottleneck Analyzer"]
+        RetroSynthesizer["POST /internal/v1/synthesize-retro\nAI Sprint Retro Synthesizer & Estimation Analyzer"]
     end
 
     subgraph Infra ["Infrastructure (Docker Compose)"]
@@ -52,6 +55,8 @@ flowchart LR
     REST --> CustomFields
     REST --> DepGraph
     REST --> Theme
+    REST --> TimeTracking
+    REST --> Retro
     REST --> Butler
     REST --> Analytics
     REST --> Presence
@@ -61,6 +66,8 @@ flowchart LR
     CustomFields --> Repo
     DepGraph --> Repo
     Theme --> Repo
+    TimeTracking --> Repo
+    Retro --> Repo
     Butler --> Repo
     Analytics --> Repo
     Presence --> WS
@@ -73,6 +80,7 @@ flowchart LR
     REST -- "X-Internal-Token (:8001)" --> BoardAnalyzer
     REST -- "X-Internal-Token (:8001)" --> Auditor
     DepGraph -- "X-Internal-Token (:8001)" --> CriticalPath
+    Retro -- "X-Internal-Token (:8001)" --> RetroSynthesizer
     Webhook -- "X-Internal-Token (:8001)" --> Formatter
 ```
 
@@ -80,10 +88,11 @@ flowchart LR
 
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
-| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | 1-Click Demo Role Switcher (`ADMIN`, `EDITOR`, `VIEWER`), Read-Only Enforcement Mode for Viewers, Shareable Board Invite Modal & Member Access Management, AI Security & Permission Audit Modal, Trello Custom Fields Power-Up Modal & Card Front Badges, Visual Dependency Graph (`🕸️ Graph`) with Interactive SVG DAG Canvas, Glassmorphism Theme Customization Studio Drawer (`🎨 Theme Studio`), Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table/Graph UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
-| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Enterprise JWT Authentication (HS256 tokens, register, login, `/auth/me`), Pre-Seeded Demo User Profiles, Strict RBAC Guard Middleware (`403 FORBIDDEN` enforcement matching `StandardErrorSchema`), Custom Fields CRUD & Card Value Service (`GET/POST/PATCH/DELETE /custom-fields`), Cycle-Safe Card Dependency Service (`POST/DELETE /cards/:cardId/dependencies` with Tarjan/DFS circular prevention), Interactive Dependency Graph Engine (`GET /dependency-graph`), AI Critical Path Proxy (`POST /dependency-graph/ai-analyze`), Theme Studio Persistence (`PATCH /boards/:boardId/theme`), Shareable Invite Links Service (`POST /invites`, preview, and join redemption), AI Permission Audit Proxy (`POST /api/v1/boards/:boardId/security-audit`), Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator, Native Trello JSON Importer, CSV/JSON Exporter, Real-Time Co-Presence Service & Live Typing Coordinator, Outbound Webhook Dispatcher with HMAC-SHA256 signatures, WebSocket real-time room fan-out, PostgreSQL & Redis persistence with automatic in-memory fallback |
-| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | AI Critical Path & Dependency Bottleneck Analyzer (`POST /internal/v1/analyze-dependencies`) computing longest DAG chain, bottleneck risk ratings, and mitigation actions, AI Workspace Access & Permission Security Auditor (`POST /internal/v1/audit-permissions`) analyzing least-privilege role distribution and invite link exposure with zero-config deterministic fallback, Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads |
-| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for Auth, JWT Sessions, RBAC Roles (`ADMIN`, `EDITOR`, `VIEWER`), Custom Fields (`CustomFieldDefinition`, `CardCustomFieldValue`), Card Dependencies & DAG Graph (`BoardDependencyGraph`, `AICriticalPathResponse`), Theme Configuration (`BoardThemeConfig`), Shareable Invite Links, AI Permission Audit, REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
+| **Web Workspace (`apps/web`)** | Next.js 16 (App Router), React 19, Tailwind CSS v4, `@dnd-kit`, Zustand v5, TanStack Query v5, Lucide Icons | Real-Time Card Stopwatch (`CardLiveTimerBadge`, `CardTimeTrackingSection`), Floating Dockable Pomodoro Focus Timer (`PomodoroDock`) with circular SVG progress ring and audio chimes, 4-Column Sprint Retrospective Board (`"🔄 Retro"` View) with upvoting & 1-click Convert to Kanban Card, AI Sprint Retrospective Synthesizer Panel, 1-Click Demo Role Switcher (`ADMIN`, `EDITOR`, `VIEWER`), Read-Only Enforcement Mode for Viewers, Shareable Board Invite Modal & Member Access Management, AI Security & Permission Audit Modal, Trello Custom Fields Power-Up Modal & Card Front Badges, Visual Dependency Graph (`🕸️ Graph`) with Interactive SVG DAG Canvas, Glassmorphism Theme Customization Studio Drawer (`🎨 Theme Studio`), Collapsible Multi-Board Workspace Sidebar, Board Templates Gallery, Trello Butler Automation Center + AI Rule Builder, Sprint Analytics Dashboard & SVG Burndown Chart, Native Trello JSON Import & CSV/JSON Export Modal, Live Co-Presence Avatar Stack, Card-Level Typing Indicators ("💬 [Name] is editing..."), Outbound Webhook Modal with Live Slack/Discord Message Previewers, Optimistic Kanban/Calendar/Table/Graph/Retro UI, O(1) Fractional Drag-and-Drop, `Cmd+K` Command Palette |
+| **Core API & WS (`apps/api`)** | Node.js 20+, Fastify v5, `@fastify/websocket`, `@fastify/cors`, Drizzle ORM, `pg`, `ioredis`, Zod v4 | Real-Time Time Tracking & Stopwatch Service (`/cards/:cardId/timer/start`, `stop`, manual `/time-entries`), Pomodoro Focus Complete Endpoint (`/cards/:cardId/pomodoro/complete`), Sprint Retrospective Board Service (`GET/POST /boards/:boardId/retro`, upvoting `/retro/:itemId/vote`, convert-to-card `/retro/:itemId/convert-to-card`), AI Retro Synthesizer Proxy (`POST /boards/:boardId/retro/ai-synthesize`), Enterprise JWT Authentication (HS256 tokens, register, login, `/auth/me`), Pre-Seeded Demo User Profiles, Strict RBAC Guard Middleware (`403 FORBIDDEN` enforcement matching `StandardErrorSchema`), Custom Fields CRUD & Card Value Service (`GET/POST/PATCH/DELETE /custom-fields`), Cycle-Safe Card Dependency Service (`POST/DELETE /cards/:cardId/dependencies` with Tarjan/DFS circular prevention), Interactive Dependency Graph Engine (`GET /dependency-graph`), AI Critical Path Proxy (`POST /dependency-graph/ai-analyze`), Theme Studio Persistence (`PATCH /boards/:boardId/theme`), Shareable Invite Links Service (`POST /invites`, preview, and join redemption), AI Permission Audit Proxy (`POST /api/v1/boards/:boardId/security-audit`), Multi-workspace & board endpoints, Board Templates provisioning, Runtime Butler Automation Engine, Real-Time Sprint Analytics Aggregator, Native Trello JSON Importer, CSV/JSON Exporter, Real-Time Co-Presence Service & Live Typing Coordinator, Outbound Webhook Dispatcher with HMAC-SHA256 signatures, WebSocket real-time room fan-out, PostgreSQL & Redis persistence with automatic in-memory fallback |
+| **AI Engine (`services/ai-engine`)** | Python 3.11/3.12, FastAPI, Uvicorn, Pydantic v2, `httpx`, OpenAI/LiteLLM | AI Sprint Retrospective Synthesizer & Estimation Accuracy Analyzer (`POST /internal/v1/synthesize-retro`) computing sprint morale scores (`0-100`), key themes, estimation accuracy summaries, and recommended action items, AI Critical Path & Dependency Bottleneck Analyzer (`POST /internal/v1/analyze-dependencies`) computing longest DAG chain, bottleneck risk ratings, and mitigation actions, AI Workspace Access & Permission Security Auditor (`POST /internal/v1/audit-permissions`) analyzing least-privilege role distribution and invite link exposure with zero-config deterministic fallback, Stateless AI task decomposition, Trello Smart Card Enrichment, Bilingual (Indonesian & English) Natural Language to Butler Automation Rule Compiler, AI Executive Sprint Health & Bottleneck Analyzer (`POST /internal/v1/analyze-board`), and AI Smart ChatOps Notification Formatter (`POST /internal/v1/format-notification`) generating Slack Block Kit & Discord Rich Embed payloads |
+| **Shared Contracts (`packages/contracts`)** | TypeScript (`index.ts`), Python Pydantic v2 (`schemas.py`), OpenAPI 3.1 (`openapi.yaml`) | Single source of truth for Phase 8 Time Tracking (`CardTimeTrackingSummary`, `ActiveCardTimer`, `CardTimeEntry`, `TimeEntrySource`), Pomodoro Sessions (`PomodoroSession`, `PomodoroMode`), Sprint Retrospectives (`RetroItem`, `RetroCategory`, `AIRetroAnalysisRequest`, `AIRetroAnalysisResponse`), Auth, JWT Sessions, RBAC Roles (`ADMIN`, `EDITOR`, `VIEWER`), Custom Fields (`CustomFieldDefinition`, `CardCustomFieldValue`), Card Dependencies & DAG Graph (`BoardDependencyGraph`, `AICriticalPathResponse`), Theme Configuration (`BoardThemeConfig`), Shareable Invite Links, AI Permission Audit, REST, WebSocket, Workspace, Template, Butler Automation, Sprint Analytics, Trello Import/Export, User Presence, Typing Indicators, Outbound Webhook, and Internal AI schemas |
+| **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 | **Infrastructure (`infrastructure/docker`)** | Docker Compose, PostgreSQL 16 Alpine, Redis 7 Alpine | Containerized 5-service production stack with healthchecks |
 
 ---
@@ -166,7 +175,7 @@ Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Automated E2E Smoke Test
 
-Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 5 lifecycle:
+Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2e_test.mjs`) that automatically starts (or connects to) `services/ai-engine` (`:8001`) and `apps/api` (`:8000`) and verifies the full Phase 1 through Phase 8 lifecycle:
 1. **Health Checks:** Verifies `GET /health` on both `http://localhost:8001/health` and `http://localhost:8000/health` return `200 OK`.
 2. **Workspaces & Board Templates Verification (Phase 3):**
    - Calls `GET /api/v1/workspaces` and asserts at least 1 workspace and multiple seeded boards exist.
@@ -193,7 +202,13 @@ Kanbanify includes a cross-platform automated End-to-End smoke test (`scripts/e2
 21. **Cycle-Safe Dependency Graph & Circular Prevention (Phase 7):** Creates Card A and Card B, links B blocked by A via `POST /api/v1/cards/:cardId/dependencies`, asserts strict rejection of circular dependency (A blocked by B) with HTTP `400 VALIDATION_ERROR`, and retrieves DAG structure via `GET /api/v1/boards/:boardId/dependency-graph`.
 22. **✨ AI Critical Path & Dependency Bottleneck Analysis (`API -> AI Engine`, Phase 7):** Calls `POST /api/v1/boards/:boardId/dependency-graph/ai-analyze` ($\rightarrow$ `POST /internal/v1/analyze-dependencies` with `X-Internal-Token`) and asserts `200 OK` returning `risk_summary`, `critical_path_titles`, `top_blocker_cards`, and `unblocking_recommendations`.
 23. **Glassmorphism & Theme Studio Persistence (Phase 7):** Updates board theme via `PATCH /api/v1/boards/:boardId/theme` with `{ preset: "FROSTED_GLASS", glass_blur: "lg", card_density: "compact" }` and asserts persistence across board reloads.
-24. **Live WebSocket Broadcast:** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`, `CARD_UPDATED`, `BOARD_UPDATED`).
+24. **Real-Time Card Time Tracking & Stopwatch Lifecycle (Phase 8):** Calls `POST /api/v1/cards/:cardId/timer/start` asserting `active_timer !== null`, followed by `POST /api/v1/cards/:cardId/timer/stop` asserting `active_timer === null`, `total_logged_seconds > 0`, and a `"STOPWATCH"` entry in `card.time_tracking.entries`.
+25. **Manual Worklog Logging & Deletion (Phase 8):** Calls `POST /api/v1/cards/:cardId/time-entries` adding 1800s manual log, verifies recalculation of `total_logged_seconds`, and calls `DELETE /api/v1/cards/:cardId/time-entries/:entryId` asserting entry removal.
+26. **Pomodoro Focus Timer Complete (Phase 8):** Calls `POST /api/v1/cards/:cardId/pomodoro/complete` with `{ mode: "FOCUS", duration_seconds: 1500 }` asserting `pomodoro_completed_count >= 1`, `total_logged_seconds >= 1500`, and a `"POMODORO"` entry in worklogs.
+27. **Sprint Retrospective Board & Upvoting (Phase 8):** Creates retro note via `POST /api/v1/boards/:boardId/retro`, verifies retrieval on `GET /api/v1/boards/:boardId/retro`, toggles upvote via `POST /api/v1/retro/:itemId/vote` asserting `votes >= 1`, and converts note into real Kanban card via `POST /api/v1/retro/:itemId/convert-to-card` asserting populated `linked_card_id` and `is_resolved: true`.
+28. **✨ AI Sprint Retrospective Synthesizer (`API -> AI Engine`, Phase 8):** Calls `POST /api/v1/boards/:boardId/retro/ai-synthesize` ($\rightarrow$ `POST /internal/v1/synthesize-retro` with `X-Internal-Token`) asserting `200 OK` with valid `sprint_morale_score` (`0-100`), `estimation_accuracy_summary`, `key_themes`, and `recommended_action_items`.
+29. **Phase 8 Analytics & CSV Export Metrics:** Calls `GET /api/v1/boards/:boardId/analytics` asserting `total_logged_hours` and `total_pomodoros_completed`, and verifies RFC 4180 CSV export headers (`"Logged Hours"`, `"Pomodoro Count"`).
+30. **Live WebSocket Broadcast (Phases 1–8):** Verifies real-time room events on `/ws/boards/:boardId` (`USER_JOINED`, `CARD_MOVED`, `AUTOMATION_TRIGGERED`, `USER_TYPING`, `PRESENCE_SYNC`, `CARD_UPDATED`, `BOARD_UPDATED`, `TIMER_UPDATED`, `RETRO_ITEM_CREATED`, `RETRO_ITEM_UPDATED`, `CARD_CREATED`).
 
 Run the E2E smoke test with a single command:
 
@@ -202,6 +217,41 @@ node scripts/e2e_test.mjs
 # or via root package.json:
 npm run test:e2e
 ```
+
+---
+
+## Phase 8 Real-Time Time Tracking, Pomodoro Focus Timer & AI Sprint Retrospectives
+
+- **Real-Time Card Time Tracking & Stopwatch Lifecycle (`apps/web` <-> `apps/api`):**
+  - **1-Click Card Front & Modal Stopwatch:** Click the stopwatch icon on any card front or inside the 2-Column Card Back Modal (`CardTimeTrackingSection`) to start/stop live time tracking via `POST /api/v1/cards/:cardId/timer/start` and `POST /api/v1/cards/:cardId/timer/stop`.
+  - **Live Pulsing Ticker Badge (`CardLiveTimerBadge`):** Running timers pulse in high-visibility emerald with live elapsed second tickers, displaying the active user's initials/name. Hovering over a running badge provides an instant **⏹️ Stop** button.
+  - **Collaborative Concurrency Protection:** Starting a timer on any card automatically detects and stops any existing active stopwatch for that user on other cards, preventing phantom dual-tracking.
+  - **Manual Worklog & Estimation Calibration:** Add manual time log entries with custom notes via `POST /api/v1/cards/:cardId/time-entries` and delete incorrect entries via `DELETE /api/v1/cards/:cardId/time-entries/:entryId` with automatic recalculation of `total_logged_seconds`. Set `estimated_seconds` to visualize completion ratio and track estimation accuracy.
+  - **Instant WebSocket Synchronization:** Real-time `TIMER_UPDATED` and `CARD_UPDATED` events are broadcast to all peers on `/ws/boards/:boardId`.
+- **Built-in Pomodoro Focus Timer (`PomodoroDock`):**
+  - **Dockable Focus Widget:** Floating, persistent bottom dock accessible from any view via the timer pill in the workspace header or card action menu.
+  - **Pomodoro Modes & Interval Presets:** Seamlessly cycle through **Focus (25m)**, **Short Break (5m)**, and **Long Break (15m)** with animated circular SVG countdown gauges and audible Web Audio API chimes upon completion.
+  - **Direct Card Binding:** Bind focus sessions to any card on the active board with a dedicated card selector dropdown.
+  - **Automatic Focus Worklog Logging (`POST /api/v1/cards/:cardId/pomodoro/complete`):** Completing a 25m Focus session automatically logs 1,500 seconds with source `"POMODORO"`, increments `card.time_tracking.pomodoro_completed_count`, updates board analytics (`total_pomodoros_completed`), and notifies team members over WebSocket.
+- **Interactive 4-Column Sprint Retrospective Board (`"🔄 Retro"` View):**
+  - **4 Agile Feedback Columns:**
+    - 🌟 **What Went Well:** Celebrate sprint successes, deployed features, and team milestones.
+    - 💡 **To Improve:** Flag process bottlenecks, tech debt, and delivery friction.
+    - 👏 **Kudos:** Peer-to-peer recognition highlighting exceptional collaboration and craftsmanship.
+    - 🚀 **Action Items:** Concrete agile commitments to carry forward into the next sprint.
+  - **Collaborative Upvoting Engine:** Upvote or un-vote notes via `POST /api/v1/retro/:itemId/vote`. Notes automatically sort by highest vote count in real time.
+  - **1-Click Convert to Kanban Card (`POST /api/v1/retro/:itemId/convert-to-card`):** Instantly convert any retro note or action item into a real Kanban task card in the Backlog with configurable priority (`HIGH`, `MEDIUM`, `LOW`), populating `retro_item.linked_card_id` and marking the item resolved with a direct navigation link.
+  - **Real-Time Board Sync:** Retro item mutations trigger `RETRO_ITEM_CREATED`, `RETRO_ITEM_UPDATED`, and `RETRO_ITEM_DELETED` room broadcasts.
+- **✨ AI Sprint Retrospective Synthesizer (`apps/web` -> `apps/api` -> `services/ai-engine`):**
+  - **1-Click Agile Facilitator:** Click **"✨ Synthesize Sprint Retro with AI"** to forward the board's retro items, card completion metrics, and estimated vs. logged hours to `services/ai-engine` (`POST /internal/v1/synthesize-retro` with `X-Internal-Token`).
+  - **Sprint Morale Score (`0–100`):** Synthesizes team sentiment into an objective sprint morale score with an ergonomic color-coded radial gauge (Green $\ge 70$, Amber $40-69$, Rose $< 40$) and qualitative assessment.
+  - **Estimation Accuracy Summary:** Cross-references `total_estimated_hours` against `total_logged_hours` and overdue cards to assess estimation calibration and predictability.
+  - **Key Sprint Themes & Recommended Action Items:** Identifies high-friction clusters and outputs structured agile action items with suggested assignees, priorities, and 1-click **Add to Board** card creation.
+- **Sprint Analytics & CSV Export Integration (`GET /api/v1/boards/:boardId/analytics` & `export`):**
+  - Sprint Analytics Dashboard includes a dedicated **Time Tracking & Focus** calibration card showing total logged hours (`total_logged_hours`), completed pomodoro count (`total_pomodoros_completed`), and percent of estimated sprint hours logged.
+  - Board CSV Export (`GET /api/v1/boards/:boardId/export?format=csv`) automatically appends RFC 4180 escaped `"Logged Hours"` and `"Pomodoro Count"` columns for payroll, client billing, and agile retrospection in spreadsheets.
+
+---
 
 ---
 

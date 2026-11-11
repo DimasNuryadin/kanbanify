@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Award,
@@ -101,12 +101,34 @@ export function RetroView() {
   const useMockMode = useWorkspaceStore((s) => s.useMockMode);
 
   const retroItems = board.retro_items ?? [];
+  const setRetroItems = useWorkspaceStore((s) => s.setRetroItems);
   const upsertRetroItem = useWorkspaceStore((s) => s.upsertRetroItem);
   const removeRetroItem = useWorkspaceStore((s) => s.removeRetroItem);
   const toggleRetroVote = useWorkspaceStore((s) => s.toggleRetroVote);
   const upsertCard = useWorkspaceStore((s) => s.upsertCard);
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
   const addToast = useWorkspaceStore((s) => s.addToast);
+
+  // Load latest retro items from GET /api/v1/boards/:boardId/retro
+  useEffect(() => {
+    let isCancelled = false;
+    async function fetchRetro() {
+      try {
+        const items = await apiClient.getRetroItems(board.id, {
+          useMock: useMockMode,
+        });
+        if (!isCancelled && Array.isArray(items)) {
+          setRetroItems(items);
+        }
+      } catch (err) {
+        console.error("Failed to load retro items from API:", err);
+      }
+    }
+    fetchRetro();
+    return () => {
+      isCancelled = true;
+    };
+  }, [board.id, useMockMode, setRetroItems]);
 
   // Composer states per category
   const [activeComposerCat, setActiveComposerCat] = useState<RetroCategory | null>(null);
