@@ -8,6 +8,7 @@ import {
   DEFAULT_BOARD_MEMBERS,
   DEFAULT_BOARD_TEMPLATES,
   DEFAULT_WORKSPACE,
+  DEFAULT_THEME_CONFIG,
   type Activity,
   type ActivityActionType,
   type Attachment,
@@ -15,8 +16,10 @@ import {
   type Board,
   type BoardBackground,
   type BoardTemplate,
+  type BoardThemeConfig,
   type Card,
   type CardCover,
+  type CardCustomFieldValue,
   type Checklist,
   type ChecklistItem,
   type Column,
@@ -30,6 +33,7 @@ import {
   type CreateColumnRequest,
   type CreateCommentRequest,
   type CreateWorkspaceRequest,
+  type CustomFieldDefinition,
   type Label,
   type Member,
   type MoveCardRequest,
@@ -572,6 +576,43 @@ function createPreseededMemoryStore(): InMemoryStore {
     },
   ];
 
+  const seedCustomFields: CustomFieldDefinition[] = [
+    {
+      id: "cf-00000000-0000-4000-8000-000000000001",
+      board_id: SEED_BOARD_ID,
+      name: "Environment",
+      type: "DROPDOWN",
+      options: [
+        { id: "opt-env-dev", label: "Development", color: "green" },
+        { id: "opt-env-staging", label: "Staging", color: "yellow" },
+        { id: "opt-env-prod", label: "Production", color: "red" },
+      ],
+      show_on_front: true,
+      position: "a0",
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+    {
+      id: "cf-00000000-0000-4000-8000-000000000002",
+      board_id: SEED_BOARD_ID,
+      name: "Est. Hours",
+      type: "NUMBER",
+      options: [],
+      show_on_front: true,
+      position: "a1",
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+    {
+      id: "cf-00000000-0000-4000-8000-000000000003",
+      board_id: SEED_BOARD_ID,
+      name: "QA Verified",
+      type: "CHECKBOX",
+      options: [],
+      show_on_front: true,
+      position: "a2",
+      created_at: "2026-11-08T00:00:00.000Z",
+    },
+  ];
+
   // Board 1: Primary Platform Launch Board
   boards.set(SEED_BOARD_ID, {
     id: SEED_BOARD_ID,
@@ -588,6 +629,8 @@ function createPreseededMemoryStore(): InMemoryStore {
     webhooks: seedWebhooks,
     invite_links: [...DEFAULT_INVITE_LINKS],
     visibility: "WORKSPACE",
+    custom_fields: seedCustomFields,
+    theme_config: { ...DEFAULT_THEME_CONFIG },
     created_at: createdAt,
   });
 
@@ -754,6 +797,11 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [
+        { field_id: "cf-00000000-0000-4000-8000-000000000001", value: "opt-env-staging" },
+        { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 16 },
+        { field_id: "cf-00000000-0000-4000-8000-000000000003", value: false },
+      ],
     },
     {
       id: "44444444-4444-4444-8444-444444444403",
@@ -792,7 +840,7 @@ function createPreseededMemoryStore(): InMemoryStore {
           position: "a3",
         },
       ],
-      blocked_by_card_ids: [],
+      blocked_by_card_ids: ["44444444-4444-4444-8444-444444444444"],
       due_date: "2026-11-12T00:00:00.000Z",
       updated_at: "2026-11-08T10:10:00.000Z",
       cover: {
@@ -887,6 +935,11 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [
+        { field_id: "cf-00000000-0000-4000-8000-000000000001", value: "opt-env-prod" },
+        { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 24 },
+        { field_id: "cf-00000000-0000-4000-8000-000000000003", value: true },
+      ],
     },
     {
       id: "44444444-4444-4444-8444-444444444404",
@@ -913,7 +966,7 @@ function createPreseededMemoryStore(): InMemoryStore {
           position: "a1",
         },
       ],
-      blocked_by_card_ids: [],
+      blocked_by_card_ids: ["44444444-4444-4444-8444-444444444408"],
       due_date: "2026-11-14T00:00:00.000Z",
       updated_at: "2026-11-08T10:15:00.000Z",
       cover: {
@@ -972,6 +1025,11 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [
+        { field_id: "cf-00000000-0000-4000-8000-000000000001", value: "opt-env-dev" },
+        { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 8 },
+        { field_id: "cf-00000000-0000-4000-8000-000000000003", value: false },
+      ],
     },
     {
       id: "44444444-4444-4444-8444-444444444406",
@@ -1045,6 +1103,11 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: true,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [
+        { field_id: "cf-00000000-0000-4000-8000-000000000001", value: "opt-env-staging" },
+        { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 12 },
+        { field_id: "cf-00000000-0000-4000-8000-000000000003", value: true },
+      ],
     },
     {
       id: "44444444-4444-4444-8444-444444444408",
@@ -1090,6 +1153,11 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [
+        { field_id: "cf-00000000-0000-4000-8000-000000000001", value: "opt-env-dev" },
+        { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 16 },
+        { field_id: "cf-00000000-0000-4000-8000-000000000003", value: false },
+      ],
     },
     {
       id: "44444444-4444-4444-8444-444444444401",
@@ -1183,6 +1251,11 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: true,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [
+        { field_id: "cf-00000000-0000-4000-8000-000000000001", value: "opt-env-prod" },
+        { field_id: "cf-00000000-0000-4000-8000-000000000002", value: 14 },
+        { field_id: "cf-00000000-0000-4000-8000-000000000003", value: true },
+      ],
     },
   ];
   for (const card of seedCards) {
@@ -1219,6 +1292,8 @@ function createPreseededMemoryStore(): InMemoryStore {
     webhooks: [],
     invite_links: [],
     visibility: "WORKSPACE",
+    custom_fields: [],
+    theme_config: { ...DEFAULT_THEME_CONFIG },
     created_at: createdAt,
   });
 
@@ -1255,6 +1330,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
     },
     {
       id: "44444444-4444-4444-8444-444444444422",
@@ -1280,6 +1356,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
     },
     {
       id: "44444444-4444-4444-8444-444444444423",
@@ -1305,6 +1382,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [],
     },
   ];
   for (const c of b2Cards) cards.set(c.id, c);
@@ -1339,6 +1417,8 @@ function createPreseededMemoryStore(): InMemoryStore {
     webhooks: [],
     invite_links: [],
     visibility: "WORKSPACE",
+    custom_fields: [],
+    theme_config: { ...DEFAULT_THEME_CONFIG },
     created_at: createdAt,
   });
 
@@ -1375,6 +1455,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
     },
     {
       id: "44444444-4444-4444-8444-444444444432",
@@ -1400,6 +1481,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
     },
     {
       id: "44444444-4444-4444-8444-444444444433",
@@ -1425,6 +1507,7 @@ function createPreseededMemoryStore(): InMemoryStore {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [],
     },
   ];
   for (const c of b3Cards) cards.set(c.id, c);
@@ -1536,6 +1619,8 @@ export class StorageRepository {
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS webhooks JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS visibility VARCHAR(32) NOT NULL DEFAULT 'WORKSPACE';
       ALTER TABLE boards ADD COLUMN IF NOT EXISTS invite_links JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE boards ADD COLUMN IF NOT EXISTS theme_config JSONB NOT NULL DEFAULT '{"preset":"DEFAULT_CLEAN","glass_blur":"md","card_density":"comfortable","card_radius":"md","accent_color":"#6366f1","show_custom_fields_on_front":true,"show_dependency_badges_on_front":true}'::jsonb;
 
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(128) PRIMARY KEY,
@@ -1598,6 +1683,7 @@ export class StorageRepository {
       ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_due_complete BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_watching BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE cards ADD COLUMN IF NOT EXISTS custom_field_values JSONB NOT NULL DEFAULT '[]'::jsonb;
 
       CREATE TABLE IF NOT EXISTS subtasks (
         id UUID PRIMARY KEY,
@@ -1671,6 +1757,8 @@ export class StorageRepository {
           webhooks: b.webhooks,
           invite_links: b.invite_links,
           visibility: b.visibility,
+          custom_fields: b.custom_fields,
+          theme_config: b.theme_config,
           created_at: b.created_at,
         })
         .onConflictDoNothing();
@@ -1720,6 +1808,7 @@ export class StorageRepository {
           is_due_complete: card.is_due_complete,
           is_archived: card.is_archived,
           is_watching: card.is_watching,
+          custom_field_values: card.custom_field_values,
         })
         .onConflictDoNothing();
 
@@ -1795,6 +1884,9 @@ export class StorageRepository {
       is_due_complete: Boolean(row.is_due_complete),
       is_archived: Boolean(row.is_archived),
       is_watching: Boolean(row.is_watching),
+      custom_field_values: Array.isArray((row as any).custom_field_values)
+        ? (row as any).custom_field_values
+        : [],
     };
   }
 
@@ -1843,6 +1935,10 @@ export class StorageRepository {
       : [];
     const visibility: BoardVisibility =
       ((row as any).visibility as BoardVisibility) ?? "WORKSPACE";
+    const customFields: CustomFieldDefinition[] = Array.isArray((row as any).custom_fields)
+      ? (row as any).custom_fields
+      : [];
+    const themeConfig: BoardThemeConfig = (row as any).theme_config ?? { ...DEFAULT_THEME_CONFIG };
 
     return {
       id: row.id,
@@ -1858,6 +1954,8 @@ export class StorageRepository {
       webhooks,
       invite_links: inviteLinks,
       visibility,
+      custom_fields: customFields,
+      theme_config: themeConfig,
       columns: cols,
       cards: boardCards,
       created_at: normalizeIsoTimestamp(row.created_at),
@@ -2158,6 +2256,7 @@ export class StorageRepository {
           is_due_complete: false,
           is_archived: false,
           is_watching: false,
+          custom_field_values: [],
         });
       }
     }
@@ -2209,6 +2308,8 @@ export class StorageRepository {
     }
 
     const visibility: BoardVisibility = input.visibility ?? "WORKSPACE";
+    const customFields: CustomFieldDefinition[] = input.custom_fields ?? [];
+    const themeConfig: BoardThemeConfig = input.theme_config ?? { ...DEFAULT_THEME_CONFIG };
 
     // Keep memory synced
     this.memory.boards.set(boardId, {
@@ -2225,6 +2326,8 @@ export class StorageRepository {
       webhooks: [],
       invite_links: [],
       visibility,
+      custom_fields: customFields,
+      theme_config: themeConfig,
       created_at: createdAt,
     });
     for (const col of defaultColumns) {
@@ -2250,6 +2353,8 @@ export class StorageRepository {
           webhooks: [],
           invite_links: [],
           visibility,
+          custom_fields: customFields,
+          theme_config: themeConfig,
           created_at: createdAt,
         });
         await this.db.insert(schema.columns).values(
@@ -2289,6 +2394,7 @@ export class StorageRepository {
               is_due_complete: sc.is_due_complete,
               is_archived: sc.is_archived,
               is_watching: sc.is_watching,
+              custom_field_values: sc.custom_field_values,
             }))
           );
         }
@@ -2315,6 +2421,8 @@ export class StorageRepository {
       webhooks: [],
       invite_links: [],
       visibility,
+      custom_fields: customFields,
+      theme_config: themeConfig,
       columns: defaultColumns,
       cards: sampleCards,
       created_at: createdAt,
@@ -2336,6 +2444,8 @@ export class StorageRepository {
       webhooks: board.webhooks ?? [],
       invite_links: board.invite_links ?? [],
       visibility: board.visibility ?? "WORKSPACE",
+      custom_fields: board.custom_fields ?? [],
+      theme_config: board.theme_config ?? { ...DEFAULT_THEME_CONFIG },
       created_at: board.created_at,
     });
 
@@ -2363,6 +2473,8 @@ export class StorageRepository {
           webhooks: board.webhooks ?? [],
           invite_links: board.invite_links ?? [],
           visibility: board.visibility ?? "WORKSPACE",
+          custom_fields: board.custom_fields ?? [],
+          theme_config: board.theme_config ?? { ...DEFAULT_THEME_CONFIG },
           created_at: board.created_at,
         });
 
@@ -2406,6 +2518,7 @@ export class StorageRepository {
               is_due_complete: c.is_due_complete,
               is_archived: c.is_archived,
               is_watching: c.is_watching,
+              custom_field_values: c.custom_field_values ?? [],
             }))
           );
         }
@@ -2503,6 +2616,10 @@ export class StorageRepository {
     const updatedLabels = input.labels ?? existing.labels;
     const updatedMembers = input.members ?? existing.members;
     const updatedVisibility: BoardVisibility = input.visibility ?? existing.visibility ?? "WORKSPACE";
+    const updatedCustomFields = input.custom_fields ?? existing.custom_fields ?? [];
+    const updatedThemeConfig = input.theme_config
+      ? { ...(existing.theme_config ?? DEFAULT_THEME_CONFIG), ...input.theme_config }
+      : existing.theme_config ?? { ...DEFAULT_THEME_CONFIG };
 
     this.memory.boards.set(boardId, {
       id: existing.id,
@@ -2518,6 +2635,8 @@ export class StorageRepository {
       webhooks: existing.webhooks,
       invite_links: existing.invite_links ?? [],
       visibility: updatedVisibility,
+      custom_fields: updatedCustomFields,
+      theme_config: updatedThemeConfig,
       created_at: existing.created_at,
     });
 
@@ -2533,6 +2652,8 @@ export class StorageRepository {
             labels: updatedLabels,
             members: updatedMembers,
             visibility: updatedVisibility,
+            custom_fields: updatedCustomFields,
+            theme_config: updatedThemeConfig,
           })
           .where(eq(schema.boards.id, boardId));
       } catch (err) {
@@ -2553,6 +2674,8 @@ export class StorageRepository {
       labels: updatedLabels,
       members: updatedMembers,
       visibility: updatedVisibility,
+      custom_fields: updatedCustomFields,
+      theme_config: updatedThemeConfig,
     };
   }
 
@@ -2858,6 +2981,7 @@ export class StorageRepository {
             is_due_complete: card.is_due_complete,
             is_archived: card.is_archived,
             is_watching: card.is_watching,
+            custom_field_values: card.custom_field_values ?? [],
           })
           .where(eq(schema.cards.id, card.id));
       } catch (err) {
@@ -3202,6 +3326,7 @@ export class StorageRepository {
       is_due_complete: input.is_due_complete ?? false,
       is_archived: input.is_archived ?? false,
       is_watching: input.is_watching ?? false,
+      custom_field_values: input.custom_field_values ?? [],
     };
 
     this.memory.cards.set(newCard.id, newCard);
@@ -3232,6 +3357,7 @@ export class StorageRepository {
           is_due_complete: newCard.is_due_complete,
           is_archived: newCard.is_archived,
           is_watching: newCard.is_watching,
+          custom_field_values: newCard.custom_field_values,
         });
 
         if (newCard.subtasks.length > 0) {
@@ -3351,6 +3477,10 @@ export class StorageRepository {
         input.is_watching !== undefined
           ? input.is_watching
           : existing.is_watching,
+      custom_field_values:
+        input.custom_field_values !== undefined
+          ? input.custom_field_values
+          : existing.custom_field_values,
     };
 
     this.memory.cards.set(cardId, updatedCard);
@@ -3381,6 +3511,7 @@ export class StorageRepository {
             is_due_complete: updatedCard.is_due_complete,
             is_archived: updatedCard.is_archived,
             is_watching: updatedCard.is_watching,
+            custom_field_values: updatedCard.custom_field_values,
           })
           .where(eq(schema.cards.id, cardId));
 
@@ -3536,6 +3667,7 @@ export class StorageRepository {
     const keepLabels = input.keep_labels ?? true;
     const keepMembers = input.keep_members ?? true;
     const keepAttachments = input.keep_attachments ?? true;
+    const keepCustomFields = input.keep_custom_fields !== false;
 
     const clonedChecklists: Checklist[] = keepChecklists
       ? sourceCard.checklists.map((cl) => ({
@@ -3584,6 +3716,9 @@ export class StorageRepository {
         is_due_complete: sourceCard.is_due_complete,
         is_archived: false,
         is_watching: sourceCard.is_watching,
+        custom_field_values: keepCustomFields
+          ? (sourceCard.custom_field_values ?? []).map((v) => ({ ...v }))
+          : [],
       },
       actorName
     );
@@ -4438,5 +4573,267 @@ export class StorageRepository {
       member,
       granted_role: invite.role,
     };
+  }
+
+  // ==========================================================================
+  // CUSTOM FIELDS OPERATIONS (PHASE 7)
+  // ==========================================================================
+
+  public async getCustomFields(boardId: string): Promise<CustomFieldDefinition[]> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+    return [...(board.custom_fields ?? [])].sort((a, b) =>
+      compareFractionalIndex(a.position, b.position)
+    );
+  }
+
+  public async createCustomField(
+    boardId: string,
+    def: CustomFieldDefinition
+  ): Promise<CustomFieldDefinition> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    const nextCustomFields = [...(board.custom_fields ?? []), def];
+    const memBoard = this.memory.boards.get(boardId);
+    if (memBoard) {
+      memBoard.custom_fields = nextCustomFields;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ custom_fields: nextCustomFields })
+          .where(eq(schema.boards.id, boardId));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return def;
+  }
+
+  public async updateCustomField(
+    fieldId: string,
+    updates: Partial<CustomFieldDefinition>
+  ): Promise<{ field: CustomFieldDefinition; boardId: string }> {
+    const allBoards = await this.listBoards();
+    let foundBoard: Board | null = null;
+    let existingField: CustomFieldDefinition | null = null;
+
+    for (const b of allBoards) {
+      const f = (b.custom_fields ?? []).find((x) => x.id === fieldId);
+      if (f) {
+        foundBoard = b;
+        existingField = f;
+        break;
+      }
+    }
+
+    if (!foundBoard || !existingField) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Custom field definition '${fieldId}' not found`,
+        { field_id: fieldId }
+      );
+    }
+
+    const updatedField: CustomFieldDefinition = {
+      ...existingField,
+      ...updates,
+      id: existingField.id,
+      board_id: existingField.board_id,
+      type: existingField.type,
+      created_at: existingField.created_at,
+    };
+
+    const nextCustomFields = (foundBoard.custom_fields ?? []).map((f) =>
+      f.id === fieldId ? updatedField : f
+    );
+
+    const memBoard = this.memory.boards.get(foundBoard.id);
+    if (memBoard) {
+      memBoard.custom_fields = nextCustomFields;
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ custom_fields: nextCustomFields })
+          .where(eq(schema.boards.id, foundBoard.id));
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { field: updatedField, boardId: foundBoard.id };
+  }
+
+  public async deleteCustomField(
+    fieldId: string
+  ): Promise<{ id: string; boardId: string; deleted: true }> {
+    const allBoards = await this.listBoards();
+    let foundBoard: Board | null = null;
+
+    for (const b of allBoards) {
+      const f = (b.custom_fields ?? []).find((x) => x.id === fieldId);
+      if (f) {
+        foundBoard = b;
+        break;
+      }
+    }
+
+    if (!foundBoard) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Custom field definition '${fieldId}' not found`,
+        { field_id: fieldId }
+      );
+    }
+
+    const nextCustomFields = (foundBoard.custom_fields ?? []).filter(
+      (f) => f.id !== fieldId
+    );
+
+    const memBoard = this.memory.boards.get(foundBoard.id);
+    if (memBoard) {
+      memBoard.custom_fields = nextCustomFields;
+    }
+
+    // Strip matching field_id from all cards on the board
+    const boardCards = (foundBoard.cards ?? []).map((c) => {
+      const filteredValues = (c.custom_field_values ?? []).filter(
+        (v) => v.field_id !== fieldId
+      );
+      return {
+        ...c,
+        custom_field_values: filteredValues,
+      };
+    });
+
+    for (const card of boardCards) {
+      this.memory.cards.set(card.id, card);
+    }
+
+    if (this.isUsingPostgres() && this.db) {
+      try {
+        await this.db
+          .update(schema.boards)
+          .set({ custom_fields: nextCustomFields })
+          .where(eq(schema.boards.id, foundBoard.id));
+
+        for (const card of boardCards) {
+          await this.db
+            .update(schema.cards)
+            .set({ custom_field_values: card.custom_field_values })
+            .where(eq(schema.cards.id, card.id));
+        }
+      } catch (err) {
+        this.useMemoryFallback = true;
+      }
+    }
+
+    return { id: fieldId, boardId: foundBoard.id, deleted: true };
+  }
+
+  public async setCardCustomFieldValue(
+    cardId: string,
+    fieldId: string,
+    value: string | number | boolean | null,
+    options?: {
+      actorName?: string;
+      activityDescription?: string;
+    }
+  ): Promise<Card> {
+    const card = await this.getCardById(cardId);
+    if (!card) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Card '${cardId}' not found`,
+        { card_id: cardId }
+      );
+    }
+
+    const board = await this.getBoardById(card.board_id);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${card.board_id}' not found`,
+        { board_id: card.board_id }
+      );
+    }
+
+    const fieldDef = (board.custom_fields ?? []).find((f) => f.id === fieldId);
+    if (!fieldDef) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Custom field '${fieldId}' does not belong to board '${card.board_id}'`,
+        { field_id: fieldId, board_id: card.board_id }
+      );
+    }
+
+    // Filter out previous value
+    const otherValues = (card.custom_field_values ?? []).filter(
+      (v) => v.field_id !== fieldId
+    );
+
+    const nextValues =
+      value === null
+        ? otherValues
+        : [...otherValues, { field_id: fieldId, value }];
+
+    return this.updateCard(
+      cardId,
+      {
+        custom_field_values: nextValues,
+      },
+      options
+    );
+  }
+
+  // ==========================================================================
+  // THEME STUDIO OPERATIONS (PHASE 7)
+  // ==========================================================================
+
+  public async updateBoardTheme(
+    boardId: string,
+    themeConfig: BoardThemeConfig
+  ): Promise<BoardThemeConfig> {
+    const board = await this.getBoardById(boardId);
+    if (!board) {
+      throw new AppError(
+        404,
+        "RESOURCE_NOT_FOUND",
+        `Board '${boardId}' not found`,
+        { board_id: boardId }
+      );
+    }
+
+    await this.updateBoard(boardId, {
+      theme_config: themeConfig,
+    });
+
+    return themeConfig;
   }
 }

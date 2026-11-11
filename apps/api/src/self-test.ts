@@ -1,20 +1,25 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import {
+  AddCardDependencyResponseSchema,
   AIAnalyticsReportSchema,
+  AICriticalPathResponseSchema,
   AIPermissionAuditResponseSchema,
   AuthSessionResponseSchema,
   AuthUserSchema,
   AutomationRuleSchema,
   BoardAnalyticsSchema,
+  BoardDependencyGraphSchema,
   BoardExportCsvResponseSchema,
   BoardInviteLinkSchema,
   BoardSchema,
   BoardTemplateSchema,
+  BoardThemeConfigSchema,
   CardSchema,
   ColumnSchema,
   CommentSchema,
   CopyColumnResponseSchema,
+  CustomFieldDefinitionSchema,
   HealthCheckResponseSchema,
   JoinViaInviteResponseSchema,
   MemberSchema,
@@ -969,7 +974,7 @@ async function runSelfTest(): Promise<void> {
     assert.ok(exportedCsv.filename.endsWith(".csv"));
     assert.ok(
       exportedCsv.csv_data.includes(
-        "Card ID,Title,Column,Priority,Story Points,Labels,Members,Due Date,Due Complete,Checklist Progress,Blocked By Count,Archived,Updated At"
+        "Card ID,Title,Column,Priority,Story Points,Labels,Members,Due Date,Due Complete,Checklist Progress,Blocked By Count,Custom Fields,Archived,Updated At"
       ),
       "CSV header row must match specification"
     );
@@ -1693,8 +1698,356 @@ async function runSelfTest(): Promise<void> {
       `[PASS] 25i. POST /api/v1/boards/:boardId/security-audit -> 200 OK (score: ${auditBody.security_score}, risk: ${auditBody.risk_level})`
     );
 
+    // ========================================================================
+    // 26. PHASE 7 GATE 2: CUSTOM FIELDS, DEPENDENCY GRAPH & THEME STUDIO
+    // ========================================================================
+    console.info("=== 26. Phase 7 Gate 2: Custom Fields, Dependency Graph & Theme Studio ===");
+
+    const defaultBoardId = "11111111-1111-4111-8111-111111111111";
+
+    // 26a-1. List Pre-Seeded Custom Fields (GET /api/v1/boards/:boardId/custom-fields)
+    const listCfRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}/custom-fields`,
+    });
+    assert.equal(listCfRes.statusCode, 200);
+    const preSeededFields = z.array(CustomFieldDefinitionSchema).parse(listCfRes.json());
+    assert.ok(preSeededFields.length >= 3, "Default board must have at least 3 pre-seeded custom fields");
+    assert.ok(preSeededFields.some((f) => f.name === "Environment" && f.type === "DROPDOWN"));
+    assert.ok(preSeededFields.some((f) => f.name === "Est. Hours" && f.type === "NUMBER"));
+    assert.ok(preSeededFields.some((f) => f.name === "QA Verified" && f.type === "CHECKBOX"));
     console.info(
-      "=== ALL KINETIX API PHASE 6 GATE 2 SELF-TESTS PASSED ==="
+      `[PASS] 26a-1. GET /api/v1/boards/:boardId/custom-fields -> ${preSeededFields.length} pre-seeded field(s) verified`
+    );
+
+    // 26a-2. Create a new Custom Field (POST /api/v1/boards/:boardId/custom-fields)
+    const createCfRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/custom-fields`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        name: "Release Train",
+        type: "DROPDOWN",
+        options: [
+          { label: "Alpha", color: "purple" },
+          { label: "Beta", color: "blue" },
+        ],
+        show_on_front: true,
+      },
+    });
+    assert.equal(createCfRes.statusCode, 201);
+    const createdCf = CustomFieldDefinitionSchema.parse(createCfRes.json());
+    assert.equal(createdCf.name, "Release Train");
+    assert.equal(createdCf.type, "DROPDOWN");
+    assert.equal(createdCf.options.length, 2);
+    assert.ok(createdCf.options[0]!.id.startsWith("opt-"), "Dropdown options must have generated IDs");
+    console.info(
+      `[PASS] 26a-2. POST /api/v1/boards/:boardId/custom-fields -> 201 Created (${createdCf.id})`
+    );
+
+    // 26a-3. Patch Custom Field (PATCH /api/v1/custom-fields/:fieldId)
+    const patchCfRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/custom-fields/${createdCf.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        name: "Release Train (Q4)",
+        show_on_front: false,
+      },
+    });
+    assert.equal(patchCfRes.statusCode, 200);
+    const patchedCf = CustomFieldDefinitionSchema.parse(patchCfRes.json());
+    assert.equal(patchedCf.name, "Release Train (Q4)");
+    assert.equal(patchedCf.show_on_front, false);
+    console.info(
+      `[PASS] 26a-3. PATCH /api/v1/custom-fields/:fieldId -> 200 OK (name updated to ${patchedCf.name})`
+    );
+
+    // 26a-4. Set & Validate Custom Field Value on a Card (PUT /api/v1/cards/:cardId/custom-fields/:fieldId)
+    const testCardId = "44444444-4444-4444-8444-444444444444";
+    const selectedOptionId = createdCf.options[0]!.id;
+
+    const setValRes = await app.inject({
+      method: "PUT",
+      url: `/api/v1/cards/${testCardId}/custom-fields/${createdCf.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        value: selectedOptionId,
+      },
+    });
+    assert.equal(setValRes.statusCode, 200);
+    const cardWithCf = CardSchema.parse(setValRes.json());
+    const matchedVal = cardWithCf.custom_field_values.find((v) => v.field_id === createdCf.id);
+    assert.ok(matchedVal, "Card must contain custom_field_values entry for field");
+    assert.equal(matchedVal.value, selectedOptionId);
+    console.info(
+      `[PASS] 26a-4. PUT /api/v1/cards/:cardId/custom-fields/:fieldId -> 200 OK (value set to ${selectedOptionId})`
+    );
+
+    // 26a-5. Validate Type Mismatch Rejection (400 VALIDATION_ERROR)
+    const badTypeRes = await app.inject({
+      method: "PUT",
+      url: `/api/v1/cards/${testCardId}/custom-fields/${createdCf.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        value: 12345, // Number is invalid for DROPDOWN
+      },
+    });
+    assert.equal(badTypeRes.statusCode, 400, "Type mismatch must return 400 VALIDATION_ERROR");
+    const badTypeErr = StandardErrorSchema.parse(badTypeRes.json());
+    assert.equal(badTypeErr.error.code, "VALIDATION_ERROR");
+
+    // Invalid option ID for DROPDOWN
+    const badOptionRes = await app.inject({
+      method: "PUT",
+      url: `/api/v1/cards/${testCardId}/custom-fields/${createdCf.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        value: "non-existent-option-id",
+      },
+    });
+    assert.equal(badOptionRes.statusCode, 400, "Invalid option ID must return 400 VALIDATION_ERROR");
+
+    // RBAC: VIEWER mutation must return 403 FORBIDDEN
+    const viewerCfRes = await app.inject({
+      method: "PUT",
+      url: `/api/v1/cards/${testCardId}/custom-fields/${createdCf.id}`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        value: selectedOptionId,
+      },
+    });
+    assert.equal(viewerCfRes.statusCode, 403, "VIEWER must be forbidden from mutating custom field values");
+
+    // 26a-6. Delete Custom Field & Verify Cascade Strip from Cards (DELETE /api/v1/custom-fields/:fieldId)
+    const delCfRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/custom-fields/${createdCf.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(delCfRes.statusCode, 200);
+    assert.deepEqual(delCfRes.json(), { id: createdCf.id, deleted: true });
+
+    // Verify card custom_field_values no longer has this field_id
+    const cardAfterDel = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}`,
+    });
+    assert.equal(cardAfterDel.statusCode, 200);
+    const boardJson = BoardSchema.parse(cardAfterDel.json());
+    const cardTarget = boardJson.cards.find((c) => c.id === testCardId);
+    assert.ok(cardTarget);
+    assert.ok(
+      !cardTarget.custom_field_values.some((v) => v.field_id === createdCf.id),
+      "Deleted custom field must be cascade stripped from all cards"
+    );
+    console.info(
+      "[PASS] 26a. Custom Fields CRUD, Type Validation & Cascade Strip verified"
+    );
+
+    // 26b. Dependency Linking & Cycle Detection (POST /api/v1/cards/:cardId/dependencies)
+    // Create two test cards on default board for clean dependency testing
+    const cardAlphaRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/cards`,
+      headers: { "x-kanbanify-role": "EDITOR" },
+      payload: {
+        column_id: "33333333-3333-4333-8333-333333333331",
+        title: "Dependency Test Card Alpha",
+        position: "b0",
+      },
+    });
+    assert.equal(cardAlphaRes.statusCode, 201);
+    const cardAlpha = CardSchema.parse(cardAlphaRes.json());
+
+    const cardBetaRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/cards`,
+      headers: { "x-kanbanify-role": "EDITOR" },
+      payload: {
+        column_id: "33333333-3333-4333-8333-333333333331",
+        title: "Dependency Test Card Beta",
+        position: "b1",
+      },
+    });
+    assert.equal(cardBetaRes.statusCode, 201);
+    const cardBeta = CardSchema.parse(cardBetaRes.json());
+
+    // Link Card Beta to be blocked by Card Alpha
+    const linkDepRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardBeta.id}/dependencies`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        blocker_card_id: cardAlpha.id,
+      },
+    });
+    assert.equal(linkDepRes.statusCode, 200);
+    const linkBody = AddCardDependencyResponseSchema.parse(linkDepRes.json());
+    assert.ok(linkBody.card.blocked_by_card_ids.includes(cardAlpha.id));
+    console.info(
+      `[PASS] 26b-1. POST /api/v1/cards/:cardB/dependencies -> Card B blocked by Card A (200 OK)`
+    );
+
+    // Attempt circular dependency: Link Card Alpha to be blocked by Card Beta (Alpha <-> Beta cycle)
+    const cycleRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/dependencies`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        blocker_card_id: cardBeta.id,
+      },
+    });
+    assert.equal(cycleRes.statusCode, 400, "Circular dependency must reject with 400 VALIDATION_ERROR");
+    const cycleErr = StandardErrorSchema.parse(cycleRes.json());
+    assert.equal(cycleErr.error.code, "VALIDATION_ERROR");
+    assert.ok(
+      cycleErr.error.message.includes("Circular dependency detected"),
+      "Error message must specify circular dependency detected"
+    );
+    console.info(
+      `[PASS] 26b-2. Circular Dependency Prevention (A <-> B) -> 400 VALIDATION_ERROR verified`
+    );
+
+    // Attempt self-dependency: Link Card Alpha to be blocked by Card Alpha
+    const selfDepRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/cards/${cardAlpha.id}/dependencies`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        blocker_card_id: cardAlpha.id,
+      },
+    });
+    assert.equal(selfDepRes.statusCode, 400, "Self dependency must reject with 400 VALIDATION_ERROR");
+    const selfDepErr = StandardErrorSchema.parse(selfDepRes.json());
+    assert.equal(selfDepErr.error.code, "VALIDATION_ERROR");
+    console.info(
+      `[PASS] 26b-3. Self Dependency Prevention (A -> A) -> 400 VALIDATION_ERROR verified`
+    );
+
+    // Unlink dependency: DELETE /api/v1/cards/:cardId/dependencies/:blockerCardId
+    const unlinkDepRes = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/cards/${cardBeta.id}/dependencies/${cardAlpha.id}`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(unlinkDepRes.statusCode, 200);
+    const unlinkBody = AddCardDependencyResponseSchema.parse(unlinkDepRes.json());
+    assert.ok(!unlinkBody.card.blocked_by_card_ids.includes(cardAlpha.id));
+    console.info(
+      `[PASS] 26b-4. DELETE /api/v1/cards/:cardId/dependencies/:blockerCardId -> 200 OK unlinked`
+    );
+
+    // 26c. Visual Dependency Graph & Critical Path Engine (GET /api/v1/boards/:boardId/dependency-graph)
+    const graphRes = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}/dependency-graph`,
+    });
+    assert.equal(graphRes.statusCode, 200);
+    const graphBody = BoardDependencyGraphSchema.parse(graphRes.json());
+    assert.ok(graphBody.nodes.length >= 4, "Graph must contain nodes for non-archived cards");
+    assert.ok(graphBody.edges.length >= 3, "Pre-seeded board has multi-step dependency chain");
+    assert.ok(graphBody.critical_path_card_ids.length >= 2, "Critical path chain must be computed");
+    assert.equal(graphBody.has_circular_dependency, false, "Pre-seeded board DAG must be cycle-free");
+
+    // Verify nodes on critical path have is_on_critical_path = true
+    const cpSet = new Set(graphBody.critical_path_card_ids);
+    for (const node of graphBody.nodes) {
+      if (cpSet.has(node.card_id)) {
+        assert.equal(node.is_on_critical_path, true);
+      }
+    }
+    // Verify edges along critical path have is_critical = true
+    const criticalEdgeCount = graphBody.edges.filter((e) => e.is_critical).length;
+    assert.ok(criticalEdgeCount >= 1, "At least one edge must be marked is_critical");
+    console.info(
+      `[PASS] 26c-1. GET /api/v1/boards/:boardId/dependency-graph -> 200 OK (${graphBody.nodes.length} nodes, ${graphBody.edges.length} edges, critical path length: ${graphBody.critical_path_card_ids.length})`
+    );
+
+    // 26c-2. AI Critical Path Analysis Proxy (POST /api/v1/boards/:boardId/dependency-graph/ai-analyze)
+    const aiDepRes = await app.inject({
+      method: "POST",
+      url: `/api/v1/boards/${defaultBoardId}/dependency-graph/ai-analyze`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+    });
+    assert.equal(aiDepRes.statusCode, 200);
+    const aiDepBody = AICriticalPathResponseSchema.parse(aiDepRes.json());
+    assert.ok(aiDepBody.risk_summary.length > 0);
+    assert.ok(Array.isArray(aiDepBody.critical_path_titles));
+    assert.ok(Array.isArray(aiDepBody.unblocking_recommendations));
+    console.info(
+      `[PASS] 26c-2. POST /api/v1/boards/:boardId/dependency-graph/ai-analyze -> 200 OK`
+    );
+
+    // 26d. Theme Studio Endpoint (PATCH /api/v1/boards/:boardId/theme)
+    const themeRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/boards/${defaultBoardId}/theme`,
+      headers: {
+        "x-kanbanify-role": "EDITOR",
+      },
+      payload: {
+        preset: "FROSTED_GLASS",
+      },
+    });
+    assert.equal(themeRes.statusCode, 200);
+    const themeBody = BoardThemeConfigSchema.parse(themeRes.json());
+    assert.equal(themeBody.preset, "FROSTED_GLASS");
+    assert.equal(themeBody.glass_blur, "lg");
+    assert.equal(themeBody.accent_color, "#38bdf8");
+
+    // Verify theme persistence on board
+    const boardThemeCheck = await app.inject({
+      method: "GET",
+      url: `/api/v1/boards/${defaultBoardId}`,
+    });
+    assert.equal(boardThemeCheck.statusCode, 200);
+    const persistedBoard = BoardSchema.parse(boardThemeCheck.json());
+    assert.equal(persistedBoard.theme_config.preset, "FROSTED_GLASS");
+    assert.equal(persistedBoard.theme_config.glass_blur, "lg");
+
+    // RBAC: VIEWER cannot update theme
+    const viewerThemeRes = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/boards/${defaultBoardId}/theme`,
+      headers: {
+        "x-kanbanify-role": "VIEWER",
+      },
+      payload: {
+        preset: "CYBERPUNK_NEON",
+      },
+    });
+    assert.equal(viewerThemeRes.statusCode, 403, "VIEWER must be forbidden from updating theme");
+    console.info(
+      `[PASS] 26d. Theme Studio (FROSTED_GLASS preset persistence & RBAC) verified`
+    );
+
+    console.info(
+      "=== ALL KINETIX API PHASE 7 GATE 2 SELF-TESTS PASSED ==="
     );
   } finally {
     await app.close();

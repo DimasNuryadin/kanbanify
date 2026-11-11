@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   BoardExportCsvResponseSchema,
   BoardSchema,
+  DEFAULT_THEME_CONFIG,
   TrelloImportResultSchema,
   type Activity,
   type Attachment,
@@ -13,6 +14,7 @@ import {
   type ChecklistItem,
   type Column,
   type Comment,
+  type CustomFieldDefinition,
   type Label,
   type LabelColor,
   type Member,
@@ -553,6 +555,7 @@ export class ImportExportService {
           ),
           is_archived: Boolean(rawCard.closed ?? rawCard.is_archived ?? false),
           is_watching: Boolean(rawCard.subscribed ?? rawCard.is_watching ?? false),
+          custom_field_values: [],
         });
       });
     }
@@ -585,6 +588,8 @@ export class ImportExportService {
       members: boardMembers,
       activities: [importActivity],
       automation_rules: [],
+      custom_fields: [],
+      theme_config: { ...DEFAULT_THEME_CONFIG },
       created_at: now,
     });
 
@@ -813,6 +818,9 @@ export class ImportExportService {
         is_due_complete: Boolean(c?.is_due_complete ?? false),
         is_archived: Boolean(c?.is_archived ?? false),
         is_watching: Boolean(c?.is_watching ?? false),
+        custom_field_values: Array.isArray(c?.custom_field_values)
+          ? c.custom_field_values
+          : [],
       };
     });
 
@@ -853,6 +861,10 @@ export class ImportExportService {
         },
       ],
       automation_rules: mappedRules,
+      custom_fields: Array.isArray(payload.custom_fields)
+        ? payload.custom_fields
+        : [],
+      theme_config: payload.theme_config ?? { ...DEFAULT_THEME_CONFIG },
       created_at: now,
     });
 
@@ -879,6 +891,9 @@ export class ImportExportService {
     const memberMap = new Map<string, string>(
       board.members.map((m) => [m.id, m.name])
     );
+    const cfDefMap = new Map<string, CustomFieldDefinition>(
+      (board.custom_fields ?? []).map((cf) => [cf.id, cf])
+    );
 
     const headers = [
       "Card ID",
@@ -892,6 +907,7 @@ export class ImportExportService {
       "Due Complete",
       "Checklist Progress",
       "Blocked By Count",
+      "Custom Fields",
       "Archived",
       "Updated At",
     ];
@@ -930,6 +946,20 @@ export class ImportExportService {
         ? card.blocked_by_card_ids.length
         : 0;
 
+      const cfSummary = (card.custom_field_values ?? [])
+        .map((cfv) => {
+          const def = cfDefMap.get(cfv.field_id);
+          if (!def) return null;
+          if (cfv.value === null || cfv.value === undefined) return null;
+          if (def.type === "DROPDOWN") {
+            const opt = (def.options ?? []).find((o) => o.id === cfv.value);
+            return `${def.name}: ${opt ? opt.label : cfv.value}`;
+          }
+          return `${def.name}: ${cfv.value}`;
+        })
+        .filter(Boolean)
+        .join("; ");
+
       const rowCells = [
         escapeCsvCell(card.id),
         escapeCsvCell(card.title),
@@ -942,6 +972,7 @@ export class ImportExportService {
         escapeCsvCell(card.is_due_complete),
         escapeCsvCell(checklistProgress),
         escapeCsvCell(blockedByCount),
+        escapeCsvCell(cfSummary),
         escapeCsvCell(card.is_archived),
         escapeCsvCell(card.updated_at),
       ];
