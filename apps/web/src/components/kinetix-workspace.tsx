@@ -96,6 +96,9 @@ export function KinetixWorkspace() {
   const upsertColumn = useWorkspaceStore((s) => s.upsertColumn);
   const removeColumn = useWorkspaceStore((s) => s.removeColumn);
   const appendCardComment = useWorkspaceStore((s) => s.appendCardComment);
+  const upsertRetroItem = useWorkspaceStore((s) => s.upsertRetroItem);
+  const removeRetroItem = useWorkspaceStore((s) => s.removeRetroItem);
+  const setCardActiveTimer = useWorkspaceStore((s) => s.setCardActiveTimer);
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const setWorkspaces = useWorkspaceStore((s) => s.setWorkspaces);
@@ -337,6 +340,22 @@ export function KinetixWorkspace() {
       onUserTyping: (presence) => {
         upsertPresence(presence);
       },
+      onTimerUpdated: (data) => {
+        setCardActiveTimer(data.card_id, data.active_timer);
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      },
+      onRetroItemCreated: (item) => {
+        upsertRetroItem(item);
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      },
+      onRetroItemUpdated: (item) => {
+        upsertRetroItem(item);
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      },
+      onRetroItemDeleted: (data) => {
+        removeRetroItem(data.id);
+        queryClient.invalidateQueries({ queryKey: ["board"] });
+      },
     });
 
     return () => {
@@ -352,6 +371,9 @@ export function KinetixWorkspace() {
     removeCard,
     upsertColumn,
     appendCardComment,
+    upsertRetroItem,
+    removeRetroItem,
+    setCardActiveTimer,
     setBoard,
     setAutomationRules,
     upsertAutomationRule,

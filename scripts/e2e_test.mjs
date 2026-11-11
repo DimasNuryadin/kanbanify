@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Kanbanify Phase 7 — Automated Cross-Service End-to-End Smoke Test
+ * Kanbanify Phase 8 — Automated Cross-Service End-to-End Smoke Test
  * Verifies:
  *  1. Process orchestration / connection to AI Engine (Port 8001) & Core API (Port 8000)
  *  2. Health check endpoints (GET :8001/health & GET :8000/health)
@@ -23,6 +23,10 @@
  * 19. Cycle-Safe Dependency Linking & Circular Prevention (API -> AI Engine) (Phase 7)
  * 20. Visual Dependency Graph & AI Critical Path Analysis (API -> AI Engine) (Phase 7)
  * 21. Glassmorphism & Theme Customization Studio Persistence (Phase 7)
+ * 22. Real-Time Card Time Tracking & Stopwatch Lifecycle (Phase 8)
+ * 23. Pomodoro Focus Timer Complete & Productivity Tracking (Phase 8)
+ * 24. Sprint Retrospective Board, Upvoting & Convert to Card (Phase 8)
+ * 25. AI Sprint Retro Synthesizer & Estimation Analysis (API -> AI Engine) (Phase 8)
  */
 
 import assert from "node:assert/strict";
@@ -206,7 +210,7 @@ async function cleanup() {
 
 async function runSmokeTests() {
   console.log("==================================================================");
-  console.log(" KANBANIFY PHASE 7 — CUSTOM FIELDS, DEPENDENCY GRAPH & THEMES E2E");
+  console.log(" KANBANIFY PHASE 8 — TIME TRACKING, POMODORO & SPRINT RETRO E2E");
   console.log("==================================================================");
 
   await ensureServicesRunning();
@@ -2311,6 +2315,448 @@ async function runSmokeTests() {
     `PATCH /api/v1/boards/${board.id}/theme -> 200 OK (persisted preset="FROSTED_GLASS", glass_blur="lg", card_density="compact" confirmed via GET /boards/:boardId)`
   );
 
+  // ---------------------------------------------------------------------------
+  // STEP 22: Card Time Tracking & Stopwatch Lifecycle (Phase 8)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "STOPWATCH_START",
+    `Calling POST /api/v1/cards/${cardA.id}/timer/start...`
+  );
+  const startTimerRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardA.id}/timer/start`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({
+        user_id: adminDemo.id,
+        user_name: adminDemo.name,
+      }),
+    }
+  );
+  assert.equal(
+    startTimerRes.status,
+    200,
+    `Expected 200 from POST /cards/:cardId/timer/start, got ${startTimerRes.status}`
+  );
+  const startTimerBody = await startTimerRes.json();
+  assert.ok(
+    startTimerBody.time_tracking,
+    "Expected card.time_tracking object"
+  );
+  assert.ok(
+    startTimerBody.time_tracking.active_timer !== null,
+    "Expected card.time_tracking.active_timer !== null"
+  );
+  assert.equal(
+    startTimerBody.time_tracking.active_timer.user_id,
+    adminDemo.id,
+    `Expected active_timer.user_id === ${adminDemo.id}`
+  );
+  logPass(
+    `POST /api/v1/cards/${cardA.id}/timer/start -> 200 OK (Stopwatch started by ${startTimerBody.time_tracking.active_timer.user_name})`
+  );
+
+  // Allow 1.1s elapsed time so duration is at least 1 second
+  await new Promise((r) => setTimeout(r, 1100));
+
+  logStep(
+    "STOPWATCH_STOP",
+    `Calling POST /api/v1/cards/${cardA.id}/timer/stop...`
+  );
+  const stopTimerRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardA.id}/timer/stop`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({
+        note: "Initial architectural sprint research",
+      }),
+    }
+  );
+  assert.equal(
+    stopTimerRes.status,
+    200,
+    `Expected 200 from POST /cards/:cardId/timer/stop, got ${stopTimerRes.status}`
+  );
+  const stopTimerBody = await stopTimerRes.json();
+  assert.equal(
+    stopTimerBody.time_tracking.active_timer,
+    null,
+    "Expected card.time_tracking.active_timer === null"
+  );
+  assert.ok(
+    stopTimerBody.time_tracking.total_logged_seconds > 0,
+    `Expected total_logged_seconds > 0, got ${stopTimerBody.time_tracking.total_logged_seconds}`
+  );
+  assert.ok(
+    Array.isArray(stopTimerBody.time_tracking.entries),
+    "Expected time_tracking.entries array"
+  );
+  const stopwatchEntry = stopTimerBody.time_tracking.entries.find(
+    (e) => e.source === "STOPWATCH"
+  );
+  assert.ok(
+    stopwatchEntry,
+    "Expected a 'STOPWATCH' entry to exist in entries"
+  );
+  assert.ok(
+    stopwatchEntry.duration_seconds > 0,
+    "Expected stopwatch entry duration_seconds > 0"
+  );
+  logPass(
+    `POST /api/v1/cards/${cardA.id}/timer/stop -> 200 OK (active_timer=null, total_logged_seconds=${stopTimerBody.time_tracking.total_logged_seconds}, entry duration=${stopwatchEntry.duration_seconds}s)`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 23: Manual Time Log & Deletion Verification (Phase 8)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "MANUAL_TIME_LOG",
+    `Calling POST /api/v1/cards/${cardA.id}/time-entries (duration=1800s)...`
+  );
+  const manualLogRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardA.id}/time-entries`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({
+        duration_seconds: 1800,
+        note: "Manual pairing session",
+        source: "MANUAL",
+      }),
+    }
+  );
+  assert.equal(
+    manualLogRes.status,
+    200,
+    `Expected 200 from POST /cards/:cardId/time-entries, got ${manualLogRes.status}`
+  );
+  const manualLogBody = await manualLogRes.json();
+  const manualEntry = manualLogBody.time_tracking.entries.find(
+    (e) => e.note === "Manual pairing session"
+  );
+  assert.ok(manualEntry, "Expected manual time entry to be present");
+  assert.equal(manualEntry.duration_seconds, 1800);
+  logPass(
+    `POST /api/v1/cards/${cardA.id}/time-entries -> 200 OK (Logged 1800s, total_logged_seconds=${manualLogBody.time_tracking.total_logged_seconds})`
+  );
+
+  logStep(
+    "MANUAL_TIME_DELETE",
+    `Calling DELETE /api/v1/cards/${cardA.id}/time-entries/${manualEntry.id}...`
+  );
+  const deleteEntryRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardA.id}/time-entries/${manualEntry.id}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+    }
+  );
+  assert.equal(
+    deleteEntryRes.status,
+    200,
+    `Expected 200 from DELETE /cards/:cardId/time-entries/:entryId, got ${deleteEntryRes.status}`
+  );
+  const deleteEntryBody = await deleteEntryRes.json();
+  assert.ok(
+    !deleteEntryBody.time_tracking.entries.some((e) => e.id === manualEntry.id),
+    "Deleted time entry must no longer exist in entries array"
+  );
+  logPass(
+    `DELETE /api/v1/cards/${cardA.id}/time-entries/${manualEntry.id} -> 200 OK (Entry removed, total_logged_seconds recalculated to ${deleteEntryBody.time_tracking.total_logged_seconds})`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 24: Pomodoro Focus Timer Complete Verification (Phase 8)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "POMODORO_COMPLETE",
+    `Calling POST /api/v1/cards/${cardA.id}/pomodoro/complete with mode FOCUS and duration 1500s...`
+  );
+  const pomodoroRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardA.id}/pomodoro/complete`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({
+        card_id: cardA.id,
+        mode: "FOCUS",
+        duration_seconds: 1500,
+        note: "Sprint 8 deep focus session",
+      }),
+    }
+  );
+  assert.equal(
+    pomodoroRes.status,
+    200,
+    `Expected 200 from POST /cards/:cardId/pomodoro/complete, got ${pomodoroRes.status}`
+  );
+  const pomodoroBody = await pomodoroRes.json();
+  assert.ok(
+    pomodoroBody.time_tracking.pomodoro_completed_count >= 1,
+    `Expected pomodoro_completed_count >= 1, got ${pomodoroBody.time_tracking.pomodoro_completed_count}`
+  );
+  assert.ok(
+    pomodoroBody.time_tracking.total_logged_seconds >= 1500,
+    `Expected total_logged_seconds >= 1500, got ${pomodoroBody.time_tracking.total_logged_seconds}`
+  );
+  assert.ok(
+    pomodoroBody.time_tracking.entries.some((e) => e.source === "POMODORO"),
+    "Expected a 'POMODORO' entry in entries"
+  );
+  logPass(
+    `POST /api/v1/cards/${cardA.id}/pomodoro/complete -> 200 OK (pomodoro_completed_count=${pomodoroBody.time_tracking.pomodoro_completed_count}, total_logged_seconds=${pomodoroBody.time_tracking.total_logged_seconds})`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 25: Sprint Retrospective & AI Retro Synthesizer Verification (API -> AI Engine) (Phase 8)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "RETRO_NOTE_CREATE",
+    `Calling POST /api/v1/boards/${board.id}/retro to create a 'TO_IMPROVE' retro note...`
+  );
+  const createRetroRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/retro`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({
+        category: "TO_IMPROVE",
+        content: "Automate staging database migrations",
+        author_id: adminDemo.id,
+        author_name: adminDemo.name,
+        author_initials: "AU",
+      }),
+    }
+  );
+  assert.equal(
+    createRetroRes.status,
+    201,
+    `Expected 201 from POST /boards/:boardId/retro, got ${createRetroRes.status}`
+  );
+  const createdRetroItem = await createRetroRes.json();
+  assert.ok(createdRetroItem.id, "Expected created retro item to have valid id");
+  assert.equal(
+    createdRetroItem.content,
+    "Automate staging database migrations"
+  );
+  assert.equal(createdRetroItem.category, "TO_IMPROVE");
+  assert.equal(createdRetroItem.votes, 0);
+  logPass(
+    `POST /api/v1/boards/${board.id}/retro -> 201 Created (id=${createdRetroItem.id}, content="${createdRetroItem.content}")`
+  );
+
+  // Verify GET /api/v1/boards/:boardId/retro
+  logStep(
+    "RETRO_FETCH",
+    `Calling GET /api/v1/boards/${board.id}/retro to verify retro view data retrieval...`
+  );
+  const getRetroRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/retro`,
+    {
+      headers: { Authorization: `Bearer ${adminDemo.token}` },
+    }
+  );
+  assert.equal(
+    getRetroRes.status,
+    200,
+    `Expected 200 from GET /boards/:boardId/retro, got ${getRetroRes.status}`
+  );
+  const fetchedRetroItems = await getRetroRes.json();
+  assert.ok(
+    Array.isArray(fetchedRetroItems),
+    "Expected retro items array from GET /boards/:boardId/retro"
+  );
+  assert.ok(
+    fetchedRetroItems.some((r) => r.id === createdRetroItem.id),
+    "Expected newly created retro item in GET response"
+  );
+  logPass(
+    `GET /api/v1/boards/${board.id}/retro -> 200 OK (${fetchedRetroItems.length} retro items verified)`
+  );
+
+  // Upvote retro note
+  logStep(
+    "RETRO_NOTE_VOTE",
+    `Calling POST /api/v1/retro/${createdRetroItem.id}/vote...`
+  );
+  const voteRetroRes = await fetch(
+    `${API_BASE_URL}/api/v1/retro/${createdRetroItem.id}/vote`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    voteRetroRes.status,
+    200,
+    `Expected 200 from POST /retro/:itemId/vote, got ${voteRetroRes.status}`
+  );
+  const voteRetroBody = await voteRetroRes.json();
+  assert.ok(
+    voteRetroBody.retro_item.votes >= 1,
+    `Expected votes >= 1, got ${voteRetroBody.retro_item.votes}`
+  );
+  assert.equal(voteRetroBody.has_voted, true, "Expected has_voted === true");
+  logPass(
+    `POST /api/v1/retro/${createdRetroItem.id}/vote -> 200 OK (votes=${voteRetroBody.retro_item.votes}, has_voted=true)`
+  );
+
+  // Convert retro note to Kanban Card
+  logStep(
+    "RETRO_CONVERT_TO_CARD",
+    `Calling POST /api/v1/retro/${createdRetroItem.id}/convert-to-card...`
+  );
+  const convertRetroRes = await fetch(
+    `${API_BASE_URL}/api/v1/retro/${createdRetroItem.id}/convert-to-card`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({
+        target_column_id: backlogCol.id,
+        priority: "HIGH",
+      }),
+    }
+  );
+  assert.equal(
+    convertRetroRes.status,
+    201,
+    `Expected 201 from POST /retro/:itemId/convert-to-card, got ${convertRetroRes.status}`
+  );
+  const convertRetroBody = await convertRetroRes.json();
+  assert.ok(
+    convertRetroBody.card && convertRetroBody.card.id,
+    "Expected created card object in conversion response"
+  );
+  assert.equal(
+    convertRetroBody.retro_item.linked_card_id,
+    convertRetroBody.card.id,
+    "Expected retro_item.linked_card_id === card.id"
+  );
+  assert.equal(
+    convertRetroBody.retro_item.is_resolved,
+    true,
+    "Expected retro_item.is_resolved === true after conversion"
+  );
+  logPass(
+    `POST /api/v1/retro/${createdRetroItem.id}/convert-to-card -> 201 Created (card.id=${convertRetroBody.card.id}, linked_card_id=${convertRetroBody.retro_item.linked_card_id})`
+  );
+
+  // Synthesize sprint retro with AI (API -> AI Engine)
+  logStep(
+    "AI_RETRO_SYNTHESIZE",
+    `Calling POST /api/v1/boards/${board.id}/retro/ai-synthesize (API -> AI Engine)...`
+  );
+  const aiRetroRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/retro/ai-synthesize`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminDemo.token}`,
+      },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    aiRetroRes.status,
+    200,
+    `Expected 200 from POST /boards/:boardId/retro/ai-synthesize, got ${aiRetroRes.status}`
+  );
+  const aiRetroBody = await aiRetroRes.json();
+  assert.ok(
+    typeof aiRetroBody.sprint_morale_score === "number" &&
+      aiRetroBody.sprint_morale_score >= 0 &&
+      aiRetroBody.sprint_morale_score <= 100,
+    `Expected valid sprint_morale_score between 0 and 100, got ${aiRetroBody.sprint_morale_score}`
+  );
+  assert.ok(
+    typeof aiRetroBody.estimation_accuracy_summary === "string" &&
+      aiRetroBody.estimation_accuracy_summary.length > 0,
+    "Expected non-empty estimation_accuracy_summary"
+  );
+  assert.ok(
+    Array.isArray(aiRetroBody.key_themes),
+    "Expected key_themes array in AI retro response"
+  );
+  assert.ok(
+    Array.isArray(aiRetroBody.recommended_action_items),
+    "Expected recommended_action_items array in AI retro response"
+  );
+  logPass(
+    `POST /api/v1/boards/${board.id}/retro/ai-synthesize -> 200 OK (sprint_morale_score=${aiRetroBody.sprint_morale_score}/100, key_themes=[${aiRetroBody.key_themes.join(
+      ", "
+    )}], recommended_action_items=${aiRetroBody.recommended_action_items.length})`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 26: Analytics & CSV Export Phase 8 Metrics Verification
+  // ---------------------------------------------------------------------------
+  logStep(
+    "PHASE8_ANALYTICS_CSV",
+    `Verifying Phase 8 metrics in board analytics & CSV export...`
+  );
+  const phase8AnalyticsRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/analytics`,
+    {
+      headers: { Authorization: `Bearer ${adminDemo.token}` },
+    }
+  );
+  assert.equal(phase8AnalyticsRes.status, 200);
+  const phase8AnalyticsBody = await phase8AnalyticsRes.json();
+  assert.ok(
+    typeof phase8AnalyticsBody.total_logged_hours === "number",
+    "Expected total_logged_hours in analytics"
+  );
+  assert.ok(
+    typeof phase8AnalyticsBody.total_pomodoros_completed === "number",
+    "Expected total_pomodoros_completed in analytics"
+  );
+
+  const phase8CsvExportRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/export?format=csv`,
+    {
+      headers: { Authorization: `Bearer ${adminDemo.token}` },
+    }
+  );
+  assert.equal(phase8CsvExportRes.status, 200);
+  const csvContent = await phase8CsvExportRes.text();
+  assert.ok(
+    csvContent.includes("Logged Hours"),
+    "Expected CSV export to contain 'Logged Hours' header"
+  );
+  assert.ok(
+    csvContent.includes("Pomodoro Count"),
+    "Expected CSV export to contain 'Pomodoro Count' header"
+  );
+  logPass(
+    `Analytics (logged_hours=${phase8AnalyticsBody.total_logged_hours}h, pomodoros=${phase8AnalyticsBody.total_pomodoros_completed}) and CSV export headers verified`
+  );
+
   if (wsClient) {
     await new Promise((r) => setTimeout(r, 150));
     wsClient.close();
@@ -2325,7 +2771,7 @@ async function runSmokeTests() {
 
   console.log("==================================================================");
   console.log(
-    "\x1b[32m[PASS] Kanbanify Phase 7 Custom Fields, Dependency Graph & Theme Studio E2E Smoke Tests Succeeded!\x1b[0m"
+    "\x1b[32m[PASS] Kanbanify Phase 8 Time Tracking, Pomodoro & Sprint Retro E2E Smoke Tests Succeeded!\x1b[0m"
   );
   console.log("==================================================================");
 }
