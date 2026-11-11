@@ -17,6 +17,8 @@ from app.config import get_settings
 from app.contracts import (
     AIAnalyticsReportSchema,
     AIAnalyticsRequestSchema,
+    AICriticalPathRequestSchema,
+    AICriticalPathResponseSchema,
     AIDecomposeRequestSchema,
     AIDecomposeResponseSchema,
     AIParseAutomationRequestSchema,
@@ -32,6 +34,7 @@ from app.contracts import (
     HealthCheckResponseSchema,
     StandardErrorSchema,
 )
+from app.critical_path_analyzer import analyze_dependencies
 from app.decomposer import decompose_task, enrich_card
 from app.notification_formatter import format_notification
 from app.permission_auditor import audit_permissions
@@ -222,6 +225,21 @@ def create_app() -> FastAPI:
         _token: str = Depends(verify_internal_token),
     ) -> AIPermissionAuditResponseSchema:
         return await audit_permissions(payload)
+
+    @application.post(
+        "/internal/v1/analyze-dependencies",
+        response_model=AICriticalPathResponseSchema,
+        responses={
+            400: {"model": StandardErrorSchema},
+            401: {"model": StandardErrorSchema},
+        },
+        summary="AI Critical Path & Dependency Bottleneck Analyzer (Graph Operations Research)",
+    )
+    async def post_analyze_dependencies(
+        payload: AICriticalPathRequestSchema,
+        _token: str = Depends(verify_internal_token),
+    ) -> AICriticalPathResponseSchema:
+        return await analyze_dependencies(payload)
 
     return application
 
