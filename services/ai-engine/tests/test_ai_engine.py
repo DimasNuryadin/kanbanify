@@ -21,6 +21,7 @@ from app.config import get_settings
 from app.contracts import (
     ActivityActionTypeEnum,
     AIAnalyticsReportSchema,
+    AICriticalPathResponseSchema,
     AIDecomposeResponseSchema,
     AIParseAutomationResponseSchema,
     AIPermissionAuditResponseSchema,
@@ -2211,6 +2212,478 @@ def test_audit_permissions_live_llm_mode_and_error_fallback() -> None:
             assert fallback_body["security_score"] == 90.0  # 100 - 10 for max_uses with no expires_at
             assert fallback_body["risk_level"] == "LOW"
             assert "Production Deployment Board" in fallback_body["summary"]
+
+
+# ============================================================================
+# PHASE 7 TESTS: VISUAL DEPENDENCY GRAPH & AI CRITICAL PATH ANALYZER
+# ============================================================================
+
+
+def test_analyze_dependencies_missing_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/analyze-dependencies without X-Internal-Token returns 401 StandardErrorSchema."""
+    payload = {
+        "board_title": "Kanbanify Launch Board",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [],
+            "edges": [],
+            "critical_path_card_ids": [],
+            "total_blocked_cards": 0,
+            "has_circular_dependency": False,
+        },
+    }
+    response = client.post("/internal/v1/analyze-dependencies", json=payload)
+    assert response.status_code == 401
+    envelope = StandardErrorSchema.model_validate(response.json())
+    assert envelope.error.code == "UNAUTHORIZED"
+    assert envelope.error.message == "Missing or invalid X-Internal-Token header."
+
+
+def test_analyze_dependencies_invalid_token_returns_401_standard_error() -> None:
+    """Verify POST /internal/v1/analyze-dependencies with invalid X-Internal-Token returns 401 StandardErrorSchema."""
+    payload = {
+        "board_title": "Kanbanify Launch Board",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [],
+            "edges": [],
+            "critical_path_card_ids": [],
+            "total_blocked_cards": 0,
+            "has_circular_dependency": False,
+        },
+    }
+    response = client.post(
+        "/internal/v1/analyze-dependencies",
+        headers={"X-Internal-Token": "invalid_sync_token"},
+        json=payload,
+    )
+    assert response.status_code == 401
+    envelope = StandardErrorSchema.model_validate(response.json())
+    assert envelope.error.code == "UNAUTHORIZED"
+
+
+def test_analyze_dependencies_empty_board_title_returns_400_validation_error() -> None:
+    """Verify POST /internal/v1/analyze-dependencies with empty board_title returns 400 validation error."""
+    payload = {
+        "board_title": "",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [],
+            "edges": [],
+            "critical_path_card_ids": [],
+            "total_blocked_cards": 0,
+            "has_circular_dependency": False,
+        },
+    }
+    response = client.post(
+        "/internal/v1/analyze-dependencies",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 400
+    envelope = StandardErrorSchema.model_validate(response.json())
+    assert envelope.error.code == "VALIDATION_ERROR"
+
+
+def test_analyze_dependencies_api_contract_single_card_example() -> None:
+    """
+    Verify POST /internal/v1/analyze-dependencies with the exact contract sample from docs/api-contract.md:
+    1 card on critical path, 0 active blockers, returns 200 OK matching AICriticalPathResponse 100%.
+    """
+    payload = {
+        "board_title": "Kanbanify Launch Board",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [
+                {
+                    "card_id": "44444444-4444-4444-8444-444444444441",
+                    "title": "Implement OAuth2 PKCE flow",
+                    "column_id": "33333333-3333-4333-8333-333333333331",
+                    "column_title": "Backlog",
+                    "priority": "HIGH",
+                    "story_points": 5,
+                    "is_completed": False,
+                    "assignee_initials": ["AR"],
+                    "in_degree": 0,
+                    "out_degree": 1,
+                    "is_on_critical_path": True,
+                }
+            ],
+            "edges": [],
+            "critical_path_card_ids": ["44444444-4444-4444-8444-444444444441"],
+            "total_blocked_cards": 0,
+            "has_circular_dependency": False,
+        },
+    }
+
+    response = client.post(
+        "/internal/v1/analyze-dependencies",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    # Validate against local contract schema
+    local_val = AICriticalPathResponseSchema.model_validate(data)
+    # Validate against root canonical schemas.py 100%
+    canonical_val = _canonical_contracts.AICriticalPathResponseSchema.model_validate(data)
+
+    assert local_val.critical_path_titles == ["Implement OAuth2 PKCE flow"]
+    assert canonical_val.critical_path_titles == ["Implement OAuth2 PKCE flow"]
+    assert local_val.top_blocker_cards == []
+    assert 3 <= len(local_val.unblocking_recommendations) <= 5
+    assert "critical path" in local_val.risk_summary.lower()
+    assert "5 story points" in local_val.risk_summary
+
+
+def test_analyze_dependencies_complex_dependency_graph_with_top_blockers() -> None:
+    """
+    Verify POST /internal/v1/analyze-dependencies with multi-node graph from docs/api-contract.md (lines 2092-2113):
+    Blocker card sits on critical path, blocking 3 downstream tasks.
+    """
+    payload = {
+        "board_title": "Kinetix Core Platform",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [
+                {
+                    "card_id": "44444444-4444-4444-8444-444444444441",
+                    "title": "Implement OAuth2 PKCE flow",
+                    "column_id": "33333333-3333-4333-8333-333333333331",
+                    "column_title": "In Progress",
+                    "priority": "HIGH",
+                    "story_points": 8,
+                    "is_completed": False,
+                    "assignee_initials": ["AR"],
+                    "in_degree": 0,
+                    "out_degree": 3,
+                    "is_on_critical_path": True,
+                },
+                {
+                    "card_id": "44444444-4444-4444-8444-444444444442",
+                    "title": "Implement Webhook Dispatcher",
+                    "column_id": "33333333-3333-4333-8333-333333333331",
+                    "column_title": "Backlog",
+                    "priority": "HIGH",
+                    "story_points": 5,
+                    "is_completed": False,
+                    "assignee_initials": ["BC"],
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "is_on_critical_path": True,
+                },
+                {
+                    "card_id": "44444444-4444-4444-8444-444444444443",
+                    "title": "Deploy Release 1.0",
+                    "column_id": "33333333-3333-4333-8333-333333333332",
+                    "column_title": "Backlog",
+                    "priority": "URGENT",
+                    "story_points": 3,
+                    "is_completed": False,
+                    "assignee_initials": ["AR"],
+                    "in_degree": 1,
+                    "out_degree": 0,
+                    "is_on_critical_path": True,
+                },
+                {
+                    "card_id": "44444444-4444-4444-8444-444444444444",
+                    "title": "Setup Prometheus Monitoring",
+                    "column_id": "33333333-3333-4333-8333-333333333332",
+                    "column_title": "Backlog",
+                    "priority": "MEDIUM",
+                    "story_points": 2,
+                    "is_completed": False,
+                    "assignee_initials": ["DL"],
+                    "in_degree": 1,
+                    "out_degree": 0,
+                    "is_on_critical_path": False,
+                },
+            ],
+            "edges": [
+                {
+                    "from_card_id": "44444444-4444-4444-8444-444444444441",
+                    "to_card_id": "44444444-4444-4444-8444-444444444442",
+                    "is_resolved": False,
+                    "is_critical": True,
+                },
+                {
+                    "from_card_id": "44444444-4444-4444-8444-444444444442",
+                    "to_card_id": "44444444-4444-4444-8444-444444444443",
+                    "is_resolved": False,
+                    "is_critical": True,
+                },
+                {
+                    "from_card_id": "44444444-4444-4444-8444-444444444441",
+                    "to_card_id": "44444444-4444-4444-8444-444444444444",
+                    "is_resolved": False,
+                    "is_critical": False,
+                },
+            ],
+            "critical_path_card_ids": [
+                "44444444-4444-4444-8444-444444444441",
+                "44444444-4444-4444-8444-444444444442",
+                "44444444-4444-4444-8444-444444444443",
+            ],
+            "total_blocked_cards": 3,
+            "has_circular_dependency": False,
+        },
+    }
+
+    response = client.post(
+        "/internal/v1/analyze-dependencies",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = _canonical_contracts.AICriticalPathResponseSchema.model_validate(data)
+
+    # 1. Critical path titles
+    assert validated.critical_path_titles == [
+        "Implement OAuth2 PKCE flow",
+        "Implement Webhook Dispatcher",
+        "Deploy Release 1.0",
+    ]
+
+    # 2. Top blocker cards
+    assert len(validated.top_blocker_cards) >= 1
+    top_blocker = validated.top_blocker_cards[0]
+    assert top_blocker.card_id == "44444444-4444-4444-8444-444444444441"
+    assert top_blocker.title == "Implement OAuth2 PKCE flow"
+    assert top_blocker.blocks_count == 3
+    assert "critical path" in top_blocker.reason.lower()
+
+    # 3. Risk summary highlights
+    assert "3 cards sit on the critical path" in validated.risk_summary
+    assert "16 story points" in validated.risk_summary  # 8 + 5 + 3
+    assert "3 total downstream tasks" in validated.risk_summary
+    assert "Delayed release risk: High" in validated.risk_summary
+
+    # 4. Actionable unblocking recommendations
+    assert 3 <= len(validated.unblocking_recommendations) <= 5
+    assert any("Prioritize 'Implement OAuth2 PKCE flow'" in rec for rec in validated.unblocking_recommendations)
+    assert any("Split high-story-point critical path card" in rec for rec in validated.unblocking_recommendations)
+
+
+def test_analyze_dependencies_circular_dependency_deadlock() -> None:
+    """Verify circular dependency deadlock produces critical warning and resolution recommendation."""
+    payload = {
+        "board_title": "Deadlock Board",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [
+                {
+                    "card_id": "c-1",
+                    "title": "Task Alpha",
+                    "column_id": "col-1",
+                    "column_title": "Backlog",
+                    "priority": "HIGH",
+                    "story_points": 3,
+                    "is_completed": False,
+                    "assignee_initials": ["A"],
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "is_on_critical_path": True,
+                },
+                {
+                    "card_id": "c-2",
+                    "title": "Task Beta",
+                    "column_id": "col-1",
+                    "column_title": "Backlog",
+                    "priority": "HIGH",
+                    "story_points": 5,
+                    "is_completed": False,
+                    "assignee_initials": ["B"],
+                    "in_degree": 1,
+                    "out_degree": 1,
+                    "is_on_critical_path": True,
+                },
+            ],
+            "edges": [
+                {"from_card_id": "c-1", "to_card_id": "c-2", "is_resolved": False, "is_critical": True},
+                {"from_card_id": "c-2", "to_card_id": "c-1", "is_resolved": False, "is_critical": True},
+            ],
+            "critical_path_card_ids": ["c-1", "c-2"],
+            "total_blocked_cards": 2,
+            "has_circular_dependency": True,
+        },
+    }
+
+    response = client.post(
+        "/internal/v1/analyze-dependencies",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    validated = _canonical_contracts.AICriticalPathResponseSchema.model_validate(data)
+
+    assert "CRITICAL: Circular dependency cycle detected" in validated.risk_summary
+    assert any("circular dependency" in rec.lower() for rec in validated.unblocking_recommendations)
+    assert 3 <= len(validated.unblocking_recommendations) <= 5
+
+
+def test_analyze_dependencies_unassigned_and_blocked_critical_cards_recommendations() -> None:
+    """Verify unassigned cards and blocked critical path cards generate targeted recommendations."""
+    payload = {
+        "board_title": "Unassigned & Blocked Board",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [
+                {
+                    "card_id": "c-orphan",
+                    "title": "Orphan Critical Task",
+                    "column_id": "col-1",
+                    "column_title": "To Do",
+                    "priority": "HIGH",
+                    "story_points": 3,
+                    "is_completed": False,
+                    "assignee_initials": [],
+                    "in_degree": 1,
+                    "out_degree": 0,
+                    "is_on_critical_path": True,
+                },
+                {
+                    "card_id": "c-root",
+                    "title": "Root Blocker Task",
+                    "column_id": "col-1",
+                    "column_title": "To Do",
+                    "priority": "HIGH",
+                    "story_points": 2,
+                    "is_completed": False,
+                    "assignee_initials": ["JD"],
+                    "in_degree": 0,
+                    "out_degree": 1,
+                    "is_on_critical_path": True,
+                },
+            ],
+            "edges": [
+                {"from_card_id": "c-root", "to_card_id": "c-orphan", "is_resolved": False, "is_critical": True},
+            ],
+            "critical_path_card_ids": ["c-root", "c-orphan"],
+            "total_blocked_cards": 1,
+            "has_circular_dependency": False,
+        },
+    }
+
+    response = client.post(
+        "/internal/v1/analyze-dependencies",
+        headers={"X-Internal-Token": DEFAULT_TOKEN},
+        json=payload,
+    )
+    assert response.status_code == 200
+    validated = AICriticalPathResponseSchema.model_validate(response.json())
+
+    # Check unassigned owner recommendation
+    assert any("dedicated owner to critical path card 'Orphan Critical Task'" in rec for rec in validated.unblocking_recommendations)
+    # Check blocked critical path swarming recommendation
+    assert any("Swarm team efforts to clear prerequisite blockers for 'Orphan Critical Task'" in rec for rec in validated.unblocking_recommendations)
+
+
+def test_analyze_dependencies_live_llm_mode_and_error_fallback() -> None:
+    """Verify live LLM orchestration path and graceful fallback on network / upstream error."""
+    mock_llm_output = {
+        "risk_summary": "LLM Analysis: Critical path has 1 card with high bottleneck potential.",
+        "critical_path_titles": [
+            "Implement OAuth2 PKCE flow",
+        ],
+        "top_blocker_cards": [
+            {
+                "card_id": "44444444-4444-4444-8444-444444444441",
+                "title": "Implement OAuth2 PKCE flow",
+                "blocks_count": 3,
+                "reason": "Blocks downstream authentication and webhook integrations.",
+            }
+        ],
+        "unblocking_recommendations": [
+            "Pair program on OAuth2 PKCE flow to expedite code review.",
+            "Decouple Webhook Dispatcher from PKCE dependency if secret tokens can be mocked.",
+            "Establish automated integration tests for authentication middleware.",
+        ],
+    }
+
+    mock_response = httpx.Response(
+        status_code=200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(mock_llm_output),
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
+
+    payload = {
+        "board_title": "Production Board",
+        "graph": {
+            "board_id": "11111111-1111-4111-8111-111111111111",
+            "nodes": [
+                {
+                    "card_id": "44444444-4444-4444-8444-444444444441",
+                    "title": "Implement OAuth2 PKCE flow",
+                    "column_id": "col-1",
+                    "column_title": "Backlog",
+                    "priority": "HIGH",
+                    "story_points": 5,
+                    "is_completed": False,
+                    "assignee_initials": ["AR"],
+                    "in_degree": 0,
+                    "out_degree": 3,
+                    "is_on_critical_path": True,
+                }
+            ],
+            "edges": [],
+            "critical_path_card_ids": ["44444444-4444-4444-8444-444444444441"],
+            "total_blocked_cards": 3,
+            "has_circular_dependency": False,
+        },
+    }
+
+    # 1. Test live LLM orchestration path
+    with patch("app.critical_path_analyzer.get_settings") as mock_settings:
+        from app.config import Settings
+        mock_settings.return_value = Settings(
+            llm_api_key="sk-real-valid-api-key-for-testing",
+        )
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(return_value=mock_response),
+        ):
+            res = client.post(
+                "/internal/v1/analyze-dependencies",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=payload,
+            )
+            assert res.status_code == 200
+            body = res.json()
+            assert body["risk_summary"] == mock_llm_output["risk_summary"]
+            assert body["critical_path_titles"] == mock_llm_output["critical_path_titles"]
+            assert len(body["top_blocker_cards"]) == 1
+            assert body["top_blocker_cards"][0]["blocks_count"] == 3
+            assert body["unblocking_recommendations"] == mock_llm_output["unblocking_recommendations"]
+
+        # 2. Test fallback on network / upstream LLM error
+        with patch.object(
+            httpx.AsyncClient,
+            "post",
+            new=AsyncMock(side_effect=httpx.ConnectError("OpenAI unreachable")),
+        ):
+            fallback_res = client.post(
+                "/internal/v1/analyze-dependencies",
+                headers={"X-Internal-Token": DEFAULT_TOKEN},
+                json=payload,
+            )
+            assert fallback_res.status_code == 200
+            fallback_body = fallback_res.json()
+            assert "1 card sits on the critical path" in fallback_body["risk_summary"]
+            assert fallback_body["critical_path_titles"] == ["Implement OAuth2 PKCE flow"]
+            assert 3 <= len(fallback_body["unblocking_recommendations"]) <= 5
+
 
 
 

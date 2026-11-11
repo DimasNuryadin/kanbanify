@@ -466,6 +466,68 @@ class AIPermissionAuditResponseSchema(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
 
 
+# Phase 7 Visual Dependency Graph & AI Critical Path Schemas
+class DependencyNodeSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1, max_length=255)
+    column_id: str = Field(..., min_length=1)
+    column_title: str = Field(..., min_length=1)
+    priority: PriorityEnum = PriorityEnum.MEDIUM
+    story_points: int | None = Field(default=None, ge=0, le=100)
+    is_completed: bool = False
+    assignee_initials: list[str] = Field(default_factory=list)
+    in_degree: int = Field(default=0, ge=0)
+    out_degree: int = Field(default=0, ge=0)
+    is_on_critical_path: bool = False
+
+
+class DependencyEdgeSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_card_id: str = Field(..., min_length=1)
+    to_card_id: str = Field(..., min_length=1)
+    is_resolved: bool = False
+    is_critical: bool = False
+
+
+class BoardDependencyGraphSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_id: str = Field(..., min_length=1)
+    nodes: list[DependencyNodeSchema] = Field(default_factory=list)
+    edges: list[DependencyEdgeSchema] = Field(default_factory=list)
+    critical_path_card_ids: list[str] = Field(default_factory=list)
+    total_blocked_cards: int = Field(default=0, ge=0)
+    has_circular_dependency: bool = False
+
+
+class CriticalPathBlockerCardSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card_id: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    blocks_count: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=1)
+
+
+class AICriticalPathRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1, max_length=150)
+    graph: BoardDependencyGraphSchema
+
+
+class AICriticalPathResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    risk_summary: str = Field(..., min_length=1)
+    critical_path_titles: list[str] = Field(default_factory=list)
+    top_blocker_cards: list[CriticalPathBlockerCardSchema] = Field(default_factory=list)
+    unblocking_recommendations: list[str] = Field(default_factory=list)
+
+
 # Bind directly to `packages/contracts/schemas.py` when present in the monorepo
 _SHARED_SCHEMAS_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent
@@ -530,6 +592,12 @@ if _SHARED_SCHEMAS_PATH.is_file():
         BoardInviteLinkSchema = _module.BoardInviteLinkSchema  # type: ignore[misc]
         AIPermissionAuditRequestSchema = _module.AIPermissionAuditRequestSchema  # type: ignore[misc]
         AIPermissionAuditResponseSchema = _module.AIPermissionAuditResponseSchema  # type: ignore[misc]
+        DependencyNodeSchema = _module.DependencyNodeSchema  # type: ignore[misc]
+        DependencyEdgeSchema = _module.DependencyEdgeSchema  # type: ignore[misc]
+        BoardDependencyGraphSchema = _module.BoardDependencyGraphSchema  # type: ignore[misc]
+        CriticalPathBlockerCardSchema = _module.CriticalPathBlockerCardSchema  # type: ignore[misc]
+        AICriticalPathRequestSchema = _module.AICriticalPathRequestSchema  # type: ignore[misc]
+        AICriticalPathResponseSchema = _module.AICriticalPathResponseSchema  # type: ignore[misc]
 
 
 _DEFAULT_COLOR_NAMES: dict[str, str] = {
@@ -761,6 +829,9 @@ AISummaryNotificationRequestSchema.model_rebuild()
 AISummaryNotificationResponseSchema.model_rebuild()
 AIPermissionAuditRequestSchema.model_rebuild()
 AIPermissionAuditResponseSchema.model_rebuild()
+BoardDependencyGraphSchema.model_rebuild()
+AICriticalPathRequestSchema.model_rebuild()
+AICriticalPathResponseSchema.model_rebuild()
 
 AIDecomposeRequest = AIDecomposeRequestSchema
 AIDecomposeResponse = AIDecomposeResponseSchema
@@ -799,11 +870,22 @@ BoardInviteLink = BoardInviteLinkSchema
 AIPermissionAuditRequest = AIPermissionAuditRequestSchema
 AIPermissionAuditResponse = AIPermissionAuditResponseSchema
 
+DependencyNode = DependencyNodeSchema
+DependencyEdge = DependencyEdgeSchema
+BoardDependencyGraph = BoardDependencyGraphSchema
+CriticalPathBlockerCard = CriticalPathBlockerCardSchema
+AICriticalPathRequest = AICriticalPathRequestSchema
+AICriticalPathResponse = AICriticalPathResponseSchema
+
 __all__ = [
     "AIAnalyticsReport",
     "AIAnalyticsReportSchema",
     "AIAnalyticsRequest",
     "AIAnalyticsRequestSchema",
+    "AICriticalPathRequest",
+    "AICriticalPathRequestSchema",
+    "AICriticalPathResponse",
+    "AICriticalPathResponseSchema",
     "AIDecomposeRequest",
     "AIDecomposeRequestSchema",
     "AIDecomposeResponse",
@@ -846,6 +928,8 @@ __all__ = [
     "AutomationTriggerTypeEnum",
     "BoardAnalytics",
     "BoardAnalyticsSchema",
+    "BoardDependencyGraph",
+    "BoardDependencyGraphSchema",
     "BoardInviteLink",
     "BoardInviteLinkSchema",
     "BoardRole",
@@ -858,6 +942,12 @@ __all__ = [
     "ChecklistSchema",
     "ColumnMetric",
     "ColumnMetricSchema",
+    "CriticalPathBlockerCard",
+    "CriticalPathBlockerCardSchema",
+    "DependencyEdge",
+    "DependencyEdgeSchema",
+    "DependencyNode",
+    "DependencyNodeSchema",
     "ErrorBodySchema",
     "ErrorCodeEnum",
     "HealthCheckResponseSchema",
