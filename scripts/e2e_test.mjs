@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Kanbanify Phase 6 — Automated Cross-Service End-to-End Smoke Test
+ * Kanbanify Phase 7 — Automated Cross-Service End-to-End Smoke Test
  * Verifies:
  *  1. Process orchestration / connection to AI Engine (Port 8001) & Core API (Port 8000)
  *  2. Health check endpoints (GET :8001/health & GET :8000/health)
@@ -19,6 +19,10 @@
  * 15. Strict RBAC Enforcement (VIEWER 403 FORBIDDEN vs EDITOR/ADMIN 200/201) (Phase 6)
  * 16. Shareable Invite Links Lifecycle (Create, Inspect, Join, Usage Increment) (Phase 6)
  * 17. AI Workspace Access & Permission Security Audit (API -> AI Engine) (Phase 6)
+ * 18. Trello Custom Fields Power-Up CRUD & Card Value Assignments (Phase 7)
+ * 19. Cycle-Safe Dependency Linking & Circular Prevention (API -> AI Engine) (Phase 7)
+ * 20. Visual Dependency Graph & AI Critical Path Analysis (API -> AI Engine) (Phase 7)
+ * 21. Glassmorphism & Theme Customization Studio Persistence (Phase 7)
  */
 
 import assert from "node:assert/strict";
@@ -202,7 +206,7 @@ async function cleanup() {
 
 async function runSmokeTests() {
   console.log("==================================================================");
-  console.log(" KANBANIFY PHASE 6 — ENTERPRISE AUTH, RBAC & INVITES E2E SMOKE TEST");
+  console.log(" KANBANIFY PHASE 7 — CUSTOM FIELDS, DEPENDENCY GRAPH & THEMES E2E");
   console.log("==================================================================");
 
   await ensureServicesRunning();
@@ -1929,6 +1933,384 @@ async function runSmokeTests() {
     `POST /api/v1/boards/${board.id}/security-audit -> 200 OK (security_score=${auditReport.security_score}, risk_level=${auditReport.risk_level}, findings=${auditReport.findings.length}, recommendations=${auditReport.recommendations.length})`
   );
 
+  // ---------------------------------------------------------------------------
+  // STEP 19: Custom Fields Lifecycle Verification (Phase 7)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "CUSTOM_FIELDS_CREATE",
+    "Creating DROPDOWN and NUMBER custom fields via POST /api/v1/boards/:boardId/custom-fields..."
+  );
+
+  // 1. Create DROPDOWN Custom Field ("Release Track")
+  const dropdownFieldRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/custom-fields`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Release Track",
+        type: "DROPDOWN",
+        show_on_front: true,
+        options: [
+          { label: "Alpha", color: "blue" },
+          { label: "Beta", color: "purple" },
+          { label: "GA", color: "green" },
+        ],
+      }),
+    }
+  );
+  assert.ok(
+    dropdownFieldRes.status === 200 || dropdownFieldRes.status === 201,
+    `Expected 200/201 from POST /custom-fields (DROPDOWN), got ${dropdownFieldRes.status}`
+  );
+  const dropdownField = await dropdownFieldRes.json();
+  assert.ok(dropdownField.id, "Expected created DROPDOWN custom field to have an id");
+  assert.equal(dropdownField.name, "Release Track");
+  assert.equal(dropdownField.type, "DROPDOWN");
+  assert.equal(dropdownField.show_on_front, true);
+  assert.ok(
+    Array.isArray(dropdownField.options) && dropdownField.options.length === 3,
+    "Expected 3 options for Release Track dropdown"
+  );
+  const selectedDropdownOption = dropdownField.options[1]; // Beta
+
+  // 2. Create NUMBER Custom Field ("Story Effort")
+  const numberFieldRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/custom-fields`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Story Effort",
+        type: "NUMBER",
+        show_on_front: true,
+      }),
+    }
+  );
+  assert.ok(
+    numberFieldRes.status === 200 || numberFieldRes.status === 201,
+    `Expected 200/201 from POST /custom-fields (NUMBER), got ${numberFieldRes.status}`
+  );
+  const numberField = await numberFieldRes.json();
+  assert.ok(numberField.id, "Expected created NUMBER custom field to have an id");
+  assert.equal(numberField.name, "Story Effort");
+  assert.equal(numberField.type, "NUMBER");
+  assert.equal(numberField.show_on_front, true);
+
+  // 3. Verify GET /api/v1/boards/:boardId/custom-fields returns fields
+  const listCfRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/custom-fields`
+  );
+  assert.equal(
+    listCfRes.status,
+    200,
+    `Expected 200 from GET /custom-fields, got ${listCfRes.status}`
+  );
+  const boardCustomFields = await listCfRes.json();
+  assert.ok(
+    boardCustomFields.some((f) => f.id === dropdownField.id),
+    "Expected created dropdown field in custom-fields list"
+  );
+  assert.ok(
+    boardCustomFields.some((f) => f.id === numberField.id),
+    "Expected created number field in custom-fields list"
+  );
+  logPass(
+    `POST /api/v1/boards/${board.id}/custom-fields -> Created DROPDOWN ("Release Track") and NUMBER ("Story Effort") verified via GET`
+  );
+
+  // 4. Assign Custom Field values to card via PUT /api/v1/cards/:cardId/custom-fields/:fieldId
+  logStep(
+    "CUSTOM_FIELDS_ASSIGN",
+    `Assigning custom field values to card '${createdCard.id}' via PUT /api/v1/cards/:cardId/custom-fields/:fieldId...`
+  );
+
+  const putDropdownValRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}/custom-fields/${dropdownField.id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value: selectedDropdownOption.id }),
+    }
+  );
+  assert.equal(
+    putDropdownValRes.status,
+    200,
+    `Expected 200 from PUT /cards/:cardId/custom-fields/:fieldId, got ${putDropdownValRes.status}`
+  );
+  const updatedCardAfterDropdown = await putDropdownValRes.json();
+  assert.ok(
+    Array.isArray(updatedCardAfterDropdown.custom_field_values),
+    "Expected updated card to have custom_field_values array"
+  );
+  const assignedDropdownEntry = updatedCardAfterDropdown.custom_field_values.find(
+    (v) => v.field_id === dropdownField.id
+  );
+  assert.ok(
+    assignedDropdownEntry,
+    "Expected card to contain assigned dropdown field value"
+  );
+  assert.equal(assignedDropdownEntry.value, selectedDropdownOption.id);
+
+  const putNumberValRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${createdCard.id}/custom-fields/${numberField.id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value: 13 }),
+    }
+  );
+  assert.equal(
+    putNumberValRes.status,
+    200,
+    `Expected 200 from PUT /cards/:cardId/custom-fields/:fieldId, got ${putNumberValRes.status}`
+  );
+  const updatedCardAfterNumber = await putNumberValRes.json();
+  const assignedNumberEntry = updatedCardAfterNumber.custom_field_values.find(
+    (v) => v.field_id === numberField.id
+  );
+  assert.ok(
+    assignedNumberEntry,
+    "Expected card to contain assigned number field value"
+  );
+  assert.equal(assignedNumberEntry.value, 13);
+  logPass(
+    `PUT /api/v1/cards/${createdCard.id}/custom-fields/:fieldId -> 200 OK (Release Track="${selectedDropdownOption.label}", Story Effort=13 persisted in card.custom_field_values)`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 20: Cycle-Safe Dependency Graph & AI Critical Path (API -> AI Engine) (Phase 7)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "DEPENDENCY_LINKING",
+    "Creating Card A and Card B, linking B blocked by A, and verifying circular dependency rejection..."
+  );
+
+  const cardARes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/cards`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        column_id: backlogCol.id,
+        title: "Phase 7 Card A - Architectural Foundation",
+        description: "Must be completed before implementation starts",
+        position: "a1",
+      }),
+    }
+  );
+  assert.ok(
+    cardARes.status === 200 || cardARes.status === 201,
+    `Expected 200/201 from POST /cards for Card A, got ${cardARes.status}`
+  );
+  const cardA = await cardARes.json();
+  assert.ok(cardA.id, "Expected Card A to have valid ID");
+
+  const cardBRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/cards`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        column_id: backlogCol.id,
+        title: "Phase 7 Card B - Feature Implementation",
+        description: "Dependent on Card A architectural foundation",
+        position: "a2",
+      }),
+    }
+  );
+  assert.ok(
+    cardBRes.status === 200 || cardBRes.status === 201,
+    `Expected 200/201 from POST /cards for Card B, got ${cardBRes.status}`
+  );
+  const cardB = await cardBRes.json();
+  assert.ok(cardB.id, "Expected Card B to have valid ID");
+
+  // Link Card B as blocked by Card A
+  const linkBtoARes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardB.id}/dependencies`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blocker_card_id: cardA.id }),
+    }
+  );
+  assert.equal(
+    linkBtoARes.status,
+    200,
+    `Expected 200 from POST /cards/:cardId/dependencies, got ${linkBtoARes.status}`
+  );
+  const linkBtoABody = await linkBtoARes.json();
+  assert.ok(
+    linkBtoABody.card.blocked_by_card_ids.includes(cardA.id),
+    "Expected Card B blocked_by_card_ids to include Card A"
+  );
+  logPass(
+    `POST /api/v1/cards/${cardB.id}/dependencies -> 200 OK (Card B successfully marked as blocked by Card A)`
+  );
+
+  // Attempt circular dependency: Link Card A as blocked by Card B
+  logStep(
+    "CYCLE_PREVENTION",
+    "Attempting circular dependency: linking Card A as blocked by Card B (expecting strictly 400 VALIDATION_ERROR)..."
+  );
+  const cycleRes = await fetch(
+    `${API_BASE_URL}/api/v1/cards/${cardA.id}/dependencies`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blocker_card_id: cardB.id }),
+    }
+  );
+  assert.equal(
+    cycleRes.status,
+    400,
+    `Circular dependency MUST be rejected with 400 VALIDATION_ERROR, got ${cycleRes.status}`
+  );
+  const cycleErr = await cycleRes.json();
+  assert.equal(
+    cycleErr.error.code,
+    "VALIDATION_ERROR",
+    `Expected error.code === "VALIDATION_ERROR", got ${cycleErr.error?.code}`
+  );
+  assert.ok(
+    cycleErr.error.message.toLowerCase().includes("circular"),
+    `Expected message to reference circular dependency, got "${cycleErr.error?.message}"`
+  );
+  logPass(
+    `Circular dependency (Card A <-> Card B) strictly rejected with 400 VALIDATION_ERROR: "${cycleErr.error.message}"`
+  );
+
+  // Call GET /api/v1/boards/:boardId/dependency-graph
+  logStep(
+    "DEPENDENCY_GRAPH_GET",
+    `Calling GET /api/v1/boards/${board.id}/dependency-graph...`
+  );
+  const graphRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/dependency-graph`
+  );
+  assert.equal(
+    graphRes.status,
+    200,
+    `Expected 200 from GET /dependency-graph, got ${graphRes.status}`
+  );
+  const graphData = await graphRes.json();
+  assert.ok(Array.isArray(graphData.nodes), "Expected graphData.nodes array");
+  assert.ok(Array.isArray(graphData.edges), "Expected graphData.edges array");
+  assert.ok(
+    Array.isArray(graphData.critical_path_card_ids),
+    "Expected graphData.critical_path_card_ids array"
+  );
+  assert.ok(
+    graphData.nodes.some((n) => n.card_id === cardA.id),
+    "Expected Card A to be present in graph nodes"
+  );
+  assert.ok(
+    graphData.nodes.some((n) => n.card_id === cardB.id),
+    "Expected Card B to be present in graph nodes"
+  );
+  assert.ok(
+    graphData.edges.some(
+      (e) => e.from_card_id === cardA.id && e.to_card_id === cardB.id
+    ),
+    "Expected directed edge from Card A to Card B in graph edges"
+  );
+  assert.equal(
+    graphData.has_circular_dependency,
+    false,
+    "Board dependency graph must have has_circular_dependency === false"
+  );
+  logPass(
+    `GET /api/v1/boards/${board.id}/dependency-graph -> 200 OK (${graphData.nodes.length} nodes, ${graphData.edges.length} edges, critical path length: ${graphData.critical_path_card_ids.length})`
+  );
+
+  // Call POST /api/v1/boards/:boardId/dependency-graph/ai-analyze (API -> AI Engine)
+  logStep(
+    "AI_CRITICAL_PATH_ANALYZE",
+    `Calling POST /api/v1/boards/${board.id}/dependency-graph/ai-analyze (API -> AI Engine)...`
+  );
+  const aiAnalyzeRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/dependency-graph/ai-analyze`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }
+  );
+  assert.equal(
+    aiAnalyzeRes.status,
+    200,
+    `Expected 200 from POST /dependency-graph/ai-analyze, got ${aiAnalyzeRes.status}`
+  );
+  const aiAnalyzeBody = await aiAnalyzeRes.json();
+  assert.ok(
+    typeof aiAnalyzeBody.risk_summary === "string" &&
+      aiAnalyzeBody.risk_summary.length > 0,
+    "Expected non-empty risk_summary in AI critical path response"
+  );
+  assert.ok(
+    Array.isArray(aiAnalyzeBody.critical_path_titles),
+    "Expected critical_path_titles array in AI critical path response"
+  );
+  assert.ok(
+    Array.isArray(aiAnalyzeBody.unblocking_recommendations) &&
+      aiAnalyzeBody.unblocking_recommendations.length >= 1,
+    "Expected at least 1 unblocking_recommendations in AI critical path response"
+  );
+  assert.ok(
+    Array.isArray(aiAnalyzeBody.top_blocker_cards),
+    "Expected top_blocker_cards array in AI critical path response"
+  );
+  logPass(
+    `POST /api/v1/boards/${board.id}/dependency-graph/ai-analyze -> 200 OK (critical_path_titles=[${aiAnalyzeBody.critical_path_titles.join(
+      ", "
+    )}], top_blockers=${aiAnalyzeBody.top_blocker_cards.length}, recommendations=${
+      aiAnalyzeBody.unblocking_recommendations.length
+    })`
+  );
+
+  // ---------------------------------------------------------------------------
+  // STEP 21: Theme Studio Persistence Verification (Phase 7)
+  // ---------------------------------------------------------------------------
+  logStep(
+    "THEME_STUDIO_PERSISTENCE",
+    `Calling PATCH /api/v1/boards/${board.id}/theme with FROSTED_GLASS preset...`
+  );
+  const patchThemeRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}/theme`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        preset: "FROSTED_GLASS",
+        glass_blur: "lg",
+        card_density: "compact",
+      }),
+    }
+  );
+  assert.equal(
+    patchThemeRes.status,
+    200,
+    `Expected 200 from PATCH /boards/:boardId/theme, got ${patchThemeRes.status}`
+  );
+  const patchThemeBody = await patchThemeRes.json();
+  assert.equal(patchThemeBody.preset, "FROSTED_GLASS");
+  assert.equal(patchThemeBody.glass_blur, "lg");
+  assert.equal(patchThemeBody.card_density, "compact");
+
+  // Verify theme persisted on the board
+  const getBoardAfterThemeRes = await fetch(
+    `${API_BASE_URL}/api/v1/boards/${board.id}`
+  );
+  assert.equal(getBoardAfterThemeRes.status, 200);
+  const boardAfterTheme = await getBoardAfterThemeRes.json();
+  assert.equal(boardAfterTheme.theme_config.preset, "FROSTED_GLASS");
+  assert.equal(boardAfterTheme.theme_config.glass_blur, "lg");
+  assert.equal(boardAfterTheme.theme_config.card_density, "compact");
+  logPass(
+    `PATCH /api/v1/boards/${board.id}/theme -> 200 OK (persisted preset="FROSTED_GLASS", glass_blur="lg", card_density="compact" confirmed via GET /boards/:boardId)`
+  );
+
   if (wsClient) {
     await new Promise((r) => setTimeout(r, 150));
     wsClient.close();
@@ -1943,7 +2325,7 @@ async function runSmokeTests() {
 
   console.log("==================================================================");
   console.log(
-    "\x1b[32m[PASS] Kanbanify Phase 6 Auth, RBAC & Shareable Invite Links E2E Smoke Tests Succeeded!\x1b[0m"
+    "\x1b[32m[PASS] Kanbanify Phase 7 Custom Fields, Dependency Graph & Theme Studio E2E Smoke Tests Succeeded!\x1b[0m"
   );
   console.log("==================================================================");
 }

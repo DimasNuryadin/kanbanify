@@ -155,6 +155,7 @@ export function CardDetailDrawer({
   const setSelectedCardId = useWorkspaceStore((s) => s.setSelectedCardId);
   const activeRole = useWorkspaceStore((s) => s.activeRole);
   const isViewer = activeRole === "VIEWER";
+  const useMockMode = useWorkspaceStore((s) => s.useMockMode);
 
   const setCardCustomFieldValueStore = useWorkspaceStore(
     (s) => s.setCardCustomFieldValue
@@ -496,7 +497,7 @@ export function CardDetailDrawer({
     setCardCustomFieldValueStore(card.id, fieldId, value);
     try {
       await apiClient.setCardCustomFieldValue(card.id, fieldId, value, {
-        useMock: true,
+        useMock: useMockMode,
       });
     } catch (err) {
       console.error("Failed to update custom field value:", err);
@@ -511,7 +512,7 @@ export function CardDetailDrawer({
       unlinkCardDependency(card.id, blockerCardId);
       try {
         await apiClient.removeCardDependency(card.id, blockerCardId, {
-          useMock: true,
+          useMock: useMockMode,
         });
       } catch (err) {
         console.error("Failed to remove dependency:", err);
@@ -519,7 +520,7 @@ export function CardDetailDrawer({
     } else {
       try {
         await apiClient.addCardDependency(card.id, blockerCardId, {
-          useMock: true,
+          useMock: useMockMode,
         });
         linkCardDependency(card.id, blockerCardId);
       } catch (err: unknown) {
