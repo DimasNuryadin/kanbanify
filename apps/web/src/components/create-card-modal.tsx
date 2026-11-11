@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Check, Plus, X } from "lucide-react";
-import { CreateCardRequest, Priority } from "@kinetix/contracts";
+import { CreateCardRequest, DEFAULT_CARD_TIME_TRACKING, Priority } from "@kinetix/contracts";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import {
   comparePositions,
@@ -100,6 +100,7 @@ export function CreateCardModal({ onCreateCard }: CreateCardModalProps) {
         is_archived: false,
         is_watching: false,
         custom_field_values: [],
+        time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
       });
 
       closeCreateCardModal();

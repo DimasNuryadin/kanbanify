@@ -132,6 +132,21 @@ export const ThemePresetEnum = z.enum([
 ]);
 export type ThemePreset = z.infer<typeof ThemePresetEnum>;
 
+// Phase 8 Time Tracking, Pomodoro & Sprint Retrospective Enums
+export const TimeEntrySourceEnum = z.enum(["STOPWATCH", "POMODORO", "MANUAL"]);
+export type TimeEntrySource = z.infer<typeof TimeEntrySourceEnum>;
+
+export const PomodoroModeEnum = z.enum(["FOCUS", "SHORT_BREAK", "LONG_BREAK"]);
+export type PomodoroMode = z.infer<typeof PomodoroModeEnum>;
+
+export const RetroCategoryEnum = z.enum([
+  "WENT_WELL",
+  "TO_IMPROVE",
+  "KUDOS",
+  "ACTION_ITEMS",
+]);
+export type RetroCategory = z.infer<typeof RetroCategoryEnum>;
+
 /**
  * Lexicographical fractional index string (e.g., "a0", "a1", "a0V")
  * enabling O(1) single-row updates during drag-and-drop reordering.
@@ -663,6 +678,76 @@ export const THEME_PRESET_CONFIGS: Record<ThemePreset, BoardThemeConfig> = {
   },
 };
 
+// Phase 8 Card Time Tracking, Stopwatch & Worklog Schemas
+export const TimeEntrySchema = z.object({
+  id: z.string().min(1),
+  card_id: z.string().min(1),
+  user_id: z.string().min(1),
+  user_name: z.string().min(1).max(120),
+  user_initials: z.string().min(1).max(4),
+  duration_seconds: z.number().int().positive(),
+  note: z.string().default(""),
+  source: TimeEntrySourceEnum.default("MANUAL"),
+  started_at: z.string().datetime(),
+  ended_at: z.string().datetime(),
+  created_at: z.string().datetime(),
+});
+export type TimeEntry = z.infer<typeof TimeEntrySchema>;
+
+export const ActiveCardTimerSchema = z.object({
+  card_id: z.string().min(1),
+  user_id: z.string().min(1),
+  user_name: z.string().min(1),
+  started_at: z.string().datetime(),
+});
+export type ActiveCardTimer = z.infer<typeof ActiveCardTimerSchema>;
+
+export const CardTimeTrackingSummarySchema = z.object({
+  estimated_seconds: z.number().int().min(0).default(0),
+  total_logged_seconds: z.number().int().min(0).default(0),
+  active_timer: ActiveCardTimerSchema.nullable().default(null),
+  entries: z.array(TimeEntrySchema).default([]),
+  pomodoro_completed_count: z.number().int().min(0).default(0),
+});
+export type CardTimeTrackingSummary = z.infer<typeof CardTimeTrackingSummarySchema>;
+
+export const DEFAULT_CARD_TIME_TRACKING: CardTimeTrackingSummary = {
+  estimated_seconds: 0,
+  total_logged_seconds: 0,
+  active_timer: null,
+  entries: [],
+  pomodoro_completed_count: 0,
+};
+
+// Phase 8 Pomodoro Session Schema
+export const PomodoroSessionSchema = z.object({
+  id: z.string().min(1),
+  card_id: z.string().min(1),
+  user_id: z.string().min(1),
+  mode: PomodoroModeEnum.default("FOCUS"),
+  duration_seconds: z.number().int().positive().default(1500),
+  note: z.string().default(""),
+  completed_at: z.string().datetime(),
+});
+export type PomodoroSession = z.infer<typeof PomodoroSessionSchema>;
+
+// Phase 8 Sprint Retrospective Board Item Schema
+export const RetroItemSchema = z.object({
+  id: z.string().min(1),
+  board_id: z.string().min(1),
+  category: RetroCategoryEnum,
+  content: z.string().min(1),
+  author_id: z.string().min(1),
+  author_name: z.string().min(1).max(120),
+  author_initials: z.string().min(1).max(4),
+  votes: z.number().int().min(0).default(0),
+  voted_by_user_ids: z.array(z.string()).default([]),
+  linked_card_id: z.string().nullable().default(null),
+  is_resolved: z.boolean().default(false),
+  created_at: z.string().datetime(),
+});
+export type RetroItem = z.infer<typeof RetroItemSchema>;
+
 export const CardSchema = z.object({
   id: z.string().uuid(),
   board_id: z.string().uuid(),
@@ -690,6 +775,14 @@ export const CardSchema = z.object({
   is_watching: z.boolean().default(false),
   // Phase 7 Custom Fields Values
   custom_field_values: z.array(CardCustomFieldValueSchema).default([]),
+  // Phase 8 Card Time Tracking & Pomodoro Focus Timer
+  time_tracking: CardTimeTrackingSummarySchema.default({
+    estimated_seconds: 0,
+    total_logged_seconds: 0,
+    active_timer: null,
+    entries: [],
+    pomodoro_completed_count: 0,
+  }),
 });
 export type Card = z.infer<typeof CardSchema>;
 
@@ -745,6 +838,8 @@ export const BoardSchema = z.object({
   // Phase 7 Custom Fields & Theme Studio
   custom_fields: z.array(CustomFieldDefinitionSchema).default([]),
   theme_config: BoardThemeConfigSchema.default(DEFAULT_THEME_CONFIG),
+  // Phase 8 Interactive Sprint Retrospective Board
+  retro_items: z.array(RetroItemSchema).default([]),
 });
 export type Board = z.infer<typeof BoardSchema>;
 
@@ -893,6 +988,13 @@ export const CreateCardRequestSchema = z.object({
   is_archived: z.boolean().optional().default(false),
   is_watching: z.boolean().optional().default(false),
   custom_field_values: z.array(CardCustomFieldValueSchema).optional().default([]),
+  time_tracking: CardTimeTrackingSummarySchema.optional().default({
+    estimated_seconds: 0,
+    total_logged_seconds: 0,
+    active_timer: null,
+    entries: [],
+    pomodoro_completed_count: 0,
+  }),
 });
 export type CreateCardRequest = z.infer<typeof CreateCardRequestSchema>;
 
@@ -918,6 +1020,7 @@ export const UpdateCardRequestSchema = z.object({
   is_archived: z.boolean().optional(),
   is_watching: z.boolean().optional(),
   custom_field_values: z.array(CardCustomFieldValueSchema).optional(),
+  time_tracking: CardTimeTrackingSummarySchema.optional(),
 });
 export type UpdateCardRequest = z.infer<typeof UpdateCardRequestSchema>;
 
@@ -1046,6 +1149,73 @@ export type AddCardDependencyRequest = z.infer<
   typeof AddCardDependencyRequestSchema
 >;
 
+// Phase 8 Card Time Tracking & Stopwatch Requests
+export const StartCardTimerRequestSchema = z.object({
+  user_id: z.string().optional(),
+  user_name: z.string().optional(),
+});
+export type StartCardTimerRequest = z.infer<typeof StartCardTimerRequestSchema>;
+
+export const StopCardTimerRequestSchema = z.object({
+  note: z.string().optional().default(""),
+});
+export type StopCardTimerRequest = z.infer<typeof StopCardTimerRequestSchema>;
+
+export const LogTimeEntryRequestSchema = z.object({
+  duration_seconds: z.number().int().positive().optional(),
+  note: z.string().optional().default(""),
+  source: TimeEntrySourceEnum.optional().default("MANUAL"),
+  started_at: z.string().datetime().optional(),
+  ended_at: z.string().datetime().optional(),
+  estimated_seconds: z.number().int().min(0).optional(),
+});
+export type LogTimeEntryRequest = z.infer<typeof LogTimeEntryRequestSchema>;
+
+// Phase 8 Pomodoro Complete Request
+export const PomodoroCompleteRequestSchema = z.object({
+  card_id: z.string().min(1),
+  mode: PomodoroModeEnum.default("FOCUS"),
+  duration_seconds: z.number().int().positive().default(1500),
+  note: z.string().optional().default("Completed 25m Pomodoro focus session"),
+});
+export type PomodoroCompleteRequest = z.infer<typeof PomodoroCompleteRequestSchema>;
+
+// Phase 8 Retrospective Request & Response Schemas
+export const CreateRetroItemRequestSchema = z.object({
+  category: RetroCategoryEnum,
+  content: z.string().min(1),
+  author_id: z.string().min(1).optional(),
+  author_name: z.string().min(1).max(120).optional(),
+  author_initials: z.string().min(1).max(4).optional(),
+});
+export type CreateRetroItemRequest = z.infer<typeof CreateRetroItemRequestSchema>;
+
+export const UpdateRetroItemRequestSchema = z.object({
+  content: z.string().min(1).optional(),
+  category: RetroCategoryEnum.optional(),
+  is_resolved: z.boolean().optional(),
+});
+export type UpdateRetroItemRequest = z.infer<typeof UpdateRetroItemRequestSchema>;
+
+export const VoteRetroItemResponseSchema = z.object({
+  retro_item: RetroItemSchema,
+  has_voted: z.boolean(),
+});
+export type VoteRetroItemResponse = z.infer<typeof VoteRetroItemResponseSchema>;
+
+export const ConvertRetroItemToCardRequestSchema = z.object({
+  target_column_id: z.string().optional(),
+  priority: PriorityEnum.optional().default("MEDIUM"),
+  story_points: z.number().int().min(0).max(100).nullable().optional().default(null),
+});
+export type ConvertRetroItemToCardRequest = z.infer<typeof ConvertRetroItemToCardRequestSchema>;
+
+export const ConvertRetroItemToCardResponseSchema = z.object({
+  retro_item: RetroItemSchema,
+  card: CardSchema,
+});
+export type ConvertRetroItemToCardResponse = z.infer<typeof ConvertRetroItemToCardResponseSchema>;
+
 // ============================================================================
 // 4. WEBSOCKET MESSAGE SCHEMAS (/ws/boards/:boardId)
 // ============================================================================
@@ -1077,6 +1247,11 @@ export const WSEventTypeEnum = z.enum([
   "CUSTOM_FIELD_DELETED",
   "DEPENDENCY_ADDED",
   "DEPENDENCY_REMOVED",
+  // Phase 8 Time Tracking & Retrospective Events
+  "TIMER_UPDATED",
+  "RETRO_ITEM_CREATED",
+  "RETRO_ITEM_UPDATED",
+  "RETRO_ITEM_DELETED",
 ]);
 export type WSEventType = z.infer<typeof WSEventTypeEnum>;
 
@@ -1320,6 +1495,10 @@ export const BoardAnalyticsSchema = z.object({
   cards_by_priority: z.array(PriorityMetricSchema).default([]),
   cards_by_label: z.array(LabelMetricSchema).default([]),
   burndown_series: z.array(BurndownDataPointSchema).default([]),
+  // Phase 8 Time Tracking Additive Fields
+  total_estimated_hours: z.number().min(0).default(0),
+  total_logged_hours: z.number().min(0).default(0),
+  total_pomodoros_completed: z.number().int().min(0).default(0),
 });
 export type BoardAnalytics = z.infer<typeof BoardAnalyticsSchema>;
 
@@ -1506,6 +1685,44 @@ export const AICriticalPathResponseSchema = z.object({
 });
 export type AICriticalPathResponse = z.infer<
   typeof AICriticalPathResponseSchema
+>;
+
+// ============================================================================
+// 5.8 PHASE 8 AI SPRINT RETROSPECTIVE FACILITATOR SCHEMAS
+// ============================================================================
+
+export const AIRetroSuggestedItemSchema = z.object({
+  category: RetroCategoryEnum,
+  content: z.string().min(1),
+});
+export type AIRetroSuggestedItem = z.infer<typeof AIRetroSuggestedItemSchema>;
+
+export const AIRetroActionItemSchema = z.object({
+  title: z.string().min(1),
+  priority: PriorityEnum,
+  story_points: z.number().int().min(0).max(100),
+});
+export type AIRetroActionItem = z.infer<typeof AIRetroActionItemSchema>;
+
+export const AIRetroAnalysisRequestSchema = z.object({
+  board_title: z.string().min(1),
+  retro_items: z.array(RetroItemSchema).default([]),
+  completed_cards_count: z.number().int().min(0).default(0),
+  overdue_cards_count: z.number().int().min(0).default(0),
+  total_estimated_hours: z.number().min(0).default(0),
+  total_logged_hours: z.number().min(0).default(0),
+});
+export type AIRetroAnalysisRequest = z.infer<typeof AIRetroAnalysisRequestSchema>;
+
+export const AIRetroAnalysisResponseSchema = z.object({
+  sprint_morale_score: z.number().min(0).max(100),
+  estimation_accuracy_summary: z.string().min(1),
+  key_themes: z.array(z.string()).default([]),
+  suggested_retro_items: z.array(AIRetroSuggestedItemSchema).default([]),
+  recommended_action_items: z.array(AIRetroActionItemSchema).default([]),
+});
+export type AIRetroAnalysisResponse = z.infer<
+  typeof AIRetroAnalysisResponseSchema
 >;
 
 // ============================================================================

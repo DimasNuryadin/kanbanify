@@ -35,10 +35,14 @@ import {
   Palette,
   Paperclip,
   Pencil,
+  Play,
   Plus,
   Sparkles,
+  Square,
+  Timer,
   X,
 } from "lucide-react";
+import { apiClient } from "@/lib/api-client";
 import {
   Card,
   Column,
@@ -46,6 +50,7 @@ import {
   CreateCardRequest,
   CreateColumnRequest,
   CustomFieldDefinition,
+  DEFAULT_CARD_TIME_TRACKING,
   DEFAULT_THEME_CONFIG,
   Label,
   Member,
@@ -96,6 +101,154 @@ export const PRIORITY_STYLES: Record<
   },
 };
 
+export function formatSecondsToHMS(totalSec: number): string {
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return [h, m, s].map((v) => String(v).padStart(2, "0")).join(":");
+}
+
+export function formatHoursOrMinutes(totalSec: number): string {
+  if (totalSec >= 3600) {
+    const hrs = totalSec / 3600;
+    return `${hrs % 1 === 0 ? hrs.toFixed(0) : hrs.toFixed(1)}h`;
+  }
+  const mins = Math.max(1, Math.round(totalSec / 60));
+  return `${mins}m`;
+}
+
+interface CardLiveTimerBadgeProps {
+  card: Card;
+  boardMembers: Member[];
+  onToggleTimer: (e: React.MouseEvent) => void;
+  canEdit: boolean;
+  isLoading: boolean;
+}
+
+function CardLiveTimerBadge({
+  card,
+  boardMembers,
+  onToggleTimer,
+  canEdit,
+  isLoading,
+}: CardLiveTimerBadgeProps) {
+  const activeTimer = card.time_tracking?.active_timer;
+  const totalLoggedSec = card.time_tracking?.total_logged_seconds ?? 0;
+  const estimatedSec = card.time_tracking?.estimated_seconds ?? 0;
+  const pomodoroCount = card.time_tracking?.pomodoro_completed_count ?? 0;
+
+  const [elapsedSec, setElapsedSec] = useState(() => {
+    if (!activeTimer) return 0;
+    const startMs = new Date(activeTimer.started_at).getTime();
+    return Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  });
+
+  useEffect(() => {
+    if (!activeTimer) return;
+    const updateElapsed = () => {
+      const startMs = new Date(activeTimer.started_at).getTime();
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
+    };
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
+    return () => clearInterval(interval);
+  }, [activeTimer?.started_at, activeTimer]);
+
+  if (!activeTimer && totalLoggedSec <= 0 && pomodoroCount <= 0) {
+    return null;
+  }
+
+  const userInitials = useMemo(() => {
+    if (!activeTimer) return "";
+    const member = boardMembers.find((m) => m.id === activeTimer.user_id);
+    if (member?.initials) return member.initials;
+    if (activeTimer.user_name) {
+      return activeTimer.user_name
+        .split(" ")
+        .map((p) => p[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    return "AR";
+  }, [activeTimer, boardMembers]);
+
+  const isOverBudget = estimatedSec > 0 && totalLoggedSec > estimatedSec;
+
+  return (
+    <div
+      className="inline-flex flex-wrap items-center gap-1.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Active Running Timer Badge (Pulsing Emerald / Rose with Live Ticker) */}
+      {activeTimer ? (
+        <button
+          type="button"
+          disabled={!canEdit || isLoading}
+          onClick={onToggleTimer}
+          title={
+            canEdit
+              ? "⏱️ Active timer running! Click to stop & log time"
+              : "⏱️ Active timer running"
+          }
+          className="group/timer inline-flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-700 shadow-xs backdrop-blur-xs transition-colors hover:border-rose-500/60 hover:bg-rose-500/20 hover:text-rose-700 dark:border-emerald-500/50 dark:bg-emerald-500/25 dark:text-emerald-300 dark:hover:border-rose-400 dark:hover:bg-rose-500/30 dark:hover:text-rose-200"
+        >
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          <span className="group-hover/timer:hidden">
+            ⏱️ {formatSecondsToHMS(elapsedSec)}
+          </span>
+          <span className="hidden group-hover/timer:inline">⏹️ Stop</span>
+          {userInitials && (
+            <span className="rounded bg-black/10 px-1 py-0.2 text-[9px] dark:bg-white/10">
+              {userInitials}
+            </span>
+          )}
+        </button>
+      ) : totalLoggedSec > 0 ? (
+        <button
+          type="button"
+          disabled={!canEdit || isLoading}
+          onClick={onToggleTimer}
+          title={
+            canEdit
+              ? `⏱️ Logged ${formatHoursOrMinutes(totalLoggedSec)}${
+                  estimatedSec > 0
+                    ? ` of ${formatHoursOrMinutes(estimatedSec)} estimated`
+                    : ""
+                }. Click to start timer`
+              : `⏱️ Logged ${formatHoursOrMinutes(totalLoggedSec)}`
+          }
+          className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-semibold transition-colors ${
+            isOverBudget
+              ? "border-rose-500/40 bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:border-rose-500/40 dark:bg-rose-500/25 dark:text-rose-300"
+              : "border-zinc-200/90 bg-zinc-100/90 text-zinc-700 hover:bg-zinc-200/80 dark:border-zinc-700/80 dark:bg-zinc-800/80 dark:text-zinc-300"
+          }`}
+        >
+          <span>⏱️</span>
+          <span>
+            {formatHoursOrMinutes(totalLoggedSec)}
+            {estimatedSec > 0 ? ` / ${formatHoursOrMinutes(estimatedSec)}` : ""}
+          </span>
+        </button>
+      ) : null}
+
+      {/* Completed Pomodoro Counter Badge */}
+      {pomodoroCount > 0 && (
+        <span
+          title={`${pomodoroCount} completed Pomodoro focus session(s)`}
+          className="inline-flex items-center gap-0.5 rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-300"
+        >
+          <span>🍅</span>
+          <span>x{pomodoroCount}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 interface KanbanCardItemProps {
   card: Card;
   boardLabels: Label[];
@@ -122,6 +275,40 @@ function KanbanCardContent({
 }) {
   const [isQuickEditing, setIsQuickEditing] = useState(false);
   const [quickTitle, setQuickTitle] = useState(card.title);
+  const [isTimerLoading, setIsTimerLoading] = useState(false);
+
+  const activeRole = useWorkspaceStore((s) => s.activeRole);
+  const currentUser = useWorkspaceStore((s) => s.currentUser);
+  const useMockMode = useWorkspaceStore((s) => s.useMockMode);
+  const upsertCard = useWorkspaceStore((s) => s.upsertCard);
+
+  const canEdit = activeRole !== "VIEWER";
+
+  const handleQuickToggleTimer = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canEdit || isTimerLoading) return;
+    setIsTimerLoading(true);
+    try {
+      const isRunning = Boolean(card.time_tracking?.active_timer);
+      if (isRunning) {
+        const updated = await apiClient.stopCardTimer(card.id, undefined, {
+          useMock: useMockMode,
+        });
+        upsertCard(updated);
+      } else {
+        const updated = await apiClient.startCardTimer(
+          card.id,
+          { user_id: currentUser.id, user_name: currentUser.name },
+          { useMock: useMockMode }
+        );
+        upsertCard(updated);
+      }
+    } catch (err) {
+      console.error("Failed to toggle timer:", err);
+    } finally {
+      setIsTimerLoading(false);
+    }
+  };
 
   const presences = useWorkspaceStore((s) => s.presences);
   const board = useWorkspaceStore((s) => s.board);
@@ -371,6 +558,29 @@ function KanbanCardContent({
           </div>
 
           <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            {canEdit && (
+              <button
+                type="button"
+                title={
+                  card.time_tracking?.active_timer
+                    ? "Stop stopwatch timer"
+                    : "Start stopwatch timer"
+                }
+                onClick={handleQuickToggleTimer}
+                disabled={isTimerLoading}
+                className={`rounded-md p-1 text-white shadow-xs transition-colors ${
+                  card.time_tracking?.active_timer
+                    ? "bg-rose-600 hover:bg-rose-700 animate-pulse"
+                    : "bg-black/35 hover:bg-black/55 hover:text-emerald-300"
+                }`}
+              >
+                {card.time_tracking?.active_timer ? (
+                  <Square className="h-3 w-3 fill-current" />
+                ) : (
+                  <Play className="h-3 w-3 fill-current" />
+                )}
+              </button>
+            )}
             <button
               type="button"
               title="Quick edit card title"
@@ -399,7 +609,7 @@ function KanbanCardContent({
         </h3>
 
         <div className="mt-3 flex items-center justify-between text-[11px] text-white/90">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {card.is_watching && <Eye className="h-3.5 w-3.5" />}
             {totalChecklistItems > 0 && (
               <span className="inline-flex items-center gap-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px]">
@@ -407,6 +617,13 @@ function KanbanCardContent({
                 {completedChecklistItems}/{totalChecklistItems}
               </span>
             )}
+            <CardLiveTimerBadge
+              card={card}
+              boardMembers={boardMembers}
+              onToggleTimer={handleQuickToggleTimer}
+              canEdit={canEdit}
+              isLoading={isTimerLoading}
+            />
           </div>
           {assignedMembers.length > 0 && (
             <div className="flex -space-x-1">
@@ -463,6 +680,29 @@ function KanbanCardContent({
       <div className={densityPadClass}>
         {/* Hover Quick-Edit Button + Drag Handle in Top-Right */}
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          {canEdit && (
+            <button
+              type="button"
+              title={
+                card.time_tracking?.active_timer
+                  ? "Stop stopwatch timer"
+                  : "Start stopwatch timer"
+              }
+              onClick={handleQuickToggleTimer}
+              disabled={isTimerLoading}
+              className={`rounded-lg border p-1 shadow-xs backdrop-blur-xs transition-colors ${
+                card.time_tracking?.active_timer
+                  ? "border-rose-500/50 bg-rose-500/20 text-rose-600 hover:bg-rose-500/30 dark:border-rose-500/40 dark:bg-rose-500/25 dark:text-rose-300 animate-pulse"
+                  : "border-zinc-200/80 bg-white/95 text-zinc-600 hover:bg-emerald-500/10 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-800/95 dark:text-zinc-300 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-300"
+              }`}
+            >
+              {card.time_tracking?.active_timer ? (
+                <Square className="h-3 w-3 fill-current text-rose-600 dark:text-rose-400" />
+              ) : (
+                <Play className="h-3 w-3 fill-current" />
+              )}
+            </button>
+          )}
           <button
             type="button"
             title="Quick edit title or archive"
@@ -752,6 +992,15 @@ function KanbanCardContent({
                 {completedChecklistItems}/{totalChecklistItems}
               </span>
             )}
+
+            {/* Phase 8 Live Stopwatch / Time Tracking & Pomodoro Badge */}
+            <CardLiveTimerBadge
+              card={card}
+              boardMembers={boardMembers}
+              onToggleTimer={handleQuickToggleTimer}
+              canEdit={canEdit}
+              isLoading={isTimerLoading}
+            />
           </div>
 
           {/* Right: Assigned Member Avatars */}
@@ -968,6 +1217,7 @@ function SortableKanbanColumn({
       is_archived: false,
       is_watching: false,
       custom_field_values: [],
+      time_tracking: { ...DEFAULT_CARD_TIME_TRACKING },
     });
 
     // Keep composer open and focused for rapid Trello entry

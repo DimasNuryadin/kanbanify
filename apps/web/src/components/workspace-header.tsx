@@ -115,6 +115,9 @@ export function WorkspaceHeader({
   const setThemeStudioOpen = useWorkspaceStore(
     (s) => s.setThemeStudioOpen
   );
+  const setPomodoroOpen = useWorkspaceStore(
+    (s) => s.setPomodoroOpen
+  );
   const automationRules = useWorkspaceStore((s) => s.automationRules);
   const activeRulesCount = automationRules.filter((r) => r.is_enabled).length;
   const lastMoveMetrics = useWorkspaceStore((s) => s.lastMoveMetrics);
@@ -608,6 +611,17 @@ export function WorkspaceHeader({
             <span className="hidden sm:inline">Theme</span>
           </button>
 
+          {/* Phase 8 Pomodoro Focus Timer Dock Button */}
+          <button
+            type="button"
+            onClick={() => setPomodoroOpen(true)}
+            title="Open Pomodoro Focus Timer Dock"
+            className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-500/20 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300 dark:hover:bg-rose-400/20"
+          >
+            <span>🍅</span>
+            <span className="hidden sm:inline">Pomodoro</span>
+          </button>
+
           {/* Board Menu / Background Picker Button */}
           <button
             type="button"
@@ -863,6 +877,18 @@ export function WorkspaceHeader({
             >
               <Workflow className="h-3.5 w-3.5 text-rose-500" />
               <span>🕸️ Graph</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("retro")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-150 ${
+                viewMode === "retro"
+                  ? "bg-white text-emerald-600 shadow-xs dark:bg-zinc-800 dark:text-emerald-300"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-emerald-500" />
+              <span>🔄 Retro</span>
             </button>
           </div>
 

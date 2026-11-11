@@ -86,6 +86,22 @@ import {
   CustomFieldDefinitionSchema,
   UpdateBoardThemeRequest,
   UpdateCustomFieldDefinitionRequest,
+  // Phase 8 Time Tracking, Pomodoro & Retrospectives
+  AIRetroAnalysisResponse,
+  AIRetroAnalysisResponseSchema,
+  ConvertRetroItemToCardRequest,
+  ConvertRetroItemToCardResponse,
+  ConvertRetroItemToCardResponseSchema,
+  CreateRetroItemRequest,
+  LogTimeEntryRequest,
+  PomodoroCompleteRequest,
+  RetroItem,
+  RetroItemSchema,
+  StartCardTimerRequest,
+  StopCardTimerRequest,
+  UpdateRetroItemRequest,
+  VoteRetroItemResponse,
+  VoteRetroItemResponseSchema,
 } from "@kinetix/contracts";
 import { z } from "zod";
 import { mockApi } from "./mock-data";
@@ -1639,6 +1655,301 @@ export const apiClient = {
         err instanceof Error ? err.message : "Update board theme API unreachable"
       );
       return mockApi.updateBoardTheme(boardId, payload);
+    }
+  },
+
+  // --- Phase 8: Card Time Tracking, Stopwatch & Worklog Endpoints ---
+  async startCardTimer(
+    cardId: string,
+    payload: StartCardTimerRequest | undefined,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.startCardTimer(cardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/timer/start`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload ?? {}),
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Start card timer API unreachable"
+      );
+      return mockApi.startCardTimer(cardId, payload);
+    }
+  },
+
+  async stopCardTimer(
+    cardId: string,
+    payload: StopCardTimerRequest | undefined,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.stopCardTimer(cardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/timer/stop`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload ?? {}),
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Stop card timer API unreachable"
+      );
+      return mockApi.stopCardTimer(cardId, payload);
+    }
+  },
+
+  async logTimeEntry(
+    cardId: string,
+    payload: LogTimeEntryRequest,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.logTimeEntry(cardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/time-entries`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Log time entry API unreachable"
+      );
+      return mockApi.logTimeEntry(cardId, payload);
+    }
+  },
+
+  async deleteTimeEntry(
+    cardId: string,
+    entryId: string,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.deleteTimeEntry(cardId, entryId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/time-entries/${entryId}`,
+        {
+          method: "DELETE",
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Delete time entry API unreachable"
+      );
+      return mockApi.deleteTimeEntry(cardId, entryId);
+    }
+  },
+
+  // --- Phase 8: Pomodoro Complete Session Endpoint ---
+  async completePomodoro(
+    payload: PomodoroCompleteRequest,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.completePomodoro(payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${payload.card_id}/pomodoro/complete`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Pomodoro complete API unreachable"
+      );
+      return mockApi.completePomodoro(payload);
+    }
+  },
+
+  // --- Phase 8: Sprint Retrospective Board Endpoints ---
+  async getRetroItems(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<RetroItem[]> {
+    if (opts.useMock) {
+      return mockApi.getRetroItems(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/retro`,
+        {
+          method: "GET",
+        },
+        (raw) => z.array(RetroItemSchema).parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Get retro items API unreachable"
+      );
+      return mockApi.getRetroItems(boardId);
+    }
+  },
+
+  async createRetroItem(
+    boardId: string,
+    payload: CreateRetroItemRequest,
+    opts: ApiClientOptions
+  ): Promise<RetroItem> {
+    if (opts.useMock) {
+      return mockApi.createRetroItem(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/retro`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => RetroItemSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Create retro item API unreachable"
+      );
+      return mockApi.createRetroItem(boardId, payload);
+    }
+  },
+
+  async updateRetroItem(
+    itemId: string,
+    payload: UpdateRetroItemRequest,
+    opts: ApiClientOptions
+  ): Promise<RetroItem> {
+    if (opts.useMock) {
+      return mockApi.updateRetroItem(itemId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/retro/${itemId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => RetroItemSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Update retro item API unreachable"
+      );
+      return mockApi.updateRetroItem(itemId, payload);
+    }
+  },
+
+  async deleteRetroItem(
+    itemId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; deleted: boolean }> {
+    if (opts.useMock) {
+      return mockApi.deleteRetroItem(itemId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/retro/${itemId}`,
+        {
+          method: "DELETE",
+        },
+        (raw) => (raw as { id: string; deleted: boolean })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Delete retro item API unreachable"
+      );
+      return mockApi.deleteRetroItem(itemId);
+    }
+  },
+
+  async voteRetroItem(
+    itemId: string,
+    opts: ApiClientOptions
+  ): Promise<VoteRetroItemResponse> {
+    if (opts.useMock) {
+      return mockApi.voteRetroItem(itemId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/retro/${itemId}/vote`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        (raw) => VoteRetroItemResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Vote retro item API unreachable"
+      );
+      return mockApi.voteRetroItem(itemId);
+    }
+  },
+
+  async convertRetroItemToCard(
+    itemId: string,
+    payload: ConvertRetroItemToCardRequest,
+    opts: ApiClientOptions
+  ): Promise<ConvertRetroItemToCardResponse> {
+    if (opts.useMock) {
+      return mockApi.convertRetroItemToCard(itemId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/retro/${itemId}/convert-to-card`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => ConvertRetroItemToCardResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Convert retro item to card API unreachable"
+      );
+      return mockApi.convertRetroItemToCard(itemId, payload);
+    }
+  },
+
+  async synthesizeRetroAI(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<AIRetroAnalysisResponse> {
+    if (opts.useMock) {
+      return mockApi.synthesizeRetroAI(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/retro/ai-synthesize`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        (raw) => AIRetroAnalysisResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "AI Synthesize Retro API unreachable"
+      );
+      return mockApi.synthesizeRetroAI(boardId);
     }
   },
 };
