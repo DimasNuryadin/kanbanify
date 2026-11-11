@@ -75,6 +75,30 @@ import {
   WebhookConfig,
   Workspace,
   WorkspaceWithBoards,
+  AICriticalPathResponse,
+  AICriticalPathResponseSchema,
+  AddCardDependencyRequest,
+  AddCardDependencyResponse,
+  BoardDependencyGraph,
+  BoardDependencyGraphSchema,
+  BoardThemeConfig,
+  BoardThemeConfigSchema,
+  CardCustomFieldValue,
+  CreateCustomFieldDefinitionRequest,
+  CustomFieldDefinition,
+  CustomFieldDefinitionSchema,
+  CustomFieldOption,
+  CustomFieldType,
+  DEFAULT_THEME_CONFIG,
+  DependencyEdge,
+  DependencyEdgeSchema,
+  DependencyNode,
+  DependencyNodeSchema,
+  ThemePreset,
+  ThemePresetEnum,
+  THEME_PRESET_CONFIGS,
+  UpdateBoardThemeRequest,
+  UpdateCustomFieldDefinitionRequest,
 } from "@kinetix/contracts";
 import { comparePositions, generatePositionBetween } from "./fractional-index";
 
@@ -211,6 +235,296 @@ export const DEFAULT_BOARD_WEBHOOKS: WebhookConfig[] = [
     created_at: "2026-11-08T09:00:00.000Z",
   },
 ];
+
+
+export function createDefaultCustomFields(boardId: string): CustomFieldDefinition[] {
+  return [
+    {
+      id: `cf-env-${boardId}`,
+      board_id: boardId,
+      name: "Environment",
+      type: "DROPDOWN",
+      options: [
+        { id: `opt-env-prod-${boardId}`, label: "Production", color: "red" },
+        { id: `opt-env-staging-${boardId}`, label: "Staging", color: "yellow" },
+        { id: `opt-env-dev-${boardId}`, label: "Dev", color: "blue" },
+      ],
+      show_on_front: true,
+      position: "a0",
+      created_at: "2026-11-08T08:00:00.000Z",
+    },
+    {
+      id: `cf-esthours-${boardId}`,
+      board_id: boardId,
+      name: "Est. Hours",
+      type: "NUMBER",
+      options: [],
+      show_on_front: true,
+      position: "a1",
+      created_at: "2026-11-08T08:00:00.000Z",
+    },
+    {
+      id: `cf-qa-${boardId}`,
+      board_id: boardId,
+      name: "QA Verified",
+      type: "CHECKBOX",
+      options: [],
+      show_on_front: true,
+      position: "a2",
+      created_at: "2026-11-08T08:00:00.000Z",
+    },
+  ];
+}
+
+export function computeBoardDependencyGraph(board: Board): BoardDependencyGraph {
+  const cards = board.cards.filter((c) => !c.is_archived);
+  const cardMap = new Map(cards.map((c) => [c.id, c]));
+  const colMap = new Map(board.columns.map((col) => [col.id, col]));
+
+  const doneColIds = new Set(
+    board.columns
+      .filter((col) => {
+        const lower = col.title.toLowerCase();
+        return (
+          lower.includes("done") ||
+          lower.includes("shipped") ||
+          lower.includes("complete") ||
+          col.position === "a3"
+        );
+      })
+      .map((col) => col.id)
+  );
+
+  const inDegree = new Map<string, number>();
+  const outDegree = new Map<string, number>();
+  cards.forEach((c) => {
+    inDegree.set(c.id, 0);
+    outDegree.set(c.id, 0);
+  });
+
+  const rawEdges: Array<{ from_card_id: string; to_card_id: string; is_resolved: boolean }> = [];
+
+  for (const card of cards) {
+    for (const blockerId of card.blocked_by_card_ids) {
+      if (cardMap.has(blockerId)) {
+        const blockerCard = cardMap.get(blockerId)!;
+        const isResolved = Boolean(blockerCard.is_due_complete || doneColIds.has(blockerCard.column_id));
+        rawEdges.push({
+          from_card_id: blockerId,
+          to_card_id: card.id,
+          is_resolved: isResolved,
+        });
+        inDegree.set(card.id, (inDegree.get(card.id) ?? 0) + 1);
+        outDegree.set(blockerId, (outDegree.get(blockerId) ?? 0) + 1);
+      }
+    }
+  }
+
+  const adj = new Map<string, string[]>();
+  cards.forEach((c) => adj.set(c.id, []));
+  rawEdges.forEach((e) => adj.get(e.from_card_id)?.push(e.to_card_id));
+
+  let hasCycle = false;
+  const visited = new Map<string, number>();
+  cards.forEach((c) => visited.set(c.id, 0));
+
+  function dfsCycle(nodeId: string): boolean {
+    visited.set(nodeId, 1);
+    const neighbors = adj.get(nodeId) ?? [];
+    for (const n of neighbors) {
+      if (visited.get(n) === 1) return true;
+      if (visited.get(n) === 0 && dfsCycle(n)) return true;
+    }
+    visited.set(nodeId, 2);
+    return false;
+  }
+
+  for (const c of cards) {
+    if (visited.get(c.id) === 0) {
+      if (dfsCycle(c.id)) {
+        hasCycle = true;
+        break;
+      }
+    }
+  }
+
+  let criticalPath: string[] = [];
+  if (!hasCycle && rawEdges.length > 0) {
+    const memo = new Map<string, { dist: number; path: string[] }>();
+
+    function getLongestPath(nodeId: string): { dist: number; path: string[] } {
+      if (memo.has(nodeId)) return memo.get(nodeId)!;
+      const card = cardMap.get(nodeId);
+      const weight = Math.max(card?.story_points ?? 1, 1);
+      const neighbors = adj.get(nodeId) ?? [];
+      if (neighbors.length === 0) {
+        const res = { dist: weight, path: [nodeId] };
+        memo.set(nodeId, res);
+        return res;
+      }
+      let bestDist = 0;
+      let bestPath: string[] = [];
+      for (const n of neighbors) {
+        const sub = getLongestPath(n);
+        if (sub.dist > bestDist) {
+          bestDist = sub.dist;
+          bestPath = sub.path;
+        }
+      }
+      const res = { dist: weight + bestDist, path: [nodeId, ...bestPath] };
+      memo.set(nodeId, res);
+      return res;
+    }
+
+    let overallBestDist = 0;
+    for (const c of cards) {
+      if ((outDegree.get(c.id) ?? 0) > 0) {
+        const p = getLongestPath(c.id);
+        if (p.path.length > 1 && p.dist > overallBestDist) {
+          overallBestDist = p.dist;
+          criticalPath = p.path;
+        }
+      }
+    }
+  }
+
+  const criticalPathSet = new Set(criticalPath);
+  const criticalEdgesSet = new Set<string>();
+  for (let i = 0; i < criticalPath.length - 1; i++) {
+    criticalEdgesSet.add(`${criticalPath[i]}->${criticalPath[i + 1]}`);
+  }
+
+  const nodes: DependencyNode[] = cards.map((c) => {
+    const col = colMap.get(c.column_id);
+    const isCompleted = Boolean(c.is_due_complete || doneColIds.has(c.column_id));
+    const assignees = (c.member_ids ?? [])
+      .map((mId) => board.members.find((m) => m.id === mId)?.initials)
+      .filter((init): init is string => Boolean(init));
+
+    return {
+      card_id: c.id,
+      title: c.title,
+      column_id: c.column_id,
+      column_title: col?.title ?? "Column",
+      priority: c.priority,
+      story_points: c.story_points,
+      is_completed: isCompleted,
+      assignee_initials: assignees,
+      in_degree: inDegree.get(c.id) ?? 0,
+      out_degree: outDegree.get(c.id) ?? 0,
+      is_on_critical_path: criticalPathSet.has(c.id),
+    };
+  });
+
+  const edges: DependencyEdge[] = rawEdges.map((e) => ({
+    from_card_id: e.from_card_id,
+    to_card_id: e.to_card_id,
+    is_resolved: e.is_resolved,
+    is_critical: criticalEdgesSet.has(`${e.from_card_id}->${e.to_card_id}`),
+  }));
+
+  const blockedCardIds = new Set(
+    rawEdges.filter((e) => !e.is_resolved).map((e) => e.to_card_id)
+  );
+
+  return {
+    board_id: board.id,
+    nodes,
+    edges,
+    critical_path_card_ids: criticalPath,
+    total_blocked_cards: blockedCardIds.size,
+    has_circular_dependency: hasCycle,
+  };
+}
+
+export function detectCycleIfAdded(
+  board: Board,
+  targetCardId: string,
+  blockerCardId: string
+): { hasCycle: boolean; cyclePath?: string[] } {
+  if (targetCardId === blockerCardId) {
+    return { hasCycle: true, cyclePath: [targetCardId, blockerCardId] };
+  }
+  const cards = board.cards.filter((c) => !c.is_archived);
+  const adj = new Map<string, string[]>();
+  cards.forEach((c) => adj.set(c.id, []));
+  cards.forEach((c) => {
+    c.blocked_by_card_ids.forEach((bId) => {
+      adj.get(bId)?.push(c.id);
+    });
+  });
+
+  const visited = new Set<string>();
+  const parent = new Map<string, string>();
+
+  function dfs(curr: string): boolean {
+    visited.add(curr);
+    if (curr === blockerCardId) return true;
+    for (const next of adj.get(curr) ?? []) {
+      if (!visited.has(next)) {
+        parent.set(next, curr);
+        if (dfs(next)) return true;
+      }
+    }
+    return false;
+  }
+
+  if (dfs(targetCardId)) {
+    const path = [blockerCardId];
+    let curr = blockerCardId;
+    while (curr !== targetCardId && parent.has(curr)) {
+      curr = parent.get(curr)!;
+      path.unshift(curr);
+    }
+    path.push(blockerCardId);
+    return { hasCycle: true, cyclePath: path };
+  }
+
+  return { hasCycle: false };
+}
+
+export function generateAICriticalPathAnalysis(
+  board: Board,
+  graph: BoardDependencyGraph
+): AICriticalPathResponse {
+  const cardMap = new Map(board.cards.map((c) => [c.id, c]));
+  const criticalTitles = graph.critical_path_card_ids
+    .map((id) => cardMap.get(id)?.title)
+    .filter((t): t is string => Boolean(t));
+
+  const blockerNodes = graph.nodes
+    .filter((n) => n.out_degree > 0)
+    .sort((a, b) => b.out_degree - a.out_degree);
+
+  const topBlockers = blockerNodes.slice(0, 3).map((b) => ({
+    card_id: b.card_id,
+    title: b.title,
+    blocks_count: b.out_degree,
+    reason: b.is_on_critical_path
+      ? `Holds up ${b.out_degree} downstream deliverable(s) directly on the critical release path.`
+      : `Holds up ${b.out_degree} dependent task(s) across columns.`,
+  }));
+
+  const riskSummary =
+    criticalTitles.length > 0
+      ? `Critical path contains ${criticalTitles.length} interconnected items spanning ${graph.total_blocked_cards} currently blocked card(s). The primary bottleneck is "${blockerNodes[0]?.title ?? 'Core Architecture'}" which directly impedes multiple team workflows.`
+      : `Board dependency network is well-balanced with minimal downstream blocking. Total blocked cards: ${graph.total_blocked_cards}.`;
+
+  const recommendations = [
+    topBlockers[0]
+      ? `Prioritize immediate completion of "${topBlockers[0].title}" to unblock ${topBlockers[0].blocks_count} downstream deliverable(s).`
+      : "Maintain current task velocity; no critical bottlenecks detected.",
+    "Pair senior engineers on the critical path sequence to mitigate single-point review delays.",
+    "Fast-track code reviews for cards in 'Review & QA' that have unresolved dependencies.",
+  ];
+
+  return {
+    risk_summary: riskSummary,
+    critical_path_titles: criticalTitles,
+    top_blocker_cards: topBlockers,
+    unblocking_recommendations: recommendations,
+  };
+}
 
 export const INITIAL_SEED_BOARD: Board = {
   id: SEED_BOARD_ID,
@@ -367,6 +681,11 @@ export const INITIAL_SEED_BOARD: Board = {
           created_at: "2026-11-06T10:00:00.000Z",
         },
       ],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-prod-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 6 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
+      ],
       updated_at: "2026-11-08T09:10:00.000Z",
     },
     {
@@ -434,6 +753,11 @@ export const INITIAL_SEED_BOARD: Board = {
       ],
       comments: [],
       attachments: [],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-staging-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 12 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
+      ],
       updated_at: "2026-11-08T09:20:00.000Z",
     },
     {
@@ -583,6 +907,11 @@ export const INITIAL_SEED_BOARD: Board = {
           created_at: "2026-11-08T08:30:00.000Z",
         },
       ],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-dev-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 4 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
+      ],
       updated_at: "2026-11-08T09:45:00.000Z",
     },
     {
@@ -662,6 +991,11 @@ export const INITIAL_SEED_BOARD: Board = {
         },
       ],
       attachments: [],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-staging-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 8 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
+      ],
       updated_at: "2026-11-08T10:00:00.000Z",
     },
     {
@@ -765,6 +1099,11 @@ export const INITIAL_SEED_BOARD: Board = {
           created_at: "2026-11-06T12:00:00.000Z",
         },
       ],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-prod-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 16 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
+      ],
       updated_at: "2026-11-08T10:05:00.000Z",
     },
     {
@@ -832,6 +1171,11 @@ export const INITIAL_SEED_BOARD: Board = {
       ],
       comments: [],
       attachments: [],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-dev-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 5 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
+      ],
       updated_at: "2026-11-08T10:12:00.000Z",
     },
     {
@@ -897,6 +1241,11 @@ export const INITIAL_SEED_BOARD: Board = {
         },
       ],
       attachments: [],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-staging-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 10 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
+      ],
       updated_at: "2026-11-08T10:15:00.000Z",
     },
     {
@@ -927,6 +1276,11 @@ export const INITIAL_SEED_BOARD: Board = {
       checklists: [],
       comments: [],
       attachments: [],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-dev-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 20 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: false },
+      ],
       updated_at: "2026-11-08T10:20:00.000Z",
     },
     {
@@ -957,6 +1311,11 @@ export const INITIAL_SEED_BOARD: Board = {
       checklists: [],
       comments: [],
       attachments: [],
+      custom_field_values: [
+        { field_id: `cf-env-${SEED_BOARD_ID}`, value: `opt-env-prod-${SEED_BOARD_ID}` },
+        { field_id: `cf-esthours-${SEED_BOARD_ID}`, value: 3 },
+        { field_id: `cf-qa-${SEED_BOARD_ID}`, value: true },
+      ],
       updated_at: "2026-11-08T10:25:00.000Z",
     },
   ],
@@ -1013,6 +1372,8 @@ export const INITIAL_SEED_BOARD: Board = {
     },
   ],
   visibility: "WORKSPACE",
+  custom_fields: createDefaultCustomFields(SEED_BOARD_ID),
+  theme_config: { ...DEFAULT_THEME_CONFIG },
 };
 
 export const INITIAL_SPRINT_BOARD: Board = {
@@ -1095,6 +1456,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:00:00.000Z",
     },
     {
@@ -1121,6 +1483,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:10:00.000Z",
     },
     {
@@ -1147,6 +1510,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:30:00.000Z",
     },
     {
@@ -1173,6 +1537,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:40:00.000Z",
     },
     {
@@ -1199,6 +1564,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:50:00.000Z",
     },
     {
@@ -1225,6 +1591,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
       is_due_complete: true,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T10:00:00.000Z",
     },
   ],
@@ -1244,6 +1611,8 @@ export const INITIAL_SPRINT_BOARD: Board = {
   webhooks: [],
   invite_links: [],
   visibility: "WORKSPACE",
+  custom_fields: createDefaultCustomFields(SEED_BOARD_SPRINT_ID),
+  theme_config: { ...DEFAULT_THEME_CONFIG },
 };
 
 export const INITIAL_MARKETING_BOARD: Board = {
@@ -1335,6 +1704,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: true,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:00:00.000Z",
     },
     {
@@ -1361,6 +1731,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:15:00.000Z",
     },
     {
@@ -1387,6 +1758,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:30:00.000Z",
     },
     {
@@ -1413,6 +1785,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T09:45:00.000Z",
     },
     {
@@ -1439,6 +1812,7 @@ export const INITIAL_MARKETING_BOARD: Board = {
       is_due_complete: true,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
       updated_at: "2026-11-08T10:00:00.000Z",
     },
   ],
@@ -1458,6 +1832,8 @@ export const INITIAL_MARKETING_BOARD: Board = {
   webhooks: [],
   invite_links: [],
   visibility: "WORKSPACE",
+  custom_fields: createDefaultCustomFields(SEED_BOARD_MARKETING_ID),
+  theme_config: { ...DEFAULT_THEME_CONFIG },
 };
 
 export const INITIAL_SEED_BOARDS = [
@@ -1466,7 +1842,7 @@ export const INITIAL_SEED_BOARDS = [
   INITIAL_MARKETING_BOARD,
 ];
 
-const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v6";
+const STORAGE_KEY_BOARDS = "kanbanify_mock_boards_v7";
 const STORAGE_KEY_WORKSPACES = "kanbanify_mock_workspaces_v6";
 const STORAGE_KEY = "kanbanify_mock_board_v6";
 
@@ -2257,6 +2633,8 @@ export class MockApiService {
       webhooks: [],
       invite_links: [],
       visibility: payload.visibility ?? "WORKSPACE",
+      custom_fields: createDefaultCustomFields(boardId),
+      theme_config: { ...DEFAULT_THEME_CONFIG },
     };
 
     this.saveState(nextBoard);
@@ -2548,6 +2926,7 @@ export class MockApiService {
       is_due_complete: payload.is_due_complete ?? false,
       is_archived: payload.is_archived ?? false,
       is_watching: payload.is_watching ?? false,
+      custom_field_values: payload.custom_field_values ?? [],
       updated_at: new Date().toISOString(),
     });
 
@@ -2674,6 +3053,7 @@ export class MockApiService {
       const keepLabels = payload?.keep_labels ?? true;
       const keepMembers = payload?.keep_members ?? true;
       const keepAttachments = payload?.keep_attachments ?? true;
+      const keepCustomFields = payload?.keep_custom_fields ?? true;
 
       const checklists = keepChecklists
         ? existing.checklists.map((cl) => ({
@@ -2703,6 +3083,7 @@ export class MockApiService {
               id: createDeterministicUuid(),
             }))
           : [],
+        custom_field_values: keepCustomFields ? [...(existing.custom_field_values ?? [])] : [],
         comments: [],
         is_archived: false,
         updated_at: new Date().toISOString(),
@@ -3391,6 +3772,250 @@ export class MockApiService {
       recommendations,
     };
   }
+
+  // --- Phase 7 Custom Fields Endpoints ---
+  async getCustomFields(boardId: string): Promise<CustomFieldDefinition[]> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    return (board.custom_fields ?? []).slice().sort((a, b) => comparePositions(a.position, b.position));
+  }
+
+  async createCustomField(
+    boardId: string,
+    payload: CreateCustomFieldDefinitionRequest
+  ): Promise<CustomFieldDefinition> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const existing = board.custom_fields ?? [];
+    const lastPos = existing.length > 0 ? existing[existing.length - 1].position : undefined;
+    const position = payload.position ?? generatePositionBetween(lastPos, undefined);
+
+    const newField: CustomFieldDefinition = CustomFieldDefinitionSchema.parse({
+      id: createDeterministicUuid(),
+      board_id: boardId,
+      name: payload.name.trim(),
+      type: payload.type,
+      options: payload.options ?? [],
+      show_on_front: payload.show_on_front ?? true,
+      position,
+      created_at: new Date().toISOString(),
+    });
+
+    const updatedBoard: Board = {
+      ...board,
+      custom_fields: [...existing, newField],
+    };
+    this.saveState(updatedBoard);
+    return newField;
+  }
+
+  async updateCustomField(
+    fieldId: string,
+    payload: UpdateCustomFieldDefinitionRequest
+  ): Promise<CustomFieldDefinition> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = (board.custom_fields ?? []).find((f) => f.id === fieldId);
+      if (!existing) continue;
+
+      const updatedField: CustomFieldDefinition = CustomFieldDefinitionSchema.parse({
+        ...existing,
+        name: payload.name !== undefined ? payload.name.trim() : existing.name,
+        options: payload.options !== undefined ? payload.options : existing.options,
+        show_on_front: payload.show_on_front !== undefined ? payload.show_on_front : existing.show_on_front,
+        position: payload.position !== undefined ? payload.position : existing.position,
+      });
+
+      const updatedBoard: Board = {
+        ...board,
+        custom_fields: board.custom_fields.map((f) => (f.id === fieldId ? updatedField : f)),
+      };
+      this.saveState(updatedBoard);
+      return updatedField;
+    }
+    throw new Error(`Custom field ${fieldId} not found`);
+  }
+
+  async deleteCustomField(fieldId: string): Promise<{ id: string; deleted: boolean }> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = (board.custom_fields ?? []).find((f) => f.id === fieldId);
+      if (!existing) continue;
+
+      const updatedCards = board.cards.map((c) => ({
+        ...c,
+        custom_field_values: (c.custom_field_values ?? []).filter((v) => v.field_id !== fieldId),
+      }));
+
+      const updatedBoard: Board = {
+        ...board,
+        custom_fields: board.custom_fields.filter((f) => f.id !== fieldId),
+        cards: updatedCards,
+      };
+      this.saveState(updatedBoard);
+      return { id: fieldId, deleted: true };
+    }
+    throw new Error(`Custom field ${fieldId} not found`);
+  }
+
+  async setCardCustomFieldValue(
+    cardId: string,
+    fieldId: string,
+    value: string | number | boolean | null
+  ): Promise<Card> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const existing = board.cards.find((c) => c.id === cardId);
+      if (!existing) continue;
+
+      const currentValues = (existing.custom_field_values ?? []).filter((v) => v.field_id !== fieldId);
+      if (value !== null && value !== undefined && value !== "") {
+        currentValues.push({ field_id: fieldId, value });
+      }
+
+      const updatedCard: Card = CardSchema.parse({
+        ...existing,
+        custom_field_values: currentValues,
+        updated_at: new Date().toISOString(),
+      });
+
+      const updatedBoard: Board = {
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
+      };
+      this.saveState(updatedBoard);
+      return updatedCard;
+    }
+    throw new Error(`Card ${cardId} not found`);
+  }
+
+  // --- Phase 7 Visual Dependency Graph & AI Critical Path Endpoints ---
+  async getDependencyGraph(boardId: string): Promise<BoardDependencyGraph> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    return computeBoardDependencyGraph(board);
+  }
+
+  async addCardDependency(
+    cardId: string,
+    blockerCardId: string
+  ): Promise<AddCardDependencyResponse> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const targetCard = board.cards.find((c) => c.id === cardId);
+      if (!targetCard) continue;
+
+      const blockerCard = board.cards.find((c) => c.id === blockerCardId);
+      if (!blockerCard) {
+        throw new Error(`Blocker card ${blockerCardId} not found`);
+      }
+
+      const cycleCheck = detectCycleIfAdded(board, cardId, blockerCardId);
+      if (cycleCheck.hasCycle) {
+        const err = new Error(
+          `Circular dependency detected: adding blocker ${blockerCardId} creates a cycle.`
+        );
+        (err as any).statusCode = 400;
+        (err as any).details = {
+          card_id: cardId,
+          blocker_card_id: blockerCardId,
+          cycle_path: cycleCheck.cyclePath,
+        };
+        throw err;
+      }
+
+      if (!targetCard.blocked_by_card_ids.includes(blockerCardId)) {
+        const updatedCard: Card = CardSchema.parse({
+          ...targetCard,
+          blocked_by_card_ids: [...targetCard.blocked_by_card_ids, blockerCardId],
+          updated_at: new Date().toISOString(),
+        });
+
+        const updatedBoard: Board = {
+          ...board,
+          cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
+        };
+        this.saveState(updatedBoard);
+        const graph = computeBoardDependencyGraph(updatedBoard);
+        return { card: updatedCard, graph };
+      }
+
+      const graph = computeBoardDependencyGraph(board);
+      return { card: targetCard, graph };
+    }
+    throw new Error(`Card ${cardId} not found`);
+  }
+
+  async removeCardDependency(
+    cardId: string,
+    blockerCardId: string
+  ): Promise<AddCardDependencyResponse> {
+    this.loadState();
+    for (const board of this.boards.values()) {
+      const targetCard = board.cards.find((c) => c.id === cardId);
+      if (!targetCard) continue;
+
+      const updatedCard: Card = CardSchema.parse({
+        ...targetCard,
+        blocked_by_card_ids: targetCard.blocked_by_card_ids.filter((id) => id !== blockerCardId),
+        updated_at: new Date().toISOString(),
+      });
+
+      const updatedBoard: Board = {
+        ...board,
+        cards: board.cards.map((c) => (c.id === cardId ? updatedCard : c)),
+      };
+      this.saveState(updatedBoard);
+      const graph = computeBoardDependencyGraph(updatedBoard);
+      return { card: updatedCard, graph };
+    }
+    throw new Error(`Card ${cardId} not found`);
+  }
+
+  async aiAnalyzeCriticalPath(boardId: string): Promise<AICriticalPathResponse> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const graph = computeBoardDependencyGraph(board);
+    return generateAICriticalPathAnalysis(board, graph);
+  }
+
+  // --- Phase 7 Theme Studio Endpoint ---
+  async updateBoardTheme(
+    boardId: string,
+    payload: UpdateBoardThemeRequest
+  ): Promise<BoardThemeConfig> {
+    this.loadState();
+    const board = this.boards.get(boardId) ?? (await this.getBoard(boardId));
+    const currentTheme = board.theme_config ?? { ...DEFAULT_THEME_CONFIG };
+
+    let baseTheme = currentTheme;
+    if (payload.preset && payload.preset !== currentTheme.preset) {
+      baseTheme = { ...THEME_PRESET_CONFIGS[payload.preset] };
+    }
+
+    const mergedTheme: BoardThemeConfig = BoardThemeConfigSchema.parse({
+      ...baseTheme,
+      ...(payload.preset ? { preset: payload.preset } : {}),
+      ...(payload.glass_blur !== undefined ? { glass_blur: payload.glass_blur } : {}),
+      ...(payload.card_density !== undefined ? { card_density: payload.card_density } : {}),
+      ...(payload.card_radius !== undefined ? { card_radius: payload.card_radius } : {}),
+      ...(payload.accent_color !== undefined ? { accent_color: payload.accent_color } : {}),
+      ...(payload.show_custom_fields_on_front !== undefined
+        ? { show_custom_fields_on_front: payload.show_custom_fields_on_front }
+        : {}),
+      ...(payload.show_dependency_badges_on_front !== undefined
+        ? { show_dependency_badges_on_front: payload.show_dependency_badges_on_front }
+        : {}),
+    });
+
+    const updatedBoard: Board = {
+      ...board,
+      theme_config: mergedTheme,
+    };
+    this.saveState(updatedBoard);
+    return mergedTheme;
+  }
+
 }
 
 export function computeBoardAnalyticsFromBoard(board: Board): BoardAnalytics {

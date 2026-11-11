@@ -72,6 +72,20 @@ import {
   WorkspaceSchema,
   WorkspaceWithBoards,
   WorkspaceWithBoardsSchema,
+  AddCardDependencyRequest,
+  AddCardDependencyResponse,
+  AddCardDependencyResponseSchema,
+  AICriticalPathResponse,
+  AICriticalPathResponseSchema,
+  BoardDependencyGraph,
+  BoardDependencyGraphSchema,
+  BoardThemeConfig,
+  BoardThemeConfigSchema,
+  CreateCustomFieldDefinitionRequest,
+  CustomFieldDefinition,
+  CustomFieldDefinitionSchema,
+  UpdateBoardThemeRequest,
+  UpdateCustomFieldDefinitionRequest,
 } from "@kinetix/contracts";
 import { z } from "zod";
 import { mockApi } from "./mock-data";
@@ -1375,6 +1389,256 @@ export const apiClient = {
           : "AI Security Audit API unreachable"
       );
       return mockApi.auditPermissions(boardId);
+    }
+  },
+
+  // --- Phase 7 Custom Fields Endpoints ---
+  async getCustomFields(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<CustomFieldDefinition[]> {
+    if (opts.useMock) {
+      return mockApi.getCustomFields(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/custom-fields`,
+        { method: "GET" },
+        (raw) => z.array(CustomFieldDefinitionSchema).parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Custom fields API unreachable"
+      );
+      return mockApi.getCustomFields(boardId);
+    }
+  },
+
+  async createCustomField(
+    boardId: string,
+    payload: CreateCustomFieldDefinitionRequest,
+    opts: ApiClientOptions
+  ): Promise<CustomFieldDefinition> {
+    if (opts.useMock) {
+      return mockApi.createCustomField(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/custom-fields`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+        (raw) => CustomFieldDefinitionSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Create custom field API unreachable"
+      );
+      return mockApi.createCustomField(boardId, payload);
+    }
+  },
+
+  async updateCustomField(
+    fieldId: string,
+    payload: UpdateCustomFieldDefinitionRequest,
+    opts: ApiClientOptions
+  ): Promise<CustomFieldDefinition> {
+    if (opts.useMock) {
+      return mockApi.updateCustomField(fieldId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/custom-fields/${fieldId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => CustomFieldDefinitionSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Update custom field API unreachable"
+      );
+      return mockApi.updateCustomField(fieldId, payload);
+    }
+  },
+
+  async deleteCustomField(
+    fieldId: string,
+    opts: ApiClientOptions
+  ): Promise<{ id: string; deleted: boolean }> {
+    if (opts.useMock) {
+      return mockApi.deleteCustomField(fieldId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/custom-fields/${fieldId}`,
+        { method: "DELETE" },
+        () => ({ id: fieldId, deleted: true })
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Delete custom field API unreachable"
+      );
+      return mockApi.deleteCustomField(fieldId);
+    }
+  },
+
+  async setCardCustomFieldValue(
+    cardId: string,
+    fieldId: string,
+    value: string | number | boolean | null,
+    opts: ApiClientOptions
+  ): Promise<Card> {
+    if (opts.useMock) {
+      return mockApi.setCardCustomFieldValue(cardId, fieldId, value);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/custom-fields/${fieldId}`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ value }),
+        },
+        (raw) => CardSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error
+          ? err.message
+          : "Set card custom field API unreachable"
+      );
+      return mockApi.setCardCustomFieldValue(cardId, fieldId, value);
+    }
+  },
+
+  // --- Phase 7 Visual Dependency Graph & AI Critical Path Endpoints ---
+  async getDependencyGraph(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<BoardDependencyGraph> {
+    if (opts.useMock) {
+      return mockApi.getDependencyGraph(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/dependency-graph`,
+        { method: "GET" },
+        (raw) => BoardDependencyGraphSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Dependency graph API unreachable"
+      );
+      return mockApi.getDependencyGraph(boardId);
+    }
+  },
+
+  async addCardDependency(
+    cardId: string,
+    blockerCardId: string,
+    opts: ApiClientOptions
+  ): Promise<AddCardDependencyResponse> {
+    if (opts.useMock) {
+      return mockApi.addCardDependency(cardId, blockerCardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/dependencies`,
+        {
+          method: "POST",
+          body: JSON.stringify({ blocker_card_id: blockerCardId }),
+        },
+        (raw) => AddCardDependencyResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.message.toLowerCase().includes("circular dependency")
+      ) {
+        throw err;
+      }
+      opts.onFallbackToMock?.(
+        err instanceof Error
+          ? err.message
+          : "Add card dependency API unreachable"
+      );
+      return mockApi.addCardDependency(cardId, blockerCardId);
+    }
+  },
+
+  async removeCardDependency(
+    cardId: string,
+    blockerCardId: string,
+    opts: ApiClientOptions
+  ): Promise<AddCardDependencyResponse> {
+    if (opts.useMock) {
+      return mockApi.removeCardDependency(cardId, blockerCardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/cards/${cardId}/dependencies/${blockerCardId}`,
+        { method: "DELETE" },
+        (raw) => AddCardDependencyResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error
+          ? err.message
+          : "Remove card dependency API unreachable"
+      );
+      return mockApi.removeCardDependency(cardId, blockerCardId);
+    }
+  },
+
+  async aiAnalyzeCriticalPath(
+    boardId: string,
+    opts: ApiClientOptions
+  ): Promise<AICriticalPathResponse> {
+    if (opts.useMock) {
+      return mockApi.aiAnalyzeCriticalPath(boardId);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/dependency-graph/ai-analyze`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+        (raw) => AICriticalPathResponseSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "AI Critical Path API unreachable"
+      );
+      return mockApi.aiAnalyzeCriticalPath(boardId);
+    }
+  },
+
+  // --- Phase 7 Theme Studio Endpoint ---
+  async updateBoardTheme(
+    boardId: string,
+    payload: UpdateBoardThemeRequest,
+    opts: ApiClientOptions
+  ): Promise<BoardThemeConfig> {
+    if (opts.useMock) {
+      return mockApi.updateBoardTheme(boardId, payload);
+    }
+    try {
+      return await fetchJson(
+        `/api/v1/boards/${boardId}/theme`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
+        (raw) => BoardThemeConfigSchema.parse(raw)
+      );
+    } catch (err) {
+      opts.onFallbackToMock?.(
+        err instanceof Error ? err.message : "Update board theme API unreachable"
+      );
+      return mockApi.updateBoardTheme(boardId, payload);
     }
   },
 };

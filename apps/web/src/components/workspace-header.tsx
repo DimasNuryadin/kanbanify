@@ -29,6 +29,7 @@ import {
   Table2,
   UserPlus,
   Users,
+  Workflow,
   X,
   Zap,
 } from "lucide-react";
@@ -107,6 +108,12 @@ export function WorkspaceHeader({
   );
   const setImportExportModalOpen = useWorkspaceStore(
     (s) => s.setImportExportModalOpen
+  );
+  const setCustomFieldsModalOpen = useWorkspaceStore(
+    (s) => s.setCustomFieldsModalOpen
+  );
+  const setThemeStudioOpen = useWorkspaceStore(
+    (s) => s.setThemeStudioOpen
   );
   const automationRules = useWorkspaceStore((s) => s.automationRules);
   const activeRulesCount = automationRules.filter((r) => r.is_enabled).length;
@@ -576,6 +583,31 @@ export function WorkspaceHeader({
             <span className="hidden sm:inline">📥 Import / 📤 Export</span>
           </button>
 
+          {/* Trello Custom Fields Power-Up Modal Button */}
+          <button
+            type="button"
+            onClick={() => setCustomFieldsModalOpen(true)}
+            title="Configure Board Custom Fields Power-Up"
+            className="flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-500/20 dark:border-indigo-400/30 dark:bg-indigo-400/10 dark:text-indigo-300 dark:hover:bg-indigo-400/20"
+          >
+            <span>🧩</span>
+            <span className="hidden sm:inline">Fields</span>
+            <span className="rounded-full bg-indigo-500/20 px-1.5 py-0.2 font-mono text-[10px] font-bold text-indigo-700 dark:bg-indigo-400/20 dark:text-indigo-200">
+              {board.custom_fields?.length ?? 0}
+            </span>
+          </button>
+
+          {/* Glassmorphism Theme Studio Drawer Button */}
+          <button
+            type="button"
+            onClick={() => setThemeStudioOpen(true)}
+            title="Open Glassmorphism & Theme Customization Studio"
+            className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-2.5 py-1.5 text-xs font-semibold text-purple-700 transition-colors hover:bg-purple-500/20 dark:border-purple-400/30 dark:bg-purple-400/10 dark:text-purple-300 dark:hover:bg-purple-400/20"
+          >
+            <span>🎨</span>
+            <span className="hidden sm:inline">Theme</span>
+          </button>
+
           {/* Board Menu / Background Picker Button */}
           <button
             type="button"
@@ -819,6 +851,18 @@ export function WorkspaceHeader({
             >
               <BarChart3 className="h-3.5 w-3.5 text-indigo-500" />
               <span>📊 Analytics</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("graph")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all duration-150 ${
+                viewMode === "graph"
+                  ? "bg-white text-rose-600 shadow-xs dark:bg-zinc-800 dark:text-rose-300"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              }`}
+            >
+              <Workflow className="h-3.5 w-3.5 text-rose-500" />
+              <span>🕸️ Graph</span>
             </button>
           </div>
 

@@ -46,6 +46,9 @@ import { KanbanBoard } from "./kanban-board";
 import { TableView } from "./table-view";
 import { CalendarView } from "./calendar-view";
 import { AnalyticsView } from "./analytics-view";
+import { DependencyGraphView } from "./dependency-graph-view";
+import { CustomFieldsManagerModal } from "./custom-fields-manager-modal";
+import { ThemeStudioDrawer } from "./theme-studio-drawer";
 import { TrelloImportExportModal } from "./trello-import-export-modal";
 import { CardDetailDrawer } from "./card-detail-drawer";
 import { ArchivedItemsDrawer } from "./archived-items-drawer";
@@ -1279,6 +1282,8 @@ export function KinetixWorkspace() {
               filteredCards={filteredCards}
               onUpdateCard={handleUpdateCard}
             />
+          ) : viewMode === "graph" ? (
+            <DependencyGraphView />
           ) : (
             <AnalyticsView
               onOpenImportExport={() => setImportExportModalOpen(true)}
@@ -1366,6 +1371,8 @@ export function KinetixWorkspace() {
 
       <AuthModal />
       <ShareBoardModal />
+      <CustomFieldsManagerModal />
+      <ThemeStudioDrawer />
 
       <ButlerToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
