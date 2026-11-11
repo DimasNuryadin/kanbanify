@@ -82,7 +82,17 @@ export class AnalyticsService {
     let totalChecklistItems = 0;
     let completedChecklistItems = 0;
 
+    let totalEstimatedSeconds = 0;
+    let totalLoggedSeconds = 0;
+    let totalPomodorosCompleted = 0;
+
     for (const card of activeCards) {
+      if (card.time_tracking) {
+        totalEstimatedSeconds += Math.max(0, card.time_tracking.estimated_seconds ?? 0);
+        totalLoggedSeconds += Math.max(0, card.time_tracking.total_logged_seconds ?? 0);
+        totalPomodorosCompleted += Math.max(0, card.time_tracking.pomodoro_completed_count ?? 0);
+      }
+
       const sp = Math.max(0, card.story_points ?? 0);
       totalStoryPoints += sp;
       if (isCardCompleted(card, doneColumnIds)) {
@@ -225,6 +235,9 @@ export class AnalyticsService {
       completedCards
     );
 
+    const totalEstimatedHours = roundToOneDecimal(totalEstimatedSeconds / 3600);
+    const totalLoggedHours = roundToOneDecimal(totalLoggedSeconds / 3600);
+
     return BoardAnalyticsSchema.parse({
       board_id: board.id,
       total_cards: totalCards,
@@ -242,6 +255,9 @@ export class AnalyticsService {
       cards_by_priority: cardsByPriority,
       cards_by_label: cardsByLabel,
       burndown_series: burndownSeries,
+      total_estimated_hours: totalEstimatedHours,
+      total_logged_hours: totalLoggedHours,
+      total_pomodoros_completed: totalPomodorosCompleted,
     });
   }
 
