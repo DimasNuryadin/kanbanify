@@ -113,6 +113,25 @@ export type BoardVisibility = z.infer<typeof BoardVisibilityEnum>;
 export const AIPermissionRiskLevelEnum = z.enum(["LOW", "MEDIUM", "HIGH"]);
 export type AIPermissionRiskLevel = z.infer<typeof AIPermissionRiskLevelEnum>;
 
+// Phase 7 Custom Fields & Theme Studio Enums
+export const CustomFieldTypeEnum = z.enum([
+  "TEXT",
+  "NUMBER",
+  "DATE",
+  "CHECKBOX",
+  "DROPDOWN",
+]);
+export type CustomFieldType = z.infer<typeof CustomFieldTypeEnum>;
+
+export const ThemePresetEnum = z.enum([
+  "DEFAULT_CLEAN",
+  "FROSTED_GLASS",
+  "CYBERPUNK_NEON",
+  "MINIMAL_NORD",
+  "WARM_ESPRESSO",
+]);
+export type ThemePreset = z.infer<typeof ThemePresetEnum>;
+
 /**
  * Lexicographical fractional index string (e.g., "a0", "a1", "a0V")
  * enabling O(1) single-row updates during drag-and-drop reordering.
@@ -548,6 +567,102 @@ export const AutomationRuleSchema = z.object({
 });
 export type AutomationRule = z.infer<typeof AutomationRuleSchema>;
 
+// Phase 7 Custom Field Schemas
+export const CustomFieldOptionSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1).max(100),
+  color: z.string().min(1).default("blue"),
+});
+export type CustomFieldOption = z.infer<typeof CustomFieldOptionSchema>;
+
+export const CustomFieldDefinitionSchema = z.object({
+  id: z.string().min(1),
+  board_id: z.string().min(1),
+  name: z.string().min(1).max(100),
+  type: CustomFieldTypeEnum,
+  options: z.array(CustomFieldOptionSchema).default([]),
+  show_on_front: z.boolean().default(true),
+  position: FractionalIndexSchema.default("a0"),
+  created_at: z.string().datetime(),
+});
+export type CustomFieldDefinition = z.infer<typeof CustomFieldDefinitionSchema>;
+
+export const CardCustomFieldValueSchema = z.object({
+  field_id: z.string().min(1),
+  value: z.union([z.string(), z.number(), z.boolean()]).nullable(),
+});
+export type CardCustomFieldValue = z.infer<typeof CardCustomFieldValueSchema>;
+
+// Phase 7 Advanced Board Theme & Glassmorphism Studio Schemas
+export const BoardThemeConfigSchema = z.object({
+  preset: ThemePresetEnum.default("DEFAULT_CLEAN"),
+  glass_blur: z.enum(["none", "sm", "md", "lg"]).default("md"),
+  card_density: z.enum(["comfortable", "compact"]).default("comfortable"),
+  card_radius: z.enum(["sm", "md", "xl"]).default("md"),
+  accent_color: z.string().default("#6366f1"),
+  show_custom_fields_on_front: z.boolean().default(true),
+  show_dependency_badges_on_front: z.boolean().default(true),
+});
+export type BoardThemeConfig = z.infer<typeof BoardThemeConfigSchema>;
+
+export const DEFAULT_THEME_CONFIG: BoardThemeConfig = {
+  preset: "DEFAULT_CLEAN",
+  glass_blur: "md",
+  card_density: "comfortable",
+  card_radius: "md",
+  accent_color: "#6366f1",
+  show_custom_fields_on_front: true,
+  show_dependency_badges_on_front: true,
+};
+
+export const THEME_PRESET_CONFIGS: Record<ThemePreset, BoardThemeConfig> = {
+  DEFAULT_CLEAN: {
+    preset: "DEFAULT_CLEAN",
+    glass_blur: "none",
+    card_density: "comfortable",
+    card_radius: "md",
+    accent_color: "#6366f1",
+    show_custom_fields_on_front: true,
+    show_dependency_badges_on_front: true,
+  },
+  FROSTED_GLASS: {
+    preset: "FROSTED_GLASS",
+    glass_blur: "lg",
+    card_density: "comfortable",
+    card_radius: "xl",
+    accent_color: "#38bdf8",
+    show_custom_fields_on_front: true,
+    show_dependency_badges_on_front: true,
+  },
+  CYBERPUNK_NEON: {
+    preset: "CYBERPUNK_NEON",
+    glass_blur: "md",
+    card_density: "compact",
+    card_radius: "sm",
+    accent_color: "#ec4899",
+    show_custom_fields_on_front: true,
+    show_dependency_badges_on_front: true,
+  },
+  MINIMAL_NORD: {
+    preset: "MINIMAL_NORD",
+    glass_blur: "sm",
+    card_density: "compact",
+    card_radius: "md",
+    accent_color: "#88c0d0",
+    show_custom_fields_on_front: true,
+    show_dependency_badges_on_front: true,
+  },
+  WARM_ESPRESSO: {
+    preset: "WARM_ESPRESSO",
+    glass_blur: "md",
+    card_density: "comfortable",
+    card_radius: "xl",
+    accent_color: "#f59e0b",
+    show_custom_fields_on_front: true,
+    show_dependency_badges_on_front: true,
+  },
+};
+
 export const CardSchema = z.object({
   id: z.string().uuid(),
   board_id: z.string().uuid(),
@@ -559,7 +674,7 @@ export const CardSchema = z.object({
   story_points: z.number().int().min(0).max(100).nullable().default(null),
   tags: z.array(z.string()).default([]),
   subtasks: z.array(SubtaskSchema).default([]),
-  blocked_by_card_ids: z.array(z.string().uuid()).default([]),
+  blocked_by_card_ids: z.array(z.string()).default([]),
   due_date: z.string().datetime().nullable().default(null),
   updated_at: z.string().datetime(),
   // Phase 2 Trello Parity Fields
@@ -573,6 +688,8 @@ export const CardSchema = z.object({
   is_due_complete: z.boolean().default(false),
   is_archived: z.boolean().default(false),
   is_watching: z.boolean().default(false),
+  // Phase 7 Custom Fields Values
+  custom_field_values: z.array(CardCustomFieldValueSchema).default([]),
 });
 export type Card = z.infer<typeof CardSchema>;
 
@@ -625,6 +742,9 @@ export const BoardSchema = z.object({
   // Phase 6 RBAC & Shareable Invites
   invite_links: z.array(BoardInviteLinkSchema).default([]),
   visibility: BoardVisibilityEnum.default("WORKSPACE"),
+  // Phase 7 Custom Fields & Theme Studio
+  custom_fields: z.array(CustomFieldDefinitionSchema).default([]),
+  theme_config: BoardThemeConfigSchema.default(DEFAULT_THEME_CONFIG),
 });
 export type Board = z.infer<typeof BoardSchema>;
 
@@ -642,6 +762,7 @@ export const BoardSummarySchema = z.object({
   updated_at: z.string().datetime().optional().default(() => new Date().toISOString()),
   created_at: z.string().datetime().optional().default(() => new Date().toISOString()),
   description: z.string().optional().default(""),
+  theme_config: BoardThemeConfigSchema.optional(),
 });
 export type BoardSummary = z.infer<typeof BoardSummarySchema>;
 
@@ -698,6 +819,8 @@ export const CreateBoardRequestSchema = z.object({
   background: BoardBackgroundSchema.optional(),
   template_id: z.string().optional(),
   visibility: BoardVisibilityEnum.optional().default("WORKSPACE"),
+  theme_config: BoardThemeConfigSchema.optional(),
+  custom_fields: z.array(CustomFieldDefinitionSchema).optional(),
 });
 export type CreateBoardRequest = z.infer<typeof CreateBoardRequestSchema>;
 
@@ -709,6 +832,8 @@ export const UpdateBoardRequestSchema = z.object({
   labels: z.array(LabelSchema).optional(),
   members: z.array(MemberSchema).optional(),
   visibility: BoardVisibilityEnum.optional(),
+  theme_config: BoardThemeConfigSchema.optional(),
+  custom_fields: z.array(CustomFieldDefinitionSchema).optional(),
 });
 export type UpdateBoardRequest = z.infer<typeof UpdateBoardRequestSchema>;
 
@@ -755,7 +880,7 @@ export const CreateCardRequestSchema = z.object({
   story_points: z.number().int().min(0).max(100).nullable().optional().default(null),
   tags: z.array(z.string()).optional().default([]),
   subtasks: z.array(SubtaskSchema).optional().default([]),
-  blocked_by_card_ids: z.array(z.string().uuid()).optional().default([]),
+  blocked_by_card_ids: z.array(z.string()).optional().default([]),
   due_date: z.string().datetime().nullable().optional().default(null),
   cover: CardCoverSchema.optional().default({ type: "none", value: null, size: "normal" }),
   label_ids: z.array(z.string()).optional().default([]),
@@ -767,6 +892,7 @@ export const CreateCardRequestSchema = z.object({
   is_due_complete: z.boolean().optional().default(false),
   is_archived: z.boolean().optional().default(false),
   is_watching: z.boolean().optional().default(false),
+  custom_field_values: z.array(CardCustomFieldValueSchema).optional().default([]),
 });
 export type CreateCardRequest = z.infer<typeof CreateCardRequestSchema>;
 
@@ -779,7 +905,7 @@ export const UpdateCardRequestSchema = z.object({
   story_points: z.number().int().min(0).max(100).nullable().optional(),
   tags: z.array(z.string()).optional(),
   subtasks: z.array(SubtaskSchema).optional(),
-  blocked_by_card_ids: z.array(z.string().uuid()).optional(),
+  blocked_by_card_ids: z.array(z.string()).optional(),
   due_date: z.string().datetime().nullable().optional(),
   cover: CardCoverSchema.optional(),
   label_ids: z.array(z.string()).optional(),
@@ -791,6 +917,7 @@ export const UpdateCardRequestSchema = z.object({
   is_due_complete: z.boolean().optional(),
   is_archived: z.boolean().optional(),
   is_watching: z.boolean().optional(),
+  custom_field_values: z.array(CardCustomFieldValueSchema).optional(),
 });
 export type UpdateCardRequest = z.infer<typeof UpdateCardRequestSchema>;
 
@@ -808,6 +935,7 @@ export const CopyCardRequestSchema = z.object({
   keep_labels: z.boolean().optional().default(true),
   keep_members: z.boolean().optional().default(true),
   keep_attachments: z.boolean().optional().default(true),
+  keep_custom_fields: z.boolean().optional().default(true),
 });
 export type CopyCardRequest = z.infer<typeof CopyCardRequestSchema>;
 
@@ -867,6 +995,57 @@ export const TestWebhookResponseSchema = z.object({
 });
 export type TestWebhookResponse = z.infer<typeof TestWebhookResponseSchema>;
 
+// Phase 7 Custom Field Request Payloads
+export const CreateCustomFieldDefinitionRequestSchema = z.object({
+  name: z.string().min(1).max(100),
+  type: CustomFieldTypeEnum,
+  options: z.array(CustomFieldOptionSchema).optional().default([]),
+  show_on_front: z.boolean().optional().default(true),
+  position: FractionalIndexSchema.optional(),
+});
+export type CreateCustomFieldDefinitionRequest = z.infer<
+  typeof CreateCustomFieldDefinitionRequestSchema
+>;
+
+export const UpdateCustomFieldDefinitionRequestSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  options: z.array(CustomFieldOptionSchema).optional(),
+  show_on_front: z.boolean().optional(),
+  position: FractionalIndexSchema.optional(),
+});
+export type UpdateCustomFieldDefinitionRequest = z.infer<
+  typeof UpdateCustomFieldDefinitionRequestSchema
+>;
+
+export const SetCardCustomFieldValueRequestSchema = z.object({
+  value: z.union([z.string(), z.number(), z.boolean()]).nullable(),
+});
+export type SetCardCustomFieldValueRequest = z.infer<
+  typeof SetCardCustomFieldValueRequestSchema
+>;
+
+// Phase 7 Theme Studio Request Payload
+export const UpdateBoardThemeRequestSchema = z.object({
+  preset: ThemePresetEnum.optional(),
+  glass_blur: z.enum(["none", "sm", "md", "lg"]).optional(),
+  card_density: z.enum(["comfortable", "compact"]).optional(),
+  card_radius: z.enum(["sm", "md", "xl"]).optional(),
+  accent_color: z.string().optional(),
+  show_custom_fields_on_front: z.boolean().optional(),
+  show_dependency_badges_on_front: z.boolean().optional(),
+});
+export type UpdateBoardThemeRequest = z.infer<
+  typeof UpdateBoardThemeRequestSchema
+>;
+
+// Phase 7 Dependency Linker Request Payload
+export const AddCardDependencyRequestSchema = z.object({
+  blocker_card_id: z.string().min(1),
+});
+export type AddCardDependencyRequest = z.infer<
+  typeof AddCardDependencyRequestSchema
+>;
+
 // ============================================================================
 // 4. WEBSOCKET MESSAGE SCHEMAS (/ws/boards/:boardId)
 // ============================================================================
@@ -892,6 +1071,12 @@ export const WSEventTypeEnum = z.enum([
   "USER_JOINED",
   "USER_LEFT",
   "USER_TYPING",
+  // Phase 7 Custom Fields & Dependency Graph Events
+  "CUSTOM_FIELD_CREATED",
+  "CUSTOM_FIELD_UPDATED",
+  "CUSTOM_FIELD_DELETED",
+  "DEPENDENCY_ADDED",
+  "DEPENDENCY_REMOVED",
 ]);
 export type WSEventType = z.infer<typeof WSEventTypeEnum>;
 
@@ -1250,6 +1435,77 @@ export const AIPermissionAuditResponseSchema = z.object({
 });
 export type AIPermissionAuditResponse = z.infer<
   typeof AIPermissionAuditResponseSchema
+>;
+
+// ============================================================================
+// 5.7 PHASE 7 VISUAL DEPENDENCY GRAPH & AI CRITICAL PATH SCHEMAS
+// ============================================================================
+
+export const DependencyNodeSchema = z.object({
+  card_id: z.string().min(1),
+  title: z.string().min(1).max(255),
+  column_id: z.string().min(1),
+  column_title: z.string().min(1),
+  priority: PriorityEnum,
+  story_points: z.number().int().min(0).max(100).nullable().default(null),
+  is_completed: z.boolean().default(false),
+  assignee_initials: z.array(z.string()).default([]),
+  in_degree: z.number().int().min(0).default(0),
+  out_degree: z.number().int().min(0).default(0),
+  is_on_critical_path: z.boolean().default(false),
+});
+export type DependencyNode = z.infer<typeof DependencyNodeSchema>;
+
+export const DependencyEdgeSchema = z.object({
+  from_card_id: z.string().min(1),
+  to_card_id: z.string().min(1),
+  is_resolved: z.boolean().default(false),
+  is_critical: z.boolean().default(false),
+});
+export type DependencyEdge = z.infer<typeof DependencyEdgeSchema>;
+
+export const BoardDependencyGraphSchema = z.object({
+  board_id: z.string().min(1),
+  nodes: z.array(DependencyNodeSchema).default([]),
+  edges: z.array(DependencyEdgeSchema).default([]),
+  critical_path_card_ids: z.array(z.string()).default([]),
+  total_blocked_cards: z.number().int().min(0).default(0),
+  has_circular_dependency: z.boolean().default(false),
+});
+export type BoardDependencyGraph = z.infer<typeof BoardDependencyGraphSchema>;
+
+export const AddCardDependencyResponseSchema = z.object({
+  card: CardSchema,
+  graph: BoardDependencyGraphSchema,
+});
+export type AddCardDependencyResponse = z.infer<
+  typeof AddCardDependencyResponseSchema
+>;
+
+export const CriticalPathBlockerCardSchema = z.object({
+  card_id: z.string().min(1),
+  title: z.string().min(1),
+  blocks_count: z.number().int().min(0),
+  reason: z.string().min(1),
+});
+export type CriticalPathBlockerCard = z.infer<
+  typeof CriticalPathBlockerCardSchema
+>;
+
+export const AICriticalPathRequestSchema = z.object({
+  board_title: z.string().min(1).max(150),
+  graph: BoardDependencyGraphSchema,
+});
+export type AICriticalPathRequest = z.infer<typeof AICriticalPathRequestSchema>;
+
+export const AICriticalPathResponseSchema = z.object({
+  risk_summary: z.string().min(1),
+  critical_path_titles: z.array(z.string()).default([]),
+  top_blocker_cards: z.array(CriticalPathBlockerCardSchema).default([]),
+  unblocking_recommendations: z.array(z.string()).default([]),
+});
+export type AICriticalPathResponse = z.infer<
+  typeof AICriticalPathResponseSchema
 >;
 
 // ============================================================================

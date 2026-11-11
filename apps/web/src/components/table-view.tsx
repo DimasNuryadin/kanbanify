@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Card, Priority } from "@kinetix/contracts";
 import { PRIORITY_STYLES } from "./kanban-board";
+import { getCustomFieldOptionColor } from "./custom-fields-manager-modal";
 import { useWorkspaceStore } from "@/store/workspace-store";
 import {
   comparePositions,
@@ -23,7 +24,8 @@ type SortField =
   | "priority"
   | "story_points"
   | "column"
-  | "due_date";
+  | "due_date"
+  | `custom_${string}`;
 
 const PRIORITY_WEIGHT: Record<Priority, number> = {
   URGENT: 4,
@@ -65,38 +67,64 @@ export function TableView({
     const copy = [...filteredCards];
     copy.sort((a, b) => {
       let cmp = 0;
-      switch (sortField) {
-        case "title":
-          cmp = a.title.localeCompare(b.title);
-          break;
-        case "priority":
-          cmp = PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority];
-          break;
-        case "story_points":
-          cmp = (a.story_points ?? -1) - (b.story_points ?? -1);
-          break;
-        case "column": {
-          const colA = columnMap.get(a.column_id)?.position ?? "";
-          const colB = columnMap.get(b.column_id)?.position ?? "";
-          cmp = comparePositions(colA, colB);
-          if (cmp === 0) cmp = comparePositions(a.position, b.position);
-          break;
+      if (sortField.startsWith("custom_")) {
+        const fieldId = sortField.replace("custom_", "");
+        const cf = board.custom_fields?.find((f) => f.id === fieldId);
+        const valA = a.custom_field_values?.find(
+          (v) => v.field_id === fieldId
+        )?.value;
+        const valB = b.custom_field_values?.find(
+          (v) => v.field_id === fieldId
+        )?.value;
+
+        if (valA === undefined || valA === null || valA === "") {
+          cmp = valB === undefined || valB === null || valB === "" ? 0 : 1;
+        } else if (valB === undefined || valB === null || valB === "") {
+          cmp = -1;
+        } else if (cf?.type === "NUMBER") {
+          cmp = Number(valA) - Number(valB);
+        } else if (cf?.type === "CHECKBOX") {
+          cmp = (valA ? 1 : 0) - (valB ? 1 : 0);
+        } else if (cf?.type === "DATE") {
+          cmp =
+            new Date(String(valA)).getTime() - new Date(String(valB)).getTime();
+        } else {
+          cmp = String(valA).localeCompare(String(valB));
         }
-        case "due_date": {
-          const timeA = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-          const timeB = b.due_date ? new Date(b.due_date).getTime() : Infinity;
-          cmp = timeA - timeB;
-          break;
+      } else {
+        switch (sortField) {
+          case "title":
+            cmp = a.title.localeCompare(b.title);
+            break;
+          case "priority":
+            cmp = PRIORITY_WEIGHT[a.priority] - PRIORITY_WEIGHT[b.priority];
+            break;
+          case "story_points":
+            cmp = (a.story_points ?? -1) - (b.story_points ?? -1);
+            break;
+          case "column": {
+            const colA = columnMap.get(a.column_id)?.position ?? "";
+            const colB = columnMap.get(b.column_id)?.position ?? "";
+            cmp = comparePositions(colA, colB);
+            if (cmp === 0) cmp = comparePositions(a.position, b.position);
+            break;
+          }
+          case "due_date": {
+            const timeA = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+            const timeB = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+            cmp = timeA - timeB;
+            break;
+          }
+          case "position":
+          default:
+            cmp = comparePositions(a.position, b.position);
+            break;
         }
-        case "position":
-        default:
-          cmp = comparePositions(a.position, b.position);
-          break;
       }
       return sortAsc ? cmp : -cmp;
     });
     return copy;
-  }, [filteredCards, sortField, sortAsc, columnMap]);
+  }, [filteredCards, sortField, sortAsc, columnMap, board.custom_fields]);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -165,6 +193,18 @@ export function TableView({
               </th>
               <th className="px-3 py-3">Checklists</th>
               <th className="px-3 py-3">Blocker Radar</th>
+              {board.custom_fields?.map((field) => (
+                <th key={field.id} className="px-3 py-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(`custom_${field.id}`)}
+                    className="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  >
+                    <span>{field.name}</span>
+                    <ArrowUpDown className="h-3 w-3" />
+                  </button>
+                </th>
+              ))}
               <th className="px-4 py-3 text-right">
                 <button
                   type="button"
@@ -327,6 +367,84 @@ export function TableView({
                     )}
                   </td>
 
+                  {/* Custom Field Columns */}
+                  {board.custom_fields?.map((field) => {
+                    const valObj = card.custom_field_values?.find(
+                      (v) => v.field_id === field.id
+                    );
+                    const hasVal =
+                      valObj &&
+                      valObj.value !== null &&
+                      valObj.value !== undefined &&
+                      valObj.value !== "";
+
+                    return (
+                      <td key={field.id} className="px-3 py-3">
+                        {!hasVal ? (
+                          <span className="font-mono text-[11px] text-zinc-400">
+                            —
+                          </span>
+                        ) : field.type === "DROPDOWN" ? (
+                          (() => {
+                            const opt = field.options?.find(
+                              (o) =>
+                                o.id === valObj.value ||
+                                o.label.toLowerCase() ===
+                                  String(valObj.value).toLowerCase()
+                            );
+                            const colorStyle = opt
+                              ? getCustomFieldOptionColor(opt.color)
+                              : null;
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  colorStyle
+                                    ? colorStyle.bg
+                                    : "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                                }`}
+                              >
+                                {opt?.label ?? String(valObj.value)}
+                              </span>
+                            );
+                          })()
+                        ) : field.type === "CHECKBOX" ? (
+                          valObj.value ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                              ☑️ Yes
+                            </span>
+                          ) : (
+                            <span className="font-mono text-[11px] text-zinc-400">
+                              No
+                            </span>
+                          )
+                        ) : field.type === "NUMBER" ? (
+                          <span className="font-mono text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                            {valObj.value}
+                            {field.name.toLowerCase().includes("hour") ||
+                            field.name.toLowerCase().includes("est")
+                              ? "h"
+                              : ""}
+                          </span>
+                        ) : field.type === "DATE" ? (
+                          <span className="font-mono text-xs text-zinc-700 dark:text-zinc-300">
+                            {new Date(String(valObj.value)).toLocaleDateString(
+                              "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                                timeZone: "UTC",
+                              }
+                            )}
+                          </span>
+                        ) : (
+                          <span className="block max-w-[140px] truncate text-xs text-zinc-700 dark:text-zinc-300">
+                            {String(valObj.value)}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+
                   {/* Due Date */}
                   <td className="px-4 py-3 text-right">
                     {card.due_date ? (
@@ -359,7 +477,7 @@ export function TableView({
             {sortedCards.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={8 + (board.custom_fields?.length ?? 0)}
                   className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400"
                 >
                   No cards match your current filters.

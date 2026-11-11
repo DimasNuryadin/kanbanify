@@ -6,11 +6,14 @@ import {
   BoardInviteLink,
   BoardRole,
   BoardSummary,
+  BoardThemeConfig,
   Card,
   CardMovedEventData,
   Column,
   ColumnMovedEventData,
   Comment,
+  CustomFieldDefinition,
+  DEFAULT_THEME_CONFIG,
   DEFAULT_WORKSPACE,
   Member,
   Priority,
@@ -29,7 +32,7 @@ import { WSConnectionStatus } from "@/lib/ws-client";
 import { comparePositions } from "@/lib/fractional-index";
 import { ButlerExecutionToast } from "@/lib/automation-engine";
 
-export type ViewMode = "kanban" | "table" | "calendar" | "analytics";
+export type ViewMode = "kanban" | "table" | "calendar" | "analytics" | "graph";
 export type ThemeMode = "light" | "dark" | "system";
 export type DueFilter = "ALL" | "OVERDUE" | "DUE_SOON" | "COMPLETED" | "NO_DATE";
 
@@ -150,6 +153,8 @@ interface WorkspaceState {
   isCreateWorkspaceModalOpen: boolean;
   isImportExportModalOpen: boolean;
   isWebhooksModalOpen: boolean;
+  isCustomFieldsModalOpen: boolean;
+  isThemeStudioOpen: boolean;
 
   // Real-Time Co-Presence & Live Typing Indicators
   presences: UserPresence[];
@@ -224,6 +229,21 @@ interface WorkspaceState {
   setCreateWorkspaceModalOpen: (open: boolean) => void;
   setImportExportModalOpen: (open: boolean) => void;
   setWebhooksModalOpen: (open: boolean) => void;
+  setCustomFieldsModalOpen: (open: boolean) => void;
+  setThemeStudioOpen: (open: boolean) => void;
+
+  // Phase 7 Custom Fields, Dependencies & Theme Studio Actions
+  updateBoardThemeConfig: (config: BoardThemeConfig) => void;
+  setCustomFieldDefinitions: (fields: CustomFieldDefinition[]) => void;
+  upsertCustomFieldDefinition: (field: CustomFieldDefinition) => void;
+  removeCustomFieldDefinition: (fieldId: string) => void;
+  setCardCustomFieldValue: (
+    cardId: string,
+    fieldId: string,
+    value: string | number | boolean | null
+  ) => void;
+  linkCardDependency: (cardId: string, blockerCardId: string) => void;
+  unlinkCardDependency: (cardId: string, blockerCardId: string) => void;
 
   // Real-Time Co-Presence Actions
   setPresences: (presences: UserPresence[]) => void;
@@ -293,6 +313,8 @@ function sortBoard(board: Board): Board {
     webhooks: board.webhooks ?? [],
     invite_links: board.invite_links ?? [],
     visibility: board.visibility ?? "WORKSPACE",
+    custom_fields: board.custom_fields ?? [],
+    theme_config: board.theme_config ?? { ...DEFAULT_THEME_CONFIG },
   };
 }
 
@@ -365,6 +387,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isCreateWorkspaceModalOpen: false,
   isImportExportModalOpen: false,
   isWebhooksModalOpen: false,
+  isCustomFieldsModalOpen: false,
+  isThemeStudioOpen: false,
 
   presences: [
     {
@@ -557,6 +581,118 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setImportExportModalOpen: (isImportExportModalOpen) =>
     set({ isImportExportModalOpen }),
   setWebhooksModalOpen: (isWebhooksModalOpen) => set({ isWebhooksModalOpen }),
+  setCustomFieldsModalOpen: (isCustomFieldsModalOpen) =>
+    set({ isCustomFieldsModalOpen }),
+  setThemeStudioOpen: (isThemeStudioOpen) => set({ isThemeStudioOpen }),
+
+  updateBoardThemeConfig: (config) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        theme_config: { ...state.board.theme_config, ...config },
+      },
+    })),
+
+  setCustomFieldDefinitions: (custom_fields) =>
+    set((state) => ({
+      board: {
+        ...state.board,
+        custom_fields,
+      },
+    })),
+
+  upsertCustomFieldDefinition: (field) =>
+    set((state) => {
+      const existing = state.board.custom_fields ?? [];
+      const index = existing.findIndex((f) => f.id === field.id);
+      const next =
+        index >= 0
+          ? existing.map((f, i) => (i === index ? field : f))
+          : [...existing, field];
+      return {
+        board: {
+          ...state.board,
+          custom_fields: next,
+        },
+      };
+    }),
+
+  removeCustomFieldDefinition: (fieldId) =>
+    set((state) => {
+      const nextFields = (state.board.custom_fields ?? []).filter(
+        (f) => f.id !== fieldId
+      );
+      const nextCards = state.board.cards.map((c) => ({
+        ...c,
+        custom_field_values: (c.custom_field_values ?? []).filter(
+          (v) => v.field_id !== fieldId
+        ),
+      }));
+      return {
+        board: {
+          ...state.board,
+          custom_fields: nextFields,
+          cards: nextCards,
+        },
+      };
+    }),
+
+  setCardCustomFieldValue: (cardId, fieldId, value) =>
+    set((state) => {
+      const nextCards = state.board.cards.map((c) => {
+        if (c.id !== cardId) return c;
+        const filtered = (c.custom_field_values ?? []).filter(
+          (v) => v.field_id !== fieldId
+        );
+        if (value !== null && value !== undefined && value !== "") {
+          filtered.push({ field_id: fieldId, value });
+        }
+        return { ...c, custom_field_values: filtered };
+      });
+      return {
+        board: {
+          ...state.board,
+          cards: nextCards,
+        },
+      };
+    }),
+
+  linkCardDependency: (cardId, blockerCardId) =>
+    set((state) => {
+      const nextCards = state.board.cards.map((c) => {
+        if (c.id !== cardId) return c;
+        if (c.blocked_by_card_ids.includes(blockerCardId)) return c;
+        return {
+          ...c,
+          blocked_by_card_ids: [...c.blocked_by_card_ids, blockerCardId],
+        };
+      });
+      return {
+        board: {
+          ...state.board,
+          cards: nextCards,
+        },
+      };
+    }),
+
+  unlinkCardDependency: (cardId, blockerCardId) =>
+    set((state) => {
+      const nextCards = state.board.cards.map((c) => {
+        if (c.id !== cardId) return c;
+        return {
+          ...c,
+          blocked_by_card_ids: c.blocked_by_card_ids.filter(
+            (id) => id !== blockerCardId
+          ),
+        };
+      });
+      return {
+        board: {
+          ...state.board,
+          cards: nextCards,
+        },
+      };
+    }),
 
   setPresences: (presences) => set({ presences }),
   upsertPresence: (presence) =>

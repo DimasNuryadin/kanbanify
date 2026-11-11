@@ -50,6 +50,7 @@ import {
 } from "@kinetix/contracts";
 import { PRIORITY_STYLES } from "./kanban-board";
 import { useWorkspaceStore } from "@/store/workspace-store";
+import { apiClient } from "@/lib/api-client";
 import {
   comparePositions,
   generatePositionBetween,
@@ -155,6 +156,16 @@ export function CardDetailDrawer({
   const activeRole = useWorkspaceStore((s) => s.activeRole);
   const isViewer = activeRole === "VIEWER";
 
+  const setCardCustomFieldValueStore = useWorkspaceStore(
+    (s) => s.setCardCustomFieldValue
+  );
+  const setCustomFieldsModalOpen = useWorkspaceStore(
+    (s) => s.setCustomFieldsModalOpen
+  );
+  const linkCardDependency = useWorkspaceStore((s) => s.linkCardDependency);
+  const unlinkCardDependency = useWorkspaceStore((s) => s.unlinkCardDependency);
+  const addToast = useWorkspaceStore((s) => s.addToast);
+
   const card: Card | null =
     board.cards.find((c) => c.id === selectedCardId) ?? null;
 
@@ -218,6 +229,7 @@ export function CardDetailDrawer({
   const [keepLabels, setKeepLabels] = useState(true);
   const [keepMembers, setKeepMembers] = useState(true);
   const [keepAttachments, setKeepAttachments] = useState(true);
+  const [keepCustomFields, setKeepCustomFields] = useState(true);
 
   // Move Card popover states
   const [moveTargetColId, setMoveTargetColId] = useState("");
@@ -475,13 +487,55 @@ export function CardDetailDrawer({
     });
   };
 
-  // Blocker Toggle
+  // Custom Field value update
+  const handleUpdateCustomFieldValue = async (
+    fieldId: string,
+    value: string | number | boolean | null
+  ) => {
+    if (!card) return;
+    setCardCustomFieldValueStore(card.id, fieldId, value);
+    try {
+      await apiClient.setCardCustomFieldValue(card.id, fieldId, value, {
+        useMock: true,
+      });
+    } catch (err) {
+      console.error("Failed to update custom field value:", err);
+    }
+  };
+
+  // Blocker Toggle (Cycle-safe)
   const handleToggleBlocker = async (blockerCardId: string) => {
+    if (!card) return;
     const exists = card.blocked_by_card_ids.includes(blockerCardId);
-    const nextIds = exists
-      ? card.blocked_by_card_ids.filter((id) => id !== blockerCardId)
-      : [...card.blocked_by_card_ids, blockerCardId];
-    await onUpdateCard(card.id, { blocked_by_card_ids: nextIds });
+    if (exists) {
+      unlinkCardDependency(card.id, blockerCardId);
+      try {
+        await apiClient.removeCardDependency(card.id, blockerCardId, {
+          useMock: true,
+        });
+      } catch (err) {
+        console.error("Failed to remove dependency:", err);
+      }
+    } else {
+      try {
+        await apiClient.addCardDependency(card.id, blockerCardId, {
+          useMock: true,
+        });
+        linkCardDependency(card.id, blockerCardId);
+      } catch (err: unknown) {
+        const errorMsg =
+          err instanceof Error
+            ? err.message
+            : "⚠️ Circular dependency detected: adding this blocker creates a cycle.";
+        addToast({
+          id: `toast-${Date.now()}`,
+          ruleName: "Dependency Conflict",
+          cardTitle: card.title,
+          actionSummary: errorMsg,
+          timestamp: "Just now",
+        });
+      }
+    }
   };
 
   // AI Smart Enrich / Decompose
@@ -520,6 +574,7 @@ export function CardDetailDrawer({
       keep_labels: keepLabels,
       keep_members: keepMembers,
       keep_attachments: keepAttachments,
+      keep_custom_fields: keepCustomFields,
     });
   };
 
@@ -908,6 +963,144 @@ export function CardDetailDrawer({
                   <span className="h-1.5 w-1.5 rounded-full bg-violet-600 dark:bg-violet-400 animate-bounce" style={{ animationDelay: "0ms" }} />
                   <span className="h-1.5 w-1.5 rounded-full bg-violet-600 dark:bg-violet-400 animate-bounce" style={{ animationDelay: "150ms" }} />
                   <span className="h-1.5 w-1.5 rounded-full bg-violet-600 dark:bg-violet-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            )}
+
+            {/* 🧩 Custom Fields Section */}
+            {board.custom_fields && board.custom_fields.length > 0 && (
+              <div>
+                <div className="mb-2.5 flex items-center justify-between">
+                  <h4 className="flex items-center gap-2 text-xs font-bold tracking-wider text-zinc-800 uppercase dark:text-zinc-200">
+                    <span className="text-sm">🧩</span>
+                    Custom Fields ({board.custom_fields.length})
+                  </h4>
+                  {!isViewer && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomFieldsModalOpen(true)}
+                      className="text-[11px] font-medium text-indigo-600 hover:text-indigo-500 hover:underline dark:text-indigo-400"
+                    >
+                      Manage Fields
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-3.5 sm:grid-cols-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+                  {board.custom_fields.map((field) => {
+                    const valObj = card.custom_field_values?.find(
+                      (v) => v.field_id === field.id
+                    );
+                    const currentValue = valObj?.value ?? "";
+
+                    return (
+                      <div key={field.id} className="flex flex-col gap-1.5">
+                        <label className="flex items-center justify-between text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                          <span>{field.name}</span>
+                          {field.show_on_front && (
+                            <span
+                              className="text-[10px] text-zinc-400 font-normal"
+                              title="Shown on card front"
+                            >
+                              Badge
+                            </span>
+                          )}
+                        </label>
+
+                        {field.type === "DROPDOWN" && (
+                          <select
+                            disabled={isViewer}
+                            value={String(currentValue)}
+                            onChange={(e) =>
+                              handleUpdateCustomFieldValue(field.id, e.target.value)
+                            }
+                            className="h-8 rounded-lg border border-zinc-200/80 bg-white px-2.5 text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                          >
+                            <option value="">— None —</option>
+                            {field.options?.map((opt) => (
+                              <option key={opt.id} value={opt.id}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+
+                        {field.type === "TEXT" && (
+                          <input
+                            type="text"
+                            disabled={isViewer}
+                            value={String(currentValue)}
+                            onChange={(e) =>
+                              handleUpdateCustomFieldValue(field.id, e.target.value)
+                            }
+                            placeholder={`Enter ${field.name.toLowerCase()}...`}
+                            className="h-8 rounded-lg border border-zinc-200/80 bg-white px-2.5 text-xs text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                          />
+                        )}
+
+                        {field.type === "NUMBER" && (
+                          <input
+                            type="number"
+                            disabled={isViewer}
+                            value={
+                              currentValue !== "" && currentValue !== null
+                                ? Number(currentValue)
+                                : ""
+                            }
+                            onChange={(e) =>
+                              handleUpdateCustomFieldValue(
+                                field.id,
+                                e.target.value === "" ? null : Number(e.target.value)
+                              )
+                            }
+                            placeholder="0"
+                            className="h-8 rounded-lg border border-zinc-200/80 bg-white px-2.5 font-mono text-xs text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                          />
+                        )}
+
+                        {field.type === "DATE" && (
+                          <input
+                            type="date"
+                            disabled={isViewer}
+                            value={
+                              currentValue
+                                ? String(currentValue).split("T")[0]
+                                : ""
+                            }
+                            onChange={(e) =>
+                              handleUpdateCustomFieldValue(
+                                field.id,
+                                e.target.value
+                                  ? new Date(e.target.value).toISOString()
+                                  : null
+                              )
+                            }
+                            className="h-8 rounded-lg border border-zinc-200/80 bg-white px-2.5 font-mono text-xs text-zinc-800 focus:border-indigo-500 focus:outline-none disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                          />
+                        )}
+
+                        {field.type === "CHECKBOX" && (
+                          <label className="flex h-8 items-center gap-2 rounded-lg border border-zinc-200/80 bg-white px-2.5 cursor-pointer dark:border-zinc-700 dark:bg-zinc-950">
+                            <input
+                              type="checkbox"
+                              disabled={isViewer}
+                              checked={Boolean(currentValue)}
+                              onChange={(e) =>
+                                handleUpdateCustomFieldValue(
+                                  field.id,
+                                  e.target.checked
+                                )
+                              }
+                              className="h-4 w-4 rounded border-zinc-300 accent-indigo-600 disabled:opacity-60"
+                            />
+                            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                              {currentValue ? "Verified / Checked" : "Unchecked"}
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1523,6 +1716,15 @@ export function CardDetailDrawer({
                     <AlertOctagon className="h-3.5 w-3.5 text-rose-500" />
                     <span>Blockers ({card.blocked_by_card_ids.length})</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCustomFieldsModalOpen(true)}
+                    className="flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-zinc-50/80 px-3 py-2 text-left text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  >
+                    <span className="text-sm">🧩</span>
+                    <span>Fields ({board.custom_fields?.length ?? 0})</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -2020,6 +2222,14 @@ export function CardDetailDrawer({
                           onChange={(e) => setKeepAttachments(e.target.checked)}
                         />
                         Keep Attachments ({card.attachments.length})
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={keepCustomFields}
+                          onChange={(e) => setKeepCustomFields(e.target.checked)}
+                        />
+                        Keep Custom Fields ({card.custom_field_values?.length ?? 0})
                       </label>
                     </div>
                     <button

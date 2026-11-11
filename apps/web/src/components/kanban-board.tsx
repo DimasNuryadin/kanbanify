@@ -45,12 +45,15 @@ import {
   CopyColumnRequest,
   CreateCardRequest,
   CreateColumnRequest,
+  CustomFieldDefinition,
+  DEFAULT_THEME_CONFIG,
   Label,
   Member,
   Priority,
   UpdateCardRequest,
   UpdateColumnRequest,
 } from "@kinetix/contracts";
+import { getCustomFieldOptionColor } from "./custom-fields-manager-modal";
 import {
   comparePositions,
   generatePositionBetween,
@@ -121,6 +124,136 @@ function KanbanCardContent({
   const [quickTitle, setQuickTitle] = useState(card.title);
 
   const presences = useWorkspaceStore((s) => s.presences);
+  const board = useWorkspaceStore((s) => s.board);
+  const themeConfig = board?.theme_config ?? DEFAULT_THEME_CONFIG;
+
+  const radiusClass =
+    themeConfig.card_radius === "sm"
+      ? "rounded-md"
+      : themeConfig.card_radius === "xl"
+        ? "rounded-2xl"
+        : "rounded-xl";
+
+  const densityPadClass =
+    themeConfig.card_density === "compact" ? "p-2" : "p-3";
+  const titleSizeClass =
+    themeConfig.card_density === "compact"
+      ? "text-xs mb-1"
+      : "text-[13px] mb-1.5";
+
+  let cardPresetClasses =
+    "border-zinc-200/85 bg-white hover:border-zinc-300 dark:border-zinc-800/90 dark:bg-zinc-900/95 dark:hover:border-zinc-700 shadow-xs";
+  if (themeConfig.preset === "FROSTED_GLASS") {
+    cardPresetClasses =
+      "border-white/40 dark:border-white/10 bg-white/70 dark:bg-slate-900/60 shadow-lg backdrop-blur-md hover:bg-white/85 dark:hover:bg-slate-900/75";
+  } else if (themeConfig.preset === "CYBERPUNK_NEON") {
+    cardPresetClasses =
+      "border-cyan-500/40 bg-zinc-950/90 hover:border-cyan-400/80 shadow-[0_0_12px_rgba(6,182,212,0.15)] dark:bg-black/90 text-cyan-50";
+  } else if (themeConfig.preset === "MINIMAL_NORD") {
+    cardPresetClasses =
+      "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/90 hover:border-slate-300 shadow-none";
+  } else if (themeConfig.preset === "WARM_ESPRESSO") {
+    cardPresetClasses =
+      "border-amber-900/20 dark:border-amber-900/35 bg-stone-50 dark:bg-stone-900/90 hover:border-amber-900/40 shadow-xs";
+  }
+
+  const frontCustomBadges = useMemo(() => {
+    if (!board?.custom_fields || !card.custom_field_values) return [];
+    const badges: {
+      fieldId: string;
+      fieldName: string;
+      label: string;
+      displayValue: string;
+      badgeClass: string;
+      icon?: string;
+    }[] = [];
+
+    for (const cf of board.custom_fields) {
+      if (!cf.show_on_front) continue;
+      const valObj = card.custom_field_values.find((v) => v.field_id === cf.id);
+      if (
+        !valObj ||
+        valObj.value === null ||
+        valObj.value === undefined ||
+        valObj.value === ""
+      ) {
+        continue;
+      }
+
+      if (cf.type === "DROPDOWN") {
+        const opt = cf.options?.find(
+          (o) =>
+            o.id === valObj.value ||
+            o.label.toLowerCase() === String(valObj.value).toLowerCase()
+        );
+        const colorStyle = opt ? getCustomFieldOptionColor(opt.color) : null;
+        badges.push({
+          fieldId: cf.id,
+          fieldName: cf.name,
+          label: `${cf.name}: ${opt?.label ?? valObj.value}`,
+          displayValue: String(opt?.label ?? valObj.value),
+          badgeClass: colorStyle
+            ? colorStyle.bg
+            : "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+        });
+      } else if (cf.type === "CHECKBOX") {
+        if (valObj.value === true) {
+          badges.push({
+            fieldId: cf.id,
+            fieldName: cf.name,
+            label: cf.name,
+            displayValue: "Yes",
+            badgeClass:
+              "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+            icon: "☑️",
+          });
+        }
+      } else if (cf.type === "NUMBER") {
+        const isHours =
+          cf.name.toLowerCase().includes("hour") ||
+          cf.name.toLowerCase().includes("est");
+        badges.push({
+          fieldId: cf.id,
+          fieldName: cf.name,
+          label: isHours ? `${valObj.value}h` : `${cf.name}: ${valObj.value}`,
+          displayValue: String(valObj.value),
+          badgeClass:
+            "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 font-mono",
+          icon: isHours ? "⏱️" : "#",
+        });
+      } else if (cf.type === "DATE") {
+        const dateStr = new Date(String(valObj.value)).toLocaleDateString(
+          "en-US",
+          {
+            month: "short",
+            day: "numeric",
+            timeZone: "UTC",
+          }
+        );
+        badges.push({
+          fieldId: cf.id,
+          fieldName: cf.name,
+          label: `${cf.name}: ${dateStr}`,
+          displayValue: dateStr,
+          badgeClass:
+            "border-indigo-500/40 bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 font-mono",
+          icon: "📅",
+        });
+      } else if (cf.type === "TEXT") {
+        badges.push({
+          fieldId: cf.id,
+          fieldName: cf.name,
+          label: `${cf.name}: ${valObj.value}`,
+          displayValue: String(valObj.value),
+          badgeClass:
+            "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+          icon: "📝",
+        });
+      }
+    }
+    return badges;
+  }, [board?.custom_fields, card.custom_field_values]);
+
   const editingCollaborator = useMemo(() => {
     return presences.find(
       (p) =>
@@ -200,7 +333,7 @@ function KanbanCardContent({
                 backgroundPosition: "center",
               }
         }
-        className={`group relative min-h-[104px] cursor-pointer overflow-hidden rounded-xl border p-3.5 text-left text-white shadow-sm transition-all duration-150 hover:shadow-md ${
+        className={`group relative min-h-[104px] cursor-pointer overflow-hidden ${radiusClass} border ${densityPadClass} text-left text-white shadow-sm transition-all duration-150 hover:shadow-md ${
           isOverlay
             ? "rotate-1 scale-[1.02] shadow-2xl ring-2 ring-white/40"
             : editingCollaborator
@@ -299,14 +432,14 @@ function KanbanCardContent({
       onClick={() => {
         if (!isQuickEditing) onSelect(card.id);
       }}
-      className={`group relative cursor-pointer overflow-hidden rounded-xl border bg-white text-left transition-all duration-150 dark:bg-zinc-900/95 ${
+      className={`group relative cursor-pointer overflow-hidden ${radiusClass} border text-left transition-all duration-150 ${cardPresetClasses} ${
         isOverlay
           ? "rotate-1 scale-[1.02] border-indigo-500/60 shadow-2xl ring-2 ring-indigo-500/20"
           : editingCollaborator
             ? "border-violet-500/80 shadow-[0_0_15px_rgba(139,92,246,0.35)] ring-2 ring-violet-500/40 animate-pulse"
-            : isBlocked
+            : isBlocked && themeConfig.show_dependency_badges_on_front !== false
               ? "border-red-500/45 shadow-xs hover:border-red-500/75 dark:border-red-500/40 dark:hover:border-red-500/65"
-              : "border-zinc-200/85 shadow-xs hover:border-zinc-300 hover:shadow-md dark:border-zinc-800/90 dark:hover:border-zinc-700"
+              : ""
       }`}
     >
       {/* Card Cover Banner ("normal" top strip) */}
@@ -327,7 +460,7 @@ function KanbanCardContent({
         />
       )}
 
-      <div className="p-3">
+      <div className={densityPadClass}>
         {/* Hover Quick-Edit Button + Drag Handle in Top-Right */}
         <div className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <button
@@ -454,7 +587,7 @@ function KanbanCardContent({
             </div>
           </form>
         ) : (
-          <h3 className="mb-1.5 pr-8 text-[13px] leading-snug font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <h3 className={`${titleSizeClass} pr-8 leading-snug font-semibold tracking-tight text-zinc-900 dark:text-zinc-100`}>
             {card.title}
           </h3>
         )}
@@ -474,7 +607,7 @@ function KanbanCardContent({
             </span>
           )}
 
-          {isBlocked && (
+          {isBlocked && themeConfig.show_dependency_badges_on_front !== false && (
             <span
               title={`Blocked by ${card.blocked_by_card_ids.length} upstream card(s)`}
               className="inline-flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:bg-red-500/20 dark:text-red-300"
@@ -491,6 +624,22 @@ function KanbanCardContent({
             </span>
           )}
         </div>
+
+        {/* Front Custom Field Badges */}
+        {themeConfig.show_custom_fields_on_front !== false && frontCustomBadges.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {frontCustomBadges.map((badge) => (
+              <span
+                key={badge.fieldId}
+                title={`${badge.fieldName}: ${badge.displayValue}`}
+                className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${badge.badgeClass}`}
+              >
+                {badge.icon && <span className="text-[10px]">{badge.icon}</span>}
+                <span className="truncate max-w-[150px]">{badge.label}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Rich Trello Footer Metadata Badges & Assigned Member Avatars */}
         <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-2 text-[11px] text-zinc-500 dark:border-zinc-800/80 dark:text-zinc-400">
@@ -759,6 +908,25 @@ function SortableKanbanColumn({
   const isWipExceeded =
     column.wip_limit !== null && cards.length > column.wip_limit;
 
+  const board = useWorkspaceStore((s) => s.board);
+  const themeConfig = board?.theme_config ?? DEFAULT_THEME_CONFIG;
+
+  let columnPresetClasses =
+    "border-zinc-200/85 bg-zinc-100/90 dark:border-zinc-800/85 dark:bg-zinc-900/85 shadow-xs backdrop-blur-md";
+  if (themeConfig.preset === "FROSTED_GLASS") {
+    columnPresetClasses =
+      "border-white/40 dark:border-white/10 bg-white/60 dark:bg-slate-900/50 shadow-xl backdrop-blur-xl ring-1 ring-black/5 dark:ring-white/5";
+  } else if (themeConfig.preset === "CYBERPUNK_NEON") {
+    columnPresetClasses =
+      "border-cyan-500/30 bg-black/85 shadow-[0_0_20px_rgba(6,182,212,0.12)] backdrop-blur-md";
+  } else if (themeConfig.preset === "MINIMAL_NORD") {
+    columnPresetClasses =
+      "border-slate-200/80 dark:border-slate-800 bg-slate-100/90 dark:bg-slate-900/80 shadow-none";
+  } else if (themeConfig.preset === "WARM_ESPRESSO") {
+    columnPresetClasses =
+      "border-amber-900/20 dark:border-amber-900/35 bg-stone-100/90 dark:bg-stone-900/70 shadow-xs";
+  }
+
   const handleSaveColumnTitle = async () => {
     setIsEditingTitle(false);
     const trimmed = titleDraft.trim();
@@ -799,6 +967,7 @@ function SortableKanbanColumn({
       is_due_complete: false,
       is_archived: false,
       is_watching: false,
+      custom_field_values: [],
     });
 
     // Keep composer open and focused for rapid Trello entry
@@ -822,7 +991,7 @@ function SortableKanbanColumn({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className="flex max-h-[calc(100vh-148px)] w-[310px] shrink-0 flex-col rounded-2xl border border-zinc-200/85 bg-zinc-100/90 p-2.5 shadow-xs backdrop-blur-md transition-colors duration-150 sm:w-[325px] dark:border-zinc-800/85 dark:bg-zinc-900/85"
+      className={`flex max-h-[calc(100vh-148px)] w-[310px] shrink-0 flex-col rounded-2xl border p-2.5 transition-colors duration-150 sm:w-[325px] ${columnPresetClasses}`}
     >
       {/* Top Color Accent Bar if column.color is set */}
       {column.color && (

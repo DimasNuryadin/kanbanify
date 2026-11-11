@@ -99,6 +99,7 @@ export function CreateCardModal({ onCreateCard }: CreateCardModalProps) {
         is_due_complete: false,
         is_archived: false,
         is_watching: false,
+        custom_field_values: [],
       });
 
       closeCreateCardModal();
