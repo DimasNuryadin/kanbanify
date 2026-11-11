@@ -1,4 +1,4 @@
-# Kanbanify — REST, WebSocket & Internal AI Service Contract (Phase 6: Authentication, Role-Based Access Control & Shareable Board Links)
+# Kanbanify — REST, WebSocket & Internal AI Service Contract (Phase 8: Card Time Tracking, Pomodoro Focus Timer & Interactive AI Sprint Retrospectives)
 
 All payloads MUST strictly validate against `packages/contracts/index.ts` (Zod) and `packages/contracts/schemas.py` (Pydantic v2).
 
@@ -2194,3 +2194,454 @@ Internal stateless endpoint invoked by `apps/api` with header `X-Internal-Token`
   ]
 }
 ```
+
+---
+
+## 10. Phase 8: Card Time Tracking, Pomodoro Focus Timer & Interactive Sprint Retrospectives
+
+### 10.1 Card Time Tracking & Stopwatch Endpoints (`apps/api` — Port 8000)
+
+#### `POST /api/v1/cards/:cardId/timer/start` — Start Live Stopwatch
+Starts a live stopwatch on the card by recording `active_timer: { card_id, user_id, user_name, started_at }`. If the requesting user already has a running timer on another card, that timer is stopped and committed before the new timer starts. Broadcasts `TIMER_UPDATED` and `CARD_UPDATED` WebSocket events to all connected board clients.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`StartCardTimerRequestSchema`)** *(Optional)*:
+```json
+{
+  "user_id": "88888888-8888-4888-8888-888888888881",
+  "user_name": "Alex Rivera"
+}
+```
+- **Response `200 OK` (`CardSchema`)**:
+```json
+{
+  "id": "44444444-4444-4444-8444-444444444441",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "column_id": "33333333-3333-4333-8333-333333333332",
+  "title": "Implement Webhook Dispatcher",
+  "time_tracking": {
+    "estimated_seconds": 14400,
+    "total_logged_seconds": 3600,
+    "active_timer": {
+      "card_id": "44444444-4444-4444-8444-444444444441",
+      "user_id": "88888888-8888-4888-8888-888888888881",
+      "user_name": "Alex Rivera",
+      "started_at": "2026-11-11T10:00:00.000Z"
+    },
+    "entries": [],
+    "pomodoro_completed_count": 0
+  }
+}
+```
+
+#### `POST /api/v1/cards/:cardId/timer/stop` — Stop Live Stopwatch & Commit Worklog
+Stops the active stopwatch for the requesting user on this card, calculates elapsed `duration_seconds` (`now - started_at`, minimum `1` second), appends a new `TimeEntrySchema` (`source: "STOPWATCH"`) to `card.time_tracking.entries`, increments `total_logged_seconds`, resets `active_timer` to `null`, and broadcasts `CARD_UPDATED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`StopCardTimerRequestSchema`)** *(Optional)*:
+```json
+{
+  "note": "Refactored HTTP retry logic and payload delivery"
+}
+```
+- **Response `200 OK` (`CardSchema`)**:
+```json
+{
+  "id": "44444444-4444-4444-8444-444444444441",
+  "title": "Implement Webhook Dispatcher",
+  "time_tracking": {
+    "estimated_seconds": 14400,
+    "total_logged_seconds": 5400,
+    "active_timer": null,
+    "entries": [
+      {
+        "id": "99999999-9999-4999-8999-999999999991",
+        "card_id": "44444444-4444-4444-8444-444444444441",
+        "user_id": "88888888-8888-4888-8888-888888888881",
+        "user_name": "Alex Rivera",
+        "user_initials": "AR",
+        "duration_seconds": 1800,
+        "note": "Refactored HTTP retry logic and payload delivery",
+        "source": "STOPWATCH",
+        "started_at": "2026-11-11T10:00:00.000Z",
+        "ended_at": "2026-11-11T10:30:00.000Z",
+        "created_at": "2026-11-11T10:30:00.000Z"
+      }
+    ],
+    "pomodoro_completed_count": 0
+  }
+}
+```
+
+#### `POST /api/v1/cards/:cardId/time-entries` — Manual Time Log & Estimation Update
+Logs a manual worklog entry and/or sets the target estimation on the card.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`LogTimeEntryRequestSchema`)**:
+```json
+{
+  "duration_seconds": 3600,
+  "note": "Unit tests and integration test coverage",
+  "source": "MANUAL",
+  "started_at": "2026-11-11T08:00:00.000Z",
+  "ended_at": "2026-11-11T09:00:00.000Z",
+  "estimated_seconds": 18000
+}
+```
+- **Response `200 OK` (`CardSchema`)**:
+```json
+{
+  "id": "44444444-4444-4444-8444-444444444441",
+  "title": "Implement Webhook Dispatcher",
+  "time_tracking": {
+    "estimated_seconds": 18000,
+    "total_logged_seconds": 9000,
+    "active_timer": null,
+    "entries": [
+      {
+        "id": "99999999-9999-4999-8999-999999999992",
+        "card_id": "44444444-4444-4444-8444-444444444441",
+        "user_id": "88888888-8888-4888-8888-888888888881",
+        "user_name": "Alex Rivera",
+        "user_initials": "AR",
+        "duration_seconds": 3600,
+        "note": "Unit tests and integration test coverage",
+        "source": "MANUAL",
+        "started_at": "2026-11-11T08:00:00.000Z",
+        "ended_at": "2026-11-11T09:00:00.000Z",
+        "created_at": "2026-11-11T11:00:00.000Z"
+      }
+    ],
+    "pomodoro_completed_count": 0
+  }
+}
+```
+
+#### `DELETE /api/v1/cards/:cardId/time-entries/:entryId` — Delete Worklog Entry
+Deletes a specific worklog entry and automatically recalculates `total_logged_seconds`. Broadcasts `CARD_UPDATED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK` (`CardSchema`)**:
+```json
+{
+  "id": "44444444-4444-4444-8444-444444444441",
+  "title": "Implement Webhook Dispatcher",
+  "time_tracking": {
+    "estimated_seconds": 18000,
+    "total_logged_seconds": 5400,
+    "active_timer": null,
+    "entries": [],
+    "pomodoro_completed_count": 0
+  }
+}
+```
+
+---
+
+### 10.2 Built-in Pomodoro Focus Timer (`apps/api` — Port 8000)
+
+#### `POST /api/v1/cards/:cardId/pomodoro/complete` — Complete Pomodoro Focus Session
+Records a completed 25-minute (or customized) focus session, increments `card.time_tracking.pomodoro_completed_count`, appends a `TimeEntrySchema` with `source: "POMODORO"`, increments `total_logged_seconds`, and broadcasts `CARD_UPDATED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`PomodoroCompleteRequestSchema`)**:
+```json
+{
+  "card_id": "44444444-4444-4444-8444-444444444441",
+  "mode": "FOCUS",
+  "duration_seconds": 1500,
+  "note": "Completed 25m Pomodoro focus session on dispatcher retry backoff"
+}
+```
+- **Response `200 OK` (`CardSchema`)**:
+```json
+{
+  "id": "44444444-4444-4444-8444-444444444441",
+  "title": "Implement Webhook Dispatcher",
+  "time_tracking": {
+    "estimated_seconds": 18000,
+    "total_logged_seconds": 6900,
+    "active_timer": null,
+    "entries": [
+      {
+        "id": "99999999-9999-4999-8999-999999999993",
+        "card_id": "44444444-4444-4444-8444-444444444441",
+        "user_id": "88888888-8888-4888-8888-888888888881",
+        "user_name": "Alex Rivera",
+        "user_initials": "AR",
+        "duration_seconds": 1500,
+        "note": "Completed 25m Pomodoro focus session on dispatcher retry backoff",
+        "source": "POMODORO",
+        "started_at": "2026-11-11T10:00:00.000Z",
+        "ended_at": "2026-11-11T10:25:00.000Z",
+        "created_at": "2026-11-11T10:25:00.000Z"
+      }
+    ],
+    "pomodoro_completed_count": 1
+  }
+}
+```
+
+---
+
+### 10.3 Sprint Retrospective Board Endpoints (`apps/api` — Port 8000)
+
+#### `GET /api/v1/boards/:boardId/retro` — List Board Retrospective Items
+Retrieves all retrospective cards for the board across categories (`WENT_WELL`, `TO_IMPROVE`, `KUDOS`, `ACTION_ITEMS`), ordered by upvotes descending.
+- **RBAC**: Accessible to all board members (`ADMIN`, `EDITOR`, `VIEWER`).
+- **Response `200 OK` (`RetroItemSchema[]`)**:
+```json
+[
+  {
+    "id": "55555555-5555-4555-8555-555555555551",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "category": "WENT_WELL",
+    "content": "Zero-downtime database migration executed cleanly on first try.",
+    "author_id": "88888888-8888-4888-8888-888888888881",
+    "author_name": "Alex Rivera",
+    "author_initials": "AR",
+    "votes": 5,
+    "voted_by_user_ids": [
+      "88888888-8888-4888-8888-888888888881",
+      "88888888-8888-4888-8888-888888888882"
+    ],
+    "linked_card_id": null,
+    "is_resolved": false,
+    "created_at": "2026-11-11T09:00:00.000Z"
+  },
+  {
+    "id": "55555555-5555-4555-8555-555555555552",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "category": "TO_IMPROVE",
+    "content": "PR review turnaround was slow on frontend glassmorphism studio.",
+    "author_id": "88888888-8888-4888-8888-888888888882",
+    "author_name": "Maya Lin",
+    "author_initials": "ML",
+    "votes": 3,
+    "voted_by_user_ids": [
+      "88888888-8888-4888-8888-888888888882"
+    ],
+    "linked_card_id": null,
+    "is_resolved": false,
+    "created_at": "2026-11-11T09:10:00.000Z"
+  }
+]
+```
+
+#### `POST /api/v1/boards/:boardId/retro` — Create Retrospective Item
+Adds a new reflection note to the board. Broadcasts `RETRO_ITEM_CREATED` to all connected clients.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`CreateRetroItemRequestSchema`)**:
+```json
+{
+  "category": "KUDOS",
+  "content": "Huge thanks to Samir for stepping in to resolve the WebSocket presence heartbeat race condition!",
+  "author_id": "88888888-8888-4888-8888-888888888881",
+  "author_name": "Alex Rivera",
+  "author_initials": "AR"
+}
+```
+- **Response `201 Created` (`RetroItemSchema`)**:
+```json
+{
+  "id": "55555555-5555-4555-8555-555555555553",
+  "board_id": "11111111-1111-4111-8111-111111111111",
+  "category": "KUDOS",
+  "content": "Huge thanks to Samir for stepping in to resolve the WebSocket presence heartbeat race condition!",
+  "author_id": "88888888-8888-4888-8888-888888888881",
+  "author_name": "Alex Rivera",
+  "author_initials": "AR",
+  "votes": 0,
+  "voted_by_user_ids": [],
+  "linked_card_id": null,
+  "is_resolved": false,
+  "created_at": "2026-11-11T10:00:00.000Z"
+}
+```
+
+#### `POST /api/v1/retro/:itemId/vote` — Toggle Upvote on Retro Item
+Toggles the current authenticated user's vote on a retro item. If already voted, decrements vote count and removes user ID; otherwise increments count. Broadcasts `RETRO_ITEM_UPDATED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK` (`VoteRetroItemResponseSchema`)**:
+```json
+{
+  "retro_item": {
+    "id": "55555555-5555-4555-8555-555555555553",
+    "votes": 1,
+    "voted_by_user_ids": [
+      "88888888-8888-4888-8888-888888888881"
+    ]
+  },
+  "has_voted": true
+}
+```
+
+#### `PATCH /api/v1/retro/:itemId` — Update Retrospective Item
+Modifies note content, category, or marks action item as resolved. Broadcasts `RETRO_ITEM_UPDATED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`UpdateRetroItemRequestSchema`)**:
+```json
+{
+  "content": "Establish daily 15m PR review slot at 2 PM to eliminate code review bottleneck.",
+  "is_resolved": true
+}
+```
+- **Response `200 OK` (`RetroItemSchema`)**:
+```json
+{
+  "id": "55555555-5555-4555-8555-555555555552",
+  "content": "Establish daily 15m PR review slot at 2 PM to eliminate code review bottleneck.",
+  "category": "ACTION_ITEMS",
+  "is_resolved": true
+}
+```
+
+#### `DELETE /api/v1/retro/:itemId` — Delete Retrospective Item
+Permanently deletes a retrospective card. Broadcasts `RETRO_ITEM_DELETED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK`**:
+```json
+{
+  "id": "55555555-5555-4555-8555-555555555553",
+  "deleted": true
+}
+```
+
+#### `POST /api/v1/retro/:itemId/convert-to-card` — Convert Retro Item to Kanban Card
+Converts a retro reflection (e.g. from `ACTION_ITEMS` or `TO_IMPROVE`) directly into an actionable Kanban Card in the target column (defaulting to the first column, e.g. Backlog). Automatically sets `retroItem.linked_card_id = newCard.id`. Broadcasts `CARD_CREATED` and `RETRO_ITEM_UPDATED`.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Request Body (`ConvertRetroItemToCardRequestSchema`)** *(Optional)*:
+```json
+{
+  "target_column_id": "33333333-3333-4333-8333-333333333331",
+  "priority": "HIGH",
+  "story_points": 3
+}
+```
+- **Response `201 Created` (`ConvertRetroItemToCardResponseSchema`)**:
+```json
+{
+  "retro_item": {
+    "id": "55555555-5555-4555-8555-555555555552",
+    "linked_card_id": "44444444-4444-4444-8444-444444444449",
+    "is_resolved": true
+  },
+  "card": {
+    "id": "44444444-4444-4444-8444-444444444449",
+    "board_id": "11111111-1111-4111-8111-111111111111",
+    "column_id": "33333333-3333-4333-8333-333333333331",
+    "title": "Establish daily 15m PR review slot at 2 PM to eliminate code review bottleneck",
+    "description": "Converted from Sprint Retrospective Action Item (55555555-5555-4555-8555-555555555552)",
+    "priority": "HIGH",
+    "story_points": 3
+  }
+}
+```
+
+#### `POST /api/v1/boards/:boardId/retro/ai-synthesize` — AI Sprint Retrospective Synthesizer
+Proxies all retro items along with sprint metrics (completed cards count, overdue cards count, total estimated vs logged hours) to `services/ai-engine` (`POST /internal/v1/synthesize-retro`) and returns synthesized sprint insights, morale score, estimation variance, key themes, and recommended action cards.
+- **RBAC**: `ADMIN` or `EDITOR` (`VIEWER` -> `403 FORBIDDEN`)
+- **Response `200 OK` (`AIRetroAnalysisResponseSchema`)**:
+```json
+{
+  "sprint_morale_score": 88,
+  "estimation_accuracy_summary": "Team logged 42.5h against 40.0h estimated (106% variance). High estimation accuracy within healthy agile variance limits.",
+  "key_themes": [
+    "High velocity and flawless zero-downtime database deployment",
+    "Code review bottlenecks delayed frontend glassmorphism polishing",
+    "Strong peer collaboration and proactive bug troubleshooting"
+  ],
+  "suggested_retro_items": [
+    {
+      "category": "ACTION_ITEMS",
+      "content": "Configure automated PR reminder bot on Discord/Slack for reviews older than 4 hours."
+    },
+    {
+      "category": "WENT_WELL",
+      "content": "Pomodoro focus timer adoption improved uninterrupted deep work cycles."
+    }
+  ],
+  "recommended_action_items": [
+    {
+      "title": "Automate PR Review Reminders on Slack",
+      "priority": "HIGH",
+      "story_points": 2
+    },
+    {
+      "title": "Document Pomodoro Best Practices in Engineering Handbook",
+      "priority": "MEDIUM",
+      "story_points": 1
+    }
+  ]
+}
+```
+
+---
+
+### 10.4 Internal AI Engine Retrospective Facilitator (`services/ai-engine` — Port 8001)
+
+#### `POST /internal/v1/synthesize-retro` — AI Retrospective Facilitator Endpoint
+Internal stateless microservice endpoint invoked by `apps/api` with header `X-Internal-Token`.
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>`
+- **Request Body (`AIRetroAnalysisRequestSchema`)**:
+```json
+{
+  "board_title": "Sprint 8 — Time Tracking & Retrospectives",
+  "retro_items": [
+    {
+      "id": "55555555-5555-4555-8555-555555555551",
+      "board_id": "11111111-1111-4111-8111-111111111111",
+      "category": "WENT_WELL",
+      "content": "Zero-downtime migration was executed cleanly.",
+      "author_id": "88888888-8888-4888-8888-888888888881",
+      "author_name": "Alex Rivera",
+      "author_initials": "AR",
+      "votes": 5,
+      "voted_by_user_ids": [],
+      "linked_card_id": null,
+      "is_resolved": false,
+      "created_at": "2026-11-11T09:00:00.000Z"
+    }
+  ],
+  "completed_cards_count": 14,
+  "overdue_cards_count": 1,
+  "total_estimated_hours": 40.0,
+  "total_logged_hours": 42.5
+}
+```
+- **Response `200 OK` (`AIRetroAnalysisResponseSchema`)**:
+```json
+{
+  "sprint_morale_score": 88,
+  "estimation_accuracy_summary": "Team logged 42.5h against 40.0h estimated (106% variance). High estimation accuracy within healthy agile variance limits.",
+  "key_themes": [
+    "High velocity and flawless zero-downtime database deployment",
+    "Code review bottlenecks delayed frontend glassmorphism polishing"
+  ],
+  "suggested_retro_items": [
+    {
+      "category": "ACTION_ITEMS",
+      "content": "Configure automated PR reminder bot on Discord/Slack for reviews older than 4 hours."
+    }
+  ],
+  "recommended_action_items": [
+    {
+      "title": "Automate PR Review Reminders on Slack",
+      "priority": "HIGH",
+      "story_points": 2
+    }
+  ]
+}
+```
+
+---
+
+### 10.5 Phase 8 WebSocket Real-Time Events (`/ws/boards/:boardId`)
+
+The following events are added to `WSEventTypeEnum` in Phase 8 and dispatched across the board room:
+
+| Event Type | Trigger | Payload / Data Structure |
+| :--- | :--- | :--- |
+| `TIMER_UPDATED` | Stopwatch started on card | `{ card_id: string, active_timer: ActiveCardTimerSchema, updated_at: string }` |
+| `CARD_UPDATED` | Timer stopped, manual log, or Pomodoro completed | `CardSchema` |
+| `RETRO_ITEM_CREATED` | New retro card posted to retrospective column | `RetroItemSchema` |
+| `RETRO_ITEM_UPDATED` | Retro item voted, content updated, or converted to card | `RetroItemSchema` |
+| `RETRO_ITEM_DELETED` | Retro card deleted | `{ id: string, board_id: string }` |
+

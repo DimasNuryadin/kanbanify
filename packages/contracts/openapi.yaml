@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: Kinetix Core API & Internal AI Engine Contract
-  version: 7.0.0
+  version: 8.0.0
   description: >
     Physical REST, WebSocket & AI Service OpenAPI 3.1 specification for the Kanbanify
-    High-Performance Real-Time Kanban & AI Workspace (Phase 7 Trello Custom Fields Power-Up,
-    Visual Card Dependency Graph & AI Critical Path Analyzer, and Advanced Glassmorphism / Theme Studio).
+    High-Performance Real-Time Kanban & AI Workspace (Phase 8 Card Time Tracking, Stopwatch
+    & Worklogs, Built-in Pomodoro Focus Timer, and Interactive AI Sprint Retrospective Board).
 servers:
   - url: http://localhost:8000
     description: Fastify Core API Server (apps/api)
@@ -1927,11 +1927,561 @@ paths:
               schema:
                 $ref: "#/components/schemas/StandardError"
 
+  # ============================================================================
+  # PHASE 8: CARD TIME TRACKING, STOPWATCH & POMODORO (Port 8000)
+  # ============================================================================
+  /api/v1/cards/{cardId}/timer/start:
+    post:
+      summary: Start live stopwatch on card (ADMIN or EDITOR)
+      operationId: startCardTimer
+      tags:
+        - Card Time Tracking
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartCardTimerRequest"
+      responses:
+        "200":
+          description: Live timer started on card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/timer/stop:
+    post:
+      summary: Stop live stopwatch on card, log duration, clear active_timer (ADMIN or EDITOR)
+      operationId: stopCardTimer
+      tags:
+        - Card Time Tracking
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StopCardTimerRequest"
+      responses:
+        "200":
+          description: Timer stopped, duration logged, active timer cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+        "400":
+          description: Validation error or no active timer running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/time-entries:
+    post:
+      summary: Log manual time entry or update estimated_seconds (ADMIN or EDITOR)
+      operationId: createCardTimeEntry
+      tags:
+        - Card Time Tracking
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogTimeEntryRequest"
+      responses:
+        "200":
+          description: Time entry logged or estimate updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/time-entries/{entryId}:
+    delete:
+      summary: Delete time entry and recalculate total_logged_seconds (ADMIN or EDITOR)
+      operationId: deleteCardTimeEntry
+      tags:
+        - Card Time Tracking
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Time entry deleted and totals recalculated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card or time entry not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/cards/{cardId}/pomodoro/complete:
+    post:
+      summary: Record completed Pomodoro cycle and append worklog entry (ADMIN or EDITOR)
+      operationId: completePomodoroSession
+      tags:
+        - Pomodoro Timer
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PomodoroCompleteRequest"
+      responses:
+        "200":
+          description: Pomodoro completed, logged, and broadcasted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Card"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # PHASE 8: SPRINT RETROSPECTIVE BOARD (Port 8000)
+  # ============================================================================
+  /api/v1/boards/{boardId}/retro:
+    get:
+      summary: List all retro items on board grouped or sorted by votes
+      operationId: getBoardRetroItems
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of retrospective items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RetroItem"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    post:
+      summary: Create new retro item (ADMIN or EDITOR)
+      operationId: createBoardRetroItem
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRetroItemRequest"
+      responses:
+        "201":
+          description: Retrospective item created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetroItem"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/retro/{itemId}/vote:
+    post:
+      summary: Toggle upvote on retro item
+      operationId: voteRetroItem
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Vote toggled successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoteRetroItemResponse"
+        "404":
+          description: Retro item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/retro/{itemId}:
+    patch:
+      summary: Update retro item content, category, or resolved status (ADMIN or EDITOR)
+      operationId: updateRetroItem
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRetroItemRequest"
+      responses:
+        "200":
+          description: Retro item updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetroItem"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Retro item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+    delete:
+      summary: Delete retro item (ADMIN or EDITOR)
+      operationId: deleteRetroItem
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Retro item deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Retro item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/retro/{itemId}/convert-to-card:
+    post:
+      summary: Convert retro item into Kanban Card in target column (ADMIN or EDITOR)
+      operationId: convertRetroItemToCard
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConvertRetroItemToCardRequest"
+      responses:
+        "201":
+          description: Retro item converted to card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConvertRetroItemToCardResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "403":
+          description: Forbidden (ADMIN or EDITOR required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Retro item not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  /api/v1/boards/{boardId}/retro/ai-synthesize:
+    post:
+      summary: Synthesize board retro items and metrics via AI Facilitator
+      operationId: synthesizeBoardRetroAI
+      tags:
+        - Sprint Retrospectives
+      parameters:
+        - name: boardId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: AI sprint retrospective analysis and synthesis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIRetroAnalysisResponse"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+        "404":
+          description: Board not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
+  # ============================================================================
+  # PHASE 8: INTERNAL AI ENGINE RETRO SYNTHESIZER (Port 8001)
+  # ============================================================================
+  /internal/v1/synthesize-retro:
+    post:
+      summary: Internal AI Engine sprint retrospective facilitator endpoint (Port 8001)
+      operationId: internalSynthesizeRetro
+      tags:
+        - AI Engine Internal
+      parameters:
+        - name: X-Internal-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIRetroAnalysisRequest"
+      responses:
+        "200":
+          description: Synthesized retrospective analysis with morale score, themes, and recommended actions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIRetroAnalysisResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StandardError"
+
 components:
   schemas:
     PriorityEnum:
       type: string
       enum: [LOW, MEDIUM, HIGH, URGENT]
+
+    TimeEntrySourceEnum:
+      type: string
+      enum: [STOPWATCH, POMODORO, MANUAL]
+
+    PomodoroModeEnum:
+      type: string
+      enum: [FOCUS, SHORT_BREAK, LONG_BREAK]
+
+    RetroCategoryEnum:
+      type: string
+      enum: [WENT_WELL, TO_IMPROVE, KUDOS, ACTION_ITEMS]
+
+    WSEventTypeEnum:
+      type: string
+      enum:
+        - CARD_MOVED
+        - CARD_UPDATED
+        - CARD_CREATED
+        - CARD_ARCHIVED
+        - COLUMN_CREATED
+        - COLUMN_MOVED
+        - COLUMN_UPDATED
+        - COMMENT_ADDED
+        - BOARD_UPDATED
+        - AUTOMATION_TRIGGERED
+        - AUTOMATION_RULE_CREATED
+        - AUTOMATION_RULE_UPDATED
+        - AUTOMATION_RULE_DELETED
+        - BOARD_DELETED
+        - BOARD_IMPORTED
+        - PRESENCE_SYNC
+        - USER_JOINED
+        - USER_LEFT
+        - USER_TYPING
+        - CUSTOM_FIELD_CREATED
+        - CUSTOM_FIELD_UPDATED
+        - CUSTOM_FIELD_DELETED
+        - DEPENDENCY_ADDED
+        - DEPENDENCY_REMOVED
+        - TIMER_UPDATED
+        - RETRO_ITEM_CREATED
+        - RETRO_ITEM_UPDATED
+        - RETRO_ITEM_DELETED
 
     LabelColorEnum:
       type: string
@@ -2549,6 +3099,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CardCustomFieldValue"
+        time_tracking:
+          $ref: "#/components/schemas/CardTimeTrackingSummary"
 
     Column:
       type: object
@@ -2644,6 +3196,10 @@ components:
             $ref: "#/components/schemas/CustomFieldDefinition"
         theme_config:
           $ref: "#/components/schemas/BoardThemeConfig"
+        retro_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetroItem"
 
     HealthCheckResponse:
       type: object
@@ -2850,6 +3406,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CardCustomFieldValue"
+        time_tracking:
+          $ref: "#/components/schemas/CardTimeTrackingSummary"
 
     UpdateCardRequest:
       type: object
@@ -2918,6 +3476,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CardCustomFieldValue"
+        time_tracking:
+          $ref: "#/components/schemas/CardTimeTrackingSummary"
 
     MoveCardRequest:
       type: object
@@ -3332,6 +3892,15 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/BurndownDataPoint"
+        total_estimated_hours:
+          type: number
+          default: 0
+        total_logged_hours:
+          type: number
+          default: 0
+        total_pomodoros_completed:
+          type: integer
+          default: 0
 
     AIAnalyticsRequest:
       type: object
@@ -4012,6 +4581,373 @@ components:
           type: array
           items:
             type: string
+
+    # ============================================================================
+    # PHASE 8 CARD TIME TRACKING, POMODORO & RETROSPECTIVE SCHEMAS
+    # ============================================================================
+    TimeEntry:
+      type: object
+      required:
+        - id
+        - card_id
+        - user_id
+        - user_name
+        - user_initials
+        - duration_seconds
+        - note
+        - source
+        - started_at
+        - ended_at
+        - created_at
+      properties:
+        id:
+          type: string
+        card_id:
+          type: string
+        user_id:
+          type: string
+        user_name:
+          type: string
+        user_initials:
+          type: string
+        duration_seconds:
+          type: integer
+          minimum: 1
+        note:
+          type: string
+          default: ""
+        source:
+          $ref: "#/components/schemas/TimeEntrySourceEnum"
+          default: MANUAL
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    ActiveCardTimer:
+      type: object
+      required:
+        - card_id
+        - user_id
+        - user_name
+        - started_at
+      properties:
+        card_id:
+          type: string
+        user_id:
+          type: string
+        user_name:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+
+    CardTimeTrackingSummary:
+      type: object
+      required:
+        - estimated_seconds
+        - total_logged_seconds
+        - active_timer
+        - entries
+        - pomodoro_completed_count
+      properties:
+        estimated_seconds:
+          type: integer
+          default: 0
+        total_logged_seconds:
+          type: integer
+          default: 0
+        active_timer:
+          anyOf:
+            - $ref: "#/components/schemas/ActiveCardTimer"
+            - type: "null"
+          default: null
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeEntry"
+          default: []
+        pomodoro_completed_count:
+          type: integer
+          default: 0
+
+    PomodoroSession:
+      type: object
+      required:
+        - id
+        - card_id
+        - user_id
+        - mode
+        - duration_seconds
+        - note
+        - completed_at
+      properties:
+        id:
+          type: string
+        card_id:
+          type: string
+        user_id:
+          type: string
+        mode:
+          $ref: "#/components/schemas/PomodoroModeEnum"
+          default: FOCUS
+        duration_seconds:
+          type: integer
+          default: 1500
+        note:
+          type: string
+          default: ""
+        completed_at:
+          type: string
+          format: date-time
+
+    PomodoroCompleteRequest:
+      type: object
+      required:
+        - card_id
+      properties:
+        card_id:
+          type: string
+        mode:
+          $ref: "#/components/schemas/PomodoroModeEnum"
+          default: FOCUS
+        duration_seconds:
+          type: integer
+          default: 1500
+        note:
+          type: string
+          default: "Completed 25m Pomodoro focus session"
+
+    StartCardTimerRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+        user_name:
+          type: string
+
+    StopCardTimerRequest:
+      type: object
+      properties:
+        note:
+          type: string
+          default: ""
+
+    LogTimeEntryRequest:
+      type: object
+      properties:
+        duration_seconds:
+          type: integer
+          minimum: 1
+        note:
+          type: string
+          default: ""
+        source:
+          $ref: "#/components/schemas/TimeEntrySourceEnum"
+          default: MANUAL
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        estimated_seconds:
+          type: integer
+          minimum: 0
+
+    RetroItem:
+      type: object
+      required:
+        - id
+        - board_id
+        - category
+        - content
+        - author_id
+        - author_name
+        - author_initials
+        - votes
+        - voted_by_user_ids
+        - linked_card_id
+        - is_resolved
+        - created_at
+      properties:
+        id:
+          type: string
+        board_id:
+          type: string
+        category:
+          $ref: "#/components/schemas/RetroCategoryEnum"
+        content:
+          type: string
+        author_id:
+          type: string
+        author_name:
+          type: string
+        author_initials:
+          type: string
+        votes:
+          type: integer
+          default: 0
+        voted_by_user_ids:
+          type: array
+          items:
+            type: string
+          default: []
+        linked_card_id:
+          type: [string, "null"]
+          default: null
+        is_resolved:
+          type: boolean
+          default: false
+        created_at:
+          type: string
+          format: date-time
+
+    CreateRetroItemRequest:
+      type: object
+      required:
+        - category
+        - content
+      properties:
+        category:
+          $ref: "#/components/schemas/RetroCategoryEnum"
+        content:
+          type: string
+        author_id:
+          type: string
+        author_name:
+          type: string
+        author_initials:
+          type: string
+
+    UpdateRetroItemRequest:
+      type: object
+      properties:
+        content:
+          type: string
+        category:
+          $ref: "#/components/schemas/RetroCategoryEnum"
+        is_resolved:
+          type: boolean
+
+    VoteRetroItemResponse:
+      type: object
+      required:
+        - retro_item
+        - has_voted
+      properties:
+        retro_item:
+          $ref: "#/components/schemas/RetroItem"
+        has_voted:
+          type: boolean
+
+    ConvertRetroItemToCardRequest:
+      type: object
+      properties:
+        target_column_id:
+          type: string
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+          default: MEDIUM
+        story_points:
+          type: [integer, "null"]
+          default: null
+
+    ConvertRetroItemToCardResponse:
+      type: object
+      required:
+        - retro_item
+        - card
+      properties:
+        retro_item:
+          $ref: "#/components/schemas/RetroItem"
+        card:
+          $ref: "#/components/schemas/Card"
+
+    AIRetroSuggestedItem:
+      type: object
+      required:
+        - category
+        - content
+      properties:
+        category:
+          $ref: "#/components/schemas/RetroCategoryEnum"
+        content:
+          type: string
+
+    AIRetroActionItem:
+      type: object
+      required:
+        - title
+        - priority
+        - story_points
+      properties:
+        title:
+          type: string
+        priority:
+          $ref: "#/components/schemas/PriorityEnum"
+        story_points:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    AIRetroAnalysisRequest:
+      type: object
+      required:
+        - board_title
+      properties:
+        board_title:
+          type: string
+        retro_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetroItem"
+          default: []
+        completed_cards_count:
+          type: integer
+          default: 0
+        overdue_cards_count:
+          type: integer
+          default: 0
+        total_estimated_hours:
+          type: number
+          default: 0
+        total_logged_hours:
+          type: number
+          default: 0
+
+    AIRetroAnalysisResponse:
+      type: object
+      required:
+        - sprint_morale_score
+        - estimation_accuracy_summary
+        - key_themes
+        - suggested_retro_items
+        - recommended_action_items
+      properties:
+        sprint_morale_score:
+          type: number
+          minimum: 0
+          maximum: 100
+        estimation_accuracy_summary:
+          type: string
+        key_themes:
+          type: array
+          items:
+            type: string
+        suggested_retro_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIRetroSuggestedItem"
+        recommended_action_items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AIRetroActionItem"
 
     StandardError:
       type: object

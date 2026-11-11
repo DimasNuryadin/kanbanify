@@ -146,6 +146,26 @@ class ThemePresetEnum(str, Enum):
     WARM_ESPRESSO = "WARM_ESPRESSO"
 
 
+# Phase 8 Time Tracking, Pomodoro & Sprint Retrospective Enums
+class TimeEntrySourceEnum(str, Enum):
+    STOPWATCH = "STOPWATCH"
+    POMODORO = "POMODORO"
+    MANUAL = "MANUAL"
+
+
+class PomodoroModeEnum(str, Enum):
+    FOCUS = "FOCUS"
+    SHORT_BREAK = "SHORT_BREAK"
+    LONG_BREAK = "LONG_BREAK"
+
+
+class RetroCategoryEnum(str, Enum):
+    WENT_WELL = "WENT_WELL"
+    TO_IMPROVE = "TO_IMPROVE"
+    KUDOS = "KUDOS"
+    ACTION_ITEMS = "ACTION_ITEMS"
+
+
 class WSEventTypeEnum(str, Enum):
     CARD_MOVED = "CARD_MOVED"
     CARD_UPDATED = "CARD_UPDATED"
@@ -171,6 +191,10 @@ class WSEventTypeEnum(str, Enum):
     CUSTOM_FIELD_DELETED = "CUSTOM_FIELD_DELETED"
     DEPENDENCY_ADDED = "DEPENDENCY_ADDED"
     DEPENDENCY_REMOVED = "DEPENDENCY_REMOVED"
+    TIMER_UPDATED = "TIMER_UPDATED"
+    RETRO_ITEM_CREATED = "RETRO_ITEM_CREATED"
+    RETRO_ITEM_UPDATED = "RETRO_ITEM_UPDATED"
+    RETRO_ITEM_DELETED = "RETRO_ITEM_DELETED"
 
 
 class SprintHealthStatusEnum(str, Enum):
@@ -478,6 +502,73 @@ class BoardThemeConfigSchema(BaseModel):
     show_dependency_badges_on_front: bool = True
 
 
+# Phase 8 Card Time Tracking, Stopwatch & Worklog Schemas
+class TimeEntrySchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    card_id: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    user_name: str = Field(..., min_length=1, max_length=120)
+    user_initials: str = Field(..., min_length=1, max_length=4)
+    duration_seconds: int = Field(..., gt=0)
+    note: str = ""
+    source: TimeEntrySourceEnum = TimeEntrySourceEnum.MANUAL
+    started_at: datetime | str
+    ended_at: datetime | str
+    created_at: datetime | str
+
+
+class ActiveCardTimerSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card_id: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    user_name: str = Field(..., min_length=1)
+    started_at: datetime | str
+
+
+class CardTimeTrackingSummarySchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    estimated_seconds: int = Field(default=0, ge=0)
+    total_logged_seconds: int = Field(default=0, ge=0)
+    active_timer: ActiveCardTimerSchema | None = None
+    entries: list[TimeEntrySchema] = Field(default_factory=list)
+    pomodoro_completed_count: int = Field(default=0, ge=0)
+
+
+# Phase 8 Pomodoro Session Schema
+class PomodoroSessionSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    card_id: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    mode: PomodoroModeEnum = PomodoroModeEnum.FOCUS
+    duration_seconds: int = Field(default=1500, gt=0)
+    note: str = ""
+    completed_at: datetime | str
+
+
+# Phase 8 Sprint Retrospective Board Item Schema
+class RetroItemSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., min_length=1)
+    board_id: str = Field(..., min_length=1)
+    category: RetroCategoryEnum
+    content: str = Field(..., min_length=1)
+    author_id: str = Field(..., min_length=1)
+    author_name: str = Field(..., min_length=1, max_length=120)
+    author_initials: str = Field(..., min_length=1, max_length=4)
+    votes: int = Field(default=0, ge=0)
+    voted_by_user_ids: list[str] = Field(default_factory=list)
+    linked_card_id: str | None = None
+    is_resolved: bool = False
+    created_at: datetime | str
+
+
 class CardSchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -507,6 +598,10 @@ class CardSchema(BaseModel):
     is_watching: bool = False
     # Phase 7 Custom Fields Values
     custom_field_values: list[CardCustomFieldValueSchema] = Field(default_factory=list)
+    # Phase 8 Card Time Tracking & Pomodoro Focus Timer
+    time_tracking: CardTimeTrackingSummarySchema = Field(
+        default_factory=CardTimeTrackingSummarySchema
+    )
 
 
 class ColumnSchema(BaseModel):
@@ -562,6 +657,8 @@ class BoardSchema(BaseModel):
     # Phase 7 Custom Fields & Theme Studio
     custom_fields: list[CustomFieldDefinitionSchema] = Field(default_factory=list)
     theme_config: BoardThemeConfigSchema = Field(default_factory=BoardThemeConfigSchema)
+    # Phase 8 Interactive Sprint Retrospective Board
+    retro_items: list[RetroItemSchema] = Field(default_factory=list)
 
 
 # Phase 3 Workspace & Board Summary Schemas
@@ -720,6 +817,9 @@ class CreateCardRequestSchema(BaseModel):
     is_archived: bool = False
     is_watching: bool = False
     custom_field_values: list[CardCustomFieldValueSchema] = Field(default_factory=list)
+    time_tracking: CardTimeTrackingSummarySchema = Field(
+        default_factory=CardTimeTrackingSummarySchema
+    )
 
 
 class UpdateCardRequestSchema(BaseModel):
@@ -746,6 +846,7 @@ class UpdateCardRequestSchema(BaseModel):
     is_archived: bool | None = None
     is_watching: bool | None = None
     custom_field_values: list[CardCustomFieldValueSchema] | None = None
+    time_tracking: CardTimeTrackingSummarySchema | None = None
 
 
 class MoveCardRequestSchema(BaseModel):
@@ -871,6 +972,82 @@ class AddCardDependencyRequestSchema(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     blocker_card_id: str = Field(..., min_length=1)
+
+
+# Phase 8 Card Time Tracking & Stopwatch Requests
+class StartCardTimerRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: str | None = None
+    user_name: str | None = None
+
+
+class StopCardTimerRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    note: str = ""
+
+
+class LogTimeEntryRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    duration_seconds: int | None = Field(default=None, gt=0)
+    note: str = ""
+    source: TimeEntrySourceEnum = TimeEntrySourceEnum.MANUAL
+    started_at: datetime | str | None = None
+    ended_at: datetime | str | None = None
+    estimated_seconds: int | None = Field(default=None, ge=0)
+
+
+# Phase 8 Pomodoro Complete Request
+class PomodoroCompleteRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    card_id: str = Field(..., min_length=1)
+    mode: PomodoroModeEnum = PomodoroModeEnum.FOCUS
+    duration_seconds: int = Field(default=1500, gt=0)
+    note: str = "Completed 25m Pomodoro focus session"
+
+
+# Phase 8 Retrospective Request & Response Schemas
+class CreateRetroItemRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    category: RetroCategoryEnum
+    content: str = Field(..., min_length=1)
+    author_id: str | None = None
+    author_name: str | None = Field(default=None, min_length=1, max_length=120)
+    author_initials: str | None = Field(default=None, min_length=1, max_length=4)
+
+
+class UpdateRetroItemRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    content: str | None = Field(default=None, min_length=1)
+    category: RetroCategoryEnum | None = None
+    is_resolved: bool | None = None
+
+
+class VoteRetroItemResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    retro_item: RetroItemSchema
+    has_voted: bool
+
+
+class ConvertRetroItemToCardRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    target_column_id: str | None = None
+    priority: PriorityEnum = PriorityEnum.MEDIUM
+    story_points: int | None = Field(default=None, ge=0, le=100)
+
+
+class ConvertRetroItemToCardResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    retro_item: RetroItemSchema
+    card: CardSchema
 
 
 # ============================================================================
@@ -1109,6 +1286,10 @@ class BoardAnalyticsSchema(BaseModel):
     cards_by_priority: list[PriorityMetricSchema] = Field(default_factory=list)
     cards_by_label: list[LabelMetricSchema] = Field(default_factory=list)
     burndown_series: list[BurndownDataPointSchema] = Field(default_factory=list)
+    # Phase 8 Time Tracking Additive Fields
+    total_estimated_hours: float = Field(default=0.0, ge=0)
+    total_logged_hours: float = Field(default=0.0, ge=0)
+    total_pomodoros_completed: int = Field(default=0, ge=0)
 
 
 class AIAnalyticsRequestSchema(BaseModel):
@@ -1282,6 +1463,47 @@ class AICriticalPathResponseSchema(BaseModel):
     unblocking_recommendations: list[str] = Field(default_factory=list)
 
 
+# ============================================================================
+# 5.8 PHASE 8 AI SPRINT RETROSPECTIVE FACILITATOR SCHEMAS
+# ============================================================================
+
+
+class AIRetroSuggestedItemSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    category: RetroCategoryEnum
+    content: str = Field(..., min_length=1)
+
+
+class AIRetroActionItemSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str = Field(..., min_length=1)
+    priority: PriorityEnum
+    story_points: int = Field(..., ge=0, le=100)
+
+
+class AIRetroAnalysisRequestSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    board_title: str = Field(..., min_length=1)
+    retro_items: list[RetroItemSchema] = Field(default_factory=list)
+    completed_cards_count: int = Field(default=0, ge=0)
+    overdue_cards_count: int = Field(default=0, ge=0)
+    total_estimated_hours: float = Field(default=0.0, ge=0)
+    total_logged_hours: float = Field(default=0.0, ge=0)
+
+
+class AIRetroAnalysisResponseSchema(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    sprint_morale_score: float = Field(..., ge=0, le=100)
+    estimation_accuracy_summary: str = Field(..., min_length=1)
+    key_themes: list[str] = Field(default_factory=list)
+    suggested_retro_items: list[AIRetroSuggestedItemSchema] = Field(default_factory=list)
+    recommended_action_items: list[AIRetroActionItemSchema] = Field(default_factory=list)
+
+
 # Aliases for direct import without Schema suffix
 AISuggestCardEnrichmentRequest = AISuggestCardEnrichmentRequestSchema
 AISuggestCardEnrichmentResponse = AISuggestCardEnrichmentResponseSchema
@@ -1370,6 +1592,28 @@ SetCardCustomFieldValueRequest = SetCardCustomFieldValueRequestSchema
 UpdateBoardThemeRequest = UpdateBoardThemeRequestSchema
 AddCardDependencyRequest = AddCardDependencyRequestSchema
 AddCardDependencyResponse = AddCardDependencyResponseSchema
+
+TimeEntrySource = TimeEntrySourceEnum
+PomodoroMode = PomodoroModeEnum
+RetroCategory = RetroCategoryEnum
+TimeEntry = TimeEntrySchema
+ActiveCardTimer = ActiveCardTimerSchema
+CardTimeTrackingSummary = CardTimeTrackingSummarySchema
+PomodoroSession = PomodoroSessionSchema
+PomodoroCompleteRequest = PomodoroCompleteRequestSchema
+RetroItem = RetroItemSchema
+CreateRetroItemRequest = CreateRetroItemRequestSchema
+UpdateRetroItemRequest = UpdateRetroItemRequestSchema
+VoteRetroItemResponse = VoteRetroItemResponseSchema
+ConvertRetroItemToCardRequest = ConvertRetroItemToCardRequestSchema
+ConvertRetroItemToCardResponse = ConvertRetroItemToCardResponseSchema
+StartCardTimerRequest = StartCardTimerRequestSchema
+StopCardTimerRequest = StopCardTimerRequestSchema
+LogTimeEntryRequest = LogTimeEntryRequestSchema
+AIRetroSuggestedItem = AIRetroSuggestedItemSchema
+AIRetroActionItem = AIRetroActionItemSchema
+AIRetroAnalysisRequest = AIRetroAnalysisRequestSchema
+AIRetroAnalysisResponse = AIRetroAnalysisResponseSchema
 
 
 # ============================================================================

@@ -41,7 +41,7 @@ All services MUST bind to and communicate over the locked ports defined in `.env
 
 - **Exclusive Owner**: Only `apps/api` (Fastify + Drizzle ORM) owns the PostgreSQL database (`DATABASE_URL`), schema definitions, and migrations.
 - **No Direct DB Access from Other Services**: `services/ai-engine` and `apps/web` MUST NEVER connect directly to PostgreSQL (`5432`) or Redis (`6379`).
-- `services/ai-engine` is stateless and invoked by `apps/api` via `POST http://localhost:8001/internal/v1/decompose-task`, `POST /internal/v1/enrich-card`, `POST /internal/v1/parse-automation`, and `POST /internal/v1/analyze-dependencies` with header `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>`.
+- `services/ai-engine` is stateless and invoked by `apps/api` via `POST http://localhost:8001/internal/v1/decompose-task`, `POST /internal/v1/enrich-card`, `POST /internal/v1/parse-automation`, `POST /internal/v1/analyze-dependencies`, and `POST /internal/v1/synthesize-retro` with header `X-Internal-Token: <INTERNAL_SERVICE_TOKEN>`.
 
 ---
 
@@ -56,5 +56,5 @@ Before any agent finishes its worktree task, it MUST execute and pass all checks
    - **`services/ai-engine`**: Verify syntax and Pydantic v2 validation against `packages/contracts/schemas.py`.
 3. **Runtime & Endpoint Smoke Test**:
    - **`apps/api`**: Boot server on port `8000`, verify `GET http://localhost:8000/health` returns `200 OK` (`{"status": "ok", "service": "api", "version": "1.0.0"}`), and verify error responses match `StandardErrorSchema`.
-   - **`services/ai-engine`**: Boot server on port `8001`, verify `GET http://localhost:8001/health` returns `200 OK` (`{"status": "ok", "service": "ai-engine", "version": "1.0.0"}`), and verify `POST /internal/v1/decompose-task`, `POST /internal/v1/enrich-card`, `POST /internal/v1/parse-automation`, and `POST /internal/v1/analyze-dependencies` enforce `X-Internal-Token` and return valid response schemas (including deterministic fallback when `LLM_API_KEY` is a placeholder).
+   - **`services/ai-engine`**: Boot server on port `8001`, verify `GET http://localhost:8001/health` returns `200 OK` (`{"status": "ok", "service": "ai-engine", "version": "1.0.0"}`), and verify `POST /internal/v1/decompose-task`, `POST /internal/v1/enrich-card`, `POST /internal/v1/parse-automation`, `POST /internal/v1/analyze-dependencies`, and `POST /internal/v1/synthesize-retro` enforce `X-Internal-Token` and return valid response schemas (including deterministic fallback when `LLM_API_KEY` is a placeholder).
    - **`apps/web`**: Verify build/typecheck passes and `NEXT_PUBLIC_USE_MOCK=true` / live API modes adhere to `BoardSchema`, `ColumnSchema`, and `CardSchema`.
