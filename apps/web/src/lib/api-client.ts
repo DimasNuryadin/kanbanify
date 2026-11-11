@@ -125,11 +125,11 @@ async function fetchJson<T>(
   const authHeaders: Record<string, string> = {};
   if (typeof window !== "undefined") {
     try {
-      const token = window.localStorage.getItem("kanbanify_auth_token") || "kb_sess_alex_admin_token";
+      const token = window.localStorage.getItem("kanbanify_auth_token");
       if (token) {
         authHeaders["Authorization"] = `Bearer ${token}`;
       }
-      const role = window.localStorage.getItem("kanbanify_active_role") || "ADMIN";
+      const role = window.localStorage.getItem("kanbanify_active_role");
       if (role) {
         authHeaders["X-Kanbanify-Role"] = role;
       }
