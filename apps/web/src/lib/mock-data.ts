@@ -660,7 +660,7 @@ export function generateAICriticalPathAnalysis(
 export const INITIAL_SEED_BOARD: Board = {
   id: SEED_BOARD_ID,
   workspace_id: SEED_WORKSPACE_ID,
-  title: "Kanbanify Product Launch",
+  title: "🚀 Kanbanify Core Platform Sprint",
   description:
     "High-craftsmanship real-time workspace uniting Trello visual fluidity with Linear engineering precision and Butler automations.",
   is_starred: true,
@@ -1689,7 +1689,7 @@ export const INITIAL_SEED_BOARD: Board = {
 export const INITIAL_SPRINT_BOARD: Board = {
   id: SEED_BOARD_SPRINT_ID,
   workspace_id: SEED_WORKSPACE_ID,
-  title: "Q4 Engineering Sprint",
+  title: "🎨 Q4 Design System & UI Refresh",
   description:
     "Agile 2-week engineering sprint board for high-velocity software delivery",
   is_starred: true,
@@ -1935,7 +1935,7 @@ export const INITIAL_SPRINT_BOARD: Board = {
 export const INITIAL_MARKETING_BOARD: Board = {
   id: SEED_BOARD_MARKETING_ID,
   workspace_id: SEED_WORKSPACE_ID,
-  title: "Growth & Marketing",
+  title: "📣 Product Launch Roadmap",
   description:
     "Campaign pipeline for content creation, asset review, approvals, and scheduled deployment",
   is_starred: false,
@@ -2748,7 +2748,17 @@ export class MockApiService {
               this.boards.set(v.data.id, sortBoardEntities(v.data));
             }
           }
-          if (this.boards.size > 0) return this.boards;
+          if (this.boards.size > 0) {
+            // Multi-board guarantee: if only 1 board exists, supplement with sample boards
+            if (this.boards.size <= 1) {
+              for (const b of INITIAL_SEED_BOARDS) {
+                if (!this.boards.has(b.id)) {
+                  this.boards.set(b.id, sortBoardEntities(BoardSchema.parse(b)));
+                }
+              }
+            }
+            return this.boards;
+          }
         }
       }
     } catch {
@@ -2906,12 +2916,24 @@ export class MockApiService {
     this.loadState();
     const boardId = createDeterministicUuid();
     const template = payload.template_id
-      ? DEFAULT_BOARD_TEMPLATES.find((t) => t.id === payload.template_id)
+      ? DEFAULT_BOARD_TEMPLATES.find(
+          (t) => t.id === payload.template_id || t.id === `template-${payload.template_id}`
+        )
       : undefined;
 
-    const columnTitles = template
+    let columnTitles = template
       ? template.default_columns
       : ["Backlog", "In Progress", "Review", "Done"];
+
+    if (payload.template_id === "blank") {
+      columnTitles = ["To Do", "In Progress", "Done"];
+    } else if (payload.template_id === "kanban-default") {
+      columnTitles = ["Backlog", "In Progress", "Review", "Done"];
+    } else if (payload.template_id === "agile-sprint") {
+      columnTitles = ["Backlog", "Sprint Ready", "In Progress", "Code Review", "Done"];
+    } else if (payload.template_id === "bug-tracker") {
+      columnTitles = ["Reported", "Reproducing", "Fixing", "QA Verification", "Resolved"];
+    }
 
     const columns: Column[] = columnTitles.map((title, idx) => ({
       id: createDeterministicUuid(),
@@ -2929,6 +2951,134 @@ export class MockApiService {
               : "#10b981",
       is_archived: false,
     }));
+
+    // Seed starter cards based on template
+    const cards: Card[] = [];
+    const tId = payload.template_id || "";
+
+    if (
+      tId === "template-agile-sprint" ||
+      tId === "agile-sprint" ||
+      tId === "template-engineering-sprint"
+    ) {
+      const backlogCol = columns[0]?.id ?? columns[0].id;
+      const sprintReadyCol = columns[1]?.id ?? columns[0].id;
+      const inProgressCol = columns[2]?.id ?? columns[0].id;
+      const reviewCol = columns[3]?.id ?? columns[0].id;
+      const doneCol = columns[4]?.id ?? columns[columns.length - 1].id;
+
+      const items = [
+        { title: "Define Custom Fields Schema Validation & Enums", col: backlogCol, pts: 2, prio: "MEDIUM" as const, pos: "a0" },
+        { title: "Database Connection Pool Exhaustion under Peak Load", col: sprintReadyCol, pts: 8, prio: "HIGH" as const, pos: "a0" },
+        { title: "Implement OAuth2 Token Revocation & Refresh Flow", col: inProgressCol, pts: 5, prio: "URGENT" as const, pos: "a0" },
+        { title: "Refactor Kanban Column Virtualization with DnD-Kit", col: reviewCol, pts: 3, prio: "MEDIUM" as const, pos: "a0" },
+        { title: "Setup Prometheus Metrics Exporter & Grafana Dashboard", col: doneCol, pts: 5, prio: "LOW" as const, pos: "a0" },
+      ];
+
+      for (const item of items) {
+        cards.push(
+          CardSchema.parse({
+            id: createDeterministicUuid(),
+            board_id: boardId,
+            column_id: item.col,
+            title: item.title,
+            description: `Auto-generated starter task for ${item.title}.`,
+            position: item.pos,
+            priority: item.prio,
+            story_points: item.pts,
+            updated_at: new Date().toISOString(),
+          })
+        );
+      }
+    } else if (tId === "template-marketing-campaign" || tId === "marketing-campaign") {
+      const ideasCol = columns[0].id;
+      const draftingCol = columns[1]?.id ?? columns[0].id;
+      const designCol = columns[2]?.id ?? columns[0].id;
+      const scheduledCol = columns[3]?.id ?? columns[0].id;
+      const publishedCol = columns[4]?.id ?? columns[columns.length - 1].id;
+
+      const items = [
+        { title: "Interactive Landing Page Copy & Value Propositions", col: ideasCol, pts: 3, prio: "MEDIUM" as const, pos: "a0" },
+        { title: "Q4 Global Product Keynote Deck & Teaser Video", col: draftingCol, pts: 5, prio: "HIGH" as const, pos: "a0" },
+        { title: "Social Media Asset Pack & Figma Illustrations", col: designCol, pts: 5, prio: "HIGH" as const, pos: "a0" },
+        { title: "Weekly Newsletter Edition #48 Launch Announcement", col: scheduledCol, pts: 2, prio: "MEDIUM" as const, pos: "a0" },
+        { title: "Customer Case Study: Enterprise Migration", col: publishedCol, pts: 3, prio: "LOW" as const, pos: "a0" },
+      ];
+
+      for (const item of items) {
+        cards.push(
+          CardSchema.parse({
+            id: createDeterministicUuid(),
+            board_id: boardId,
+            column_id: item.col,
+            title: item.title,
+            description: `Marketing deliverable for ${item.title}.`,
+            position: item.pos,
+            priority: item.prio,
+            story_points: item.pts,
+            updated_at: new Date().toISOString(),
+          })
+        );
+      }
+    } else if (tId === "template-bug-tracker" || tId === "bug-tracker") {
+      const reportedCol = columns[0].id;
+      const reproducingCol = columns[1]?.id ?? columns[0].id;
+      const fixingCol = columns[2]?.id ?? columns[0].id;
+      const qaCol = columns[3]?.id ?? columns[0].id;
+      const resolvedCol = columns[4]?.id ?? columns[columns.length - 1].id;
+
+      const items = [
+        { title: "Drag Handle Flickering on Safari Mobile Viewport", col: reportedCol, pts: 3, prio: "HIGH" as const, pos: "a0" },
+        { title: "CSV Export Encoding issue with UTF-8 characters", col: reproducingCol, pts: 2, prio: "MEDIUM" as const, pos: "a0" },
+        { title: "[CRITICAL] Memory Leak in WebSocket Broadcast Loop", col: fixingCol, pts: 8, prio: "URGENT" as const, pos: "a0" },
+        { title: "Audit Trail Timestamp offset by timezone UTC+0", col: qaCol, pts: 1, prio: "LOW" as const, pos: "a0" },
+        { title: "Broken avatar image fallback on slow network", col: resolvedCol, pts: 1, prio: "LOW" as const, pos: "a0" },
+      ];
+
+      for (const item of items) {
+        cards.push(
+          CardSchema.parse({
+            id: createDeterministicUuid(),
+            board_id: boardId,
+            column_id: item.col,
+            title: item.title,
+            description: `Bug report and reproduction notes for ${item.title}.`,
+            position: item.pos,
+            priority: item.prio,
+            story_points: item.pts,
+            updated_at: new Date().toISOString(),
+          })
+        );
+      }
+    } else if (tId === "template-product-discovery" || tId === "product-discovery") {
+      const objectivesCol = columns[0].id;
+      const krCol = columns[1]?.id ?? columns[0].id;
+      const validatingCol = columns[2]?.id ?? columns[0].id;
+      const shippedCol = columns[3]?.id ?? columns[columns.length - 1].id;
+
+      const items = [
+        { title: "OKR 1: Accelerate Developer Onboarding to < 5 Minutes", col: objectivesCol, pts: 8, prio: "HIGH" as const, pos: "a0" },
+        { title: "Feasibility Spike: Edge Caching for Board Summaries", col: krCol, pts: 5, prio: "HIGH" as const, pos: "a0" },
+        { title: "User Research Interviews: Multi-Board Navigation UX", col: validatingCol, pts: 3, prio: "MEDIUM" as const, pos: "a0" },
+        { title: "Ship 1-Click Trello Board Importer to Production", col: shippedCol, pts: 3, prio: "LOW" as const, pos: "a0" },
+      ];
+
+      for (const item of items) {
+        cards.push(
+          CardSchema.parse({
+            id: createDeterministicUuid(),
+            board_id: boardId,
+            column_id: item.col,
+            title: item.title,
+            description: `Strategic initiative for ${item.title}.`,
+            position: item.pos,
+            priority: item.prio,
+            story_points: item.pts,
+            updated_at: new Date().toISOString(),
+          })
+        );
+      }
+    }
 
     const nextBoard: Board = {
       id: boardId,
@@ -2951,7 +3101,7 @@ export class MockApiService {
       members: DEFAULT_BOARD_MEMBERS.map((m) => ({ ...m })),
       activities: [],
       columns,
-      cards: [],
+      cards,
       automation_rules: cloneDefaultAutomationRules(boardId),
       webhooks: [],
       invite_links: [],

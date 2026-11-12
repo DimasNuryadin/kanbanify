@@ -656,8 +656,14 @@ export const apiClient = {
       return await fetchJson(
         "/api/v1/boards",
         { method: "GET" },
-        (raw) =>
-          Array.isArray(raw) ? raw.map((b) => BoardSchema.parse(b)) : []
+        (raw) => {
+          const list = Array.isArray(raw)
+            ? raw
+            : Array.isArray((raw as any)?.boards)
+              ? (raw as any).boards
+              : [];
+          return list.map((b: any) => BoardSchema.parse(b));
+        }
       );
     } catch (err) {
       opts.onFallbackToMock?.(
@@ -858,19 +864,31 @@ export const apiClient = {
       return mockApi.importBoard(payload);
     }
     try {
+      // First attempt dedicated endpoint /api/v1/boards/import/trello
       return await fetchJson(
-        "/api/v1/boards/import",
+        "/api/v1/boards/import/trello",
         {
           method: "POST",
           body: JSON.stringify(payload),
         },
         (raw) => TrelloImportResultSchema.parse(raw)
       );
-    } catch (err) {
-      opts.onFallbackToMock?.(
-        err instanceof Error ? err.message : "Board Import API unreachable"
-      );
-      return mockApi.importBoard(payload);
+    } catch {
+      try {
+        return await fetchJson(
+          "/api/v1/boards/import",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          },
+          (raw) => TrelloImportResultSchema.parse(raw)
+        );
+      } catch (err) {
+        opts.onFallbackToMock?.(
+          err instanceof Error ? err.message : "Board Import API unreachable"
+        );
+        return mockApi.importBoard(payload);
+      }
     }
   },
 

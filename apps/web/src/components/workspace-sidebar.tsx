@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
+  ArrowRight,
   Briefcase,
   Check,
   ChevronDown,
@@ -183,8 +185,20 @@ export function WorkspaceSidebar({
             )}
           </div>
 
+          {/* 1-Click Workspace Home / All Boards */}
+          <Link
+            href="/boards"
+            className="mt-2 flex w-full items-center justify-between rounded-xl border border-zinc-200/90 bg-white px-2.5 py-1.5 text-xs font-bold text-zinc-800 shadow-2xs transition-all hover:border-indigo-400/50 hover:bg-indigo-50/70 hover:text-indigo-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-indigo-500/50 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400"
+          >
+            <div className="flex items-center gap-1.5">
+              <span>🏠</span>
+              <span>All Boards / Home</span>
+            </div>
+            <ArrowRight className="h-3 w-3 text-zinc-400" />
+          </Link>
+
           {/* Quick Hub Buttons: Templates & Automation */}
-          <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
             <button
               type="button"
               onClick={() => setTemplatesModalOpen(true)}

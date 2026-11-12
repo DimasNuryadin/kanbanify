@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   AlertTriangle,
   Archive,
@@ -229,6 +230,16 @@ export function WorkspaceHeader({
       <div className="mx-auto flex max-w-[1640px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
         {/* Left: Brand, Inline-Editable Board Title, Star Toggle & O(1) Telemetry */}
         <div className="flex items-center gap-3">
+          {/* 1-Click Workspace Home / Boards Navigation Button */}
+          <Link
+            href="/boards"
+            title="Return to Workspace Home / All Boards (⬅️ Workspace Home)"
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-200/90 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs transition-all hover:border-indigo-400/50 hover:bg-indigo-50/70 hover:text-indigo-600 dark:border-zinc-800 dark:bg-zinc-900/90 dark:text-zinc-200 dark:hover:border-indigo-500/50 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400"
+          >
+            <span className="text-sm">🏠</span>
+            <span className="font-bold">Boards</span>
+          </Link>
+
           {/* Sidebar Toggle Button */}
           <button
             type="button"

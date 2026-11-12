@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Board,
@@ -39,6 +40,7 @@ import {
   ButlerExecutionToast,
   evaluateAndExecuteAutomations,
 } from "@/lib/automation-engine";
+import { recordRecentBoard } from "@/lib/recent-boards";
 
 import { WorkspaceHeader } from "./workspace-header";
 import { WorkspaceSidebar } from "./workspace-sidebar";
@@ -69,11 +71,29 @@ import { InviteBanner } from "./invite-banner";
 
 export function KinetixWorkspace() {
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
+  const urlBoardId = searchParams?.get("boardId");
 
   const board = useWorkspaceStore((s) => s.board);
   const activeBoardId = useWorkspaceStore((s) => s.activeBoardId);
+  const setActiveBoardId = useWorkspaceStore((s) => s.setActiveBoardId);
   const viewMode = useWorkspaceStore((s) => s.viewMode);
   const useMockMode = useWorkspaceStore((s) => s.useMockMode);
+
+  // Sync URL boardId deep link if present
+  useEffect(() => {
+    if (urlBoardId && urlBoardId !== activeBoardId) {
+      setActiveBoardId(urlBoardId);
+      recordRecentBoard(urlBoardId);
+    }
+  }, [urlBoardId, activeBoardId, setActiveBoardId]);
+
+  // Keep track of current board in recent boards history
+  useEffect(() => {
+    if (board && board.id) {
+      recordRecentBoard(board.id);
+    }
+  }, [board?.id]);
 
   const priorityFilter = useWorkspaceStore((s) => s.priorityFilter);
   const searchQuery = useWorkspaceStore((s) => s.searchQuery);
