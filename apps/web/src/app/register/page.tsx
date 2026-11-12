@@ -27,6 +27,7 @@ function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get("invite");
+  const boardIdParam = searchParams.get("boardId");
 
   const setCurrentUser = useWorkspaceStore((s) => s.setCurrentUser);
   const useMockMode = useWorkspaceStore((s) => s.useMockMode);
@@ -45,13 +46,17 @@ function RegisterForm() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
-  // If already logged in, redirect straight to workspace (preserving invite if present)
+  // If already logged in, redirect to boards (preserving invite or boardId if present)
   useEffect(() => {
     if (hasValidAuthSession()) {
-      const target = inviteToken ? `/?invite=${encodeURIComponent(inviteToken)}` : "/";
+      const target = inviteToken
+        ? `/?invite=${encodeURIComponent(inviteToken)}`
+        : boardIdParam
+        ? `/?boardId=${encodeURIComponent(boardIdParam)}`
+        : "/boards";
       router.replace(target);
     }
-  }, [router, inviteToken]);
+  }, [router, inviteToken, boardIdParam]);
 
   // Sync theme
   useEffect(() => {
@@ -72,7 +77,9 @@ function RegisterForm() {
   };
 
   const getDestinationUrl = () => {
-    return inviteToken ? `/?invite=${encodeURIComponent(inviteToken)}` : "/";
+    if (inviteToken) return `/?invite=${encodeURIComponent(inviteToken)}`;
+    if (boardIdParam) return `/?boardId=${encodeURIComponent(boardIdParam)}`;
+    return "/boards";
   };
 
   const handleRegister = async (e: React.FormEvent) => {

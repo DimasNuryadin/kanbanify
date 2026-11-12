@@ -224,8 +224,56 @@ export const DEFAULT_WORKSPACE = {
 
 export const DEFAULT_BOARD_TEMPLATES = [
   {
+    id: "template-agile-sprint",
+    name: "🚀 Agile Sprint & Engineering Roadmap",
+    description: "Agile 2-week sprint board with Backlog, Sprint Ready, In Progress, Code Review, and Done columns with story points and custom fields.",
+    category: "ENGINEERING" as const,
+    background: {
+      type: "gradient" as const,
+      value: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)",
+    },
+    default_columns: ["Backlog", "Sprint Ready", "In Progress", "Code Review", "Done"],
+    sample_cards_count: 5,
+  },
+  {
+    id: "template-marketing-campaign",
+    name: "📣 Marketing Campaign & Content Calendar",
+    description: "Campaign pipeline for content ideas, drafting, design & asset review, scheduling, and publication.",
+    category: "MARKETING" as const,
+    background: {
+      type: "gradient" as const,
+      value: "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%)",
+    },
+    default_columns: ["Ideas", "Drafting", "Design & Assets", "Scheduled", "Published"],
+    sample_cards_count: 4,
+  },
+  {
+    id: "template-bug-tracker",
+    name: "🐛 Bug Triage & QA Tracker",
+    description: "Systematic defect triage and QA verification workflow from report to reproduction, fix, and resolution.",
+    category: "ENGINEERING" as const,
+    background: {
+      type: "gradient" as const,
+      value: "linear-gradient(135deg, #7c2d12 0%, #b91c1c 50%, #701a75 100%)",
+    },
+    default_columns: ["Reported", "Reproducing", "Fixing", "QA Verification", "Resolved"],
+    sample_cards_count: 4,
+  },
+  {
+    id: "template-product-discovery",
+    name: "🎯 Product Discovery & OKR Tracker",
+    description: "Quarterly OKR and product discovery pipeline aligning strategic objectives, key results, validation, and shipped releases.",
+    category: "PRODUCT" as const,
+    background: {
+      type: "gradient" as const,
+      value: "linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%)",
+    },
+    default_columns: ["Objectives", "Key Results", "Validating", "Shipped"],
+    sample_cards_count: 4,
+  },
+  {
     id: "template-engineering-sprint",
-    name: "Engineering Sprint",
+    name: "Engineering Sprint (Classic)",
     description: "Agile 2-week sprint board with Backlog, In Progress, Review, and Done columns with Butler automation.",
     category: "ENGINEERING" as const,
     background: {
@@ -237,7 +285,7 @@ export const DEFAULT_BOARD_TEMPLATES = [
   },
   {
     id: "template-marketing-launch",
-    name: "Marketing Launch",
+    name: "Marketing Launch (Classic)",
     description: "Campaign pipeline for content creation, asset review, approvals, and scheduled deployment.",
     category: "MARKETING" as const,
     background: {
@@ -249,7 +297,7 @@ export const DEFAULT_BOARD_TEMPLATES = [
   },
   {
     id: "template-product-roadmap",
-    name: "Product Roadmap",
+    name: "Product Roadmap (Classic)",
     description: "Quarterly strategic roadmap tracking feature discovery, validation, active builds, and releases.",
     category: "PRODUCT" as const,
     background: {
